@@ -1,0 +1,5701 @@
+openapi: 3.0.1
+info:
+  title: hxpr-app API
+  version: 12.0-SNAPSHOT
+servers:
+- description: Generated server url
+  url: http://127.0.0.1:8080
+security:
+- SecurityScheme: []
+tags:
+- description: Repository CRUD API
+  name: Document
+- description: Repository Document Check In API
+  name: CheckIn
+- description: GroupAPI (read-only)
+  name: Group
+- description: Security Policy API
+  name: Security
+- description: Document Permissions and ACL API
+  name: Document Permissions
+- description: Renditions API
+  name: Renditions
+- description: Bulk Import API
+  name: Bulk Import
+- description: Repository CRUD API
+  name: Vocabulary
+- description: Repository Query API
+  name: Query
+- description: Feature Flags API
+  name: Feature Flags
+- description: User API (read-only)
+  name: User
+- description: Repository Upload API
+  name: Upload
+- description: Repository Rendition Configurations API
+  name: Rendition Configurations
+- description: Repository Document Copy API
+  name: Copy
+- description: Embeddings API
+  name: Embeddings
+- description: Repository Download API
+  name: Download
+- description: Repository Model API
+  name: Model
+- description: Repository Document Move API
+  name: Move
+- description: Repository Document Version API
+  name: Version
+- description: Hello World Endpoint for HXPR
+  name: Greeting
+paths:
+  /api/documents/path/{docPath}:
+    delete:
+      operationId: deleteDocumentByPath
+      parameters:
+      - allowEmptyValue: true
+        allowReserved: true
+        description: The document path.
+        in: path
+        name: docPath
+        required: true
+        schema:
+          type: string
+          pattern: (/)?(.)*
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "204":
+          description: Document deleted.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Deletes the document with given path.
+      tags:
+      - Document
+    get:
+      operationId: getDocumentByPath
+      parameters:
+      - allowEmptyValue: true
+        allowReserved: true
+        description: The document path.
+        in: path
+        name: docPath
+        required: true
+        schema:
+          type: string
+          pattern: (/)?(.)*
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the document with given path in given repository.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the document with given path.
+      tags:
+      - Document
+    patch:
+      operationId: patchDocumentByPath
+      parameters:
+      - allowEmptyValue: true
+        allowReserved: true
+        description: The document path.
+        in: path
+        name: docPath
+        required: true
+        schema:
+          type: string
+          pattern: (/)?(.)*
+      - description: Condition (an HXQL predicate).
+        in: query
+        name: condition
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json-patch+json:
+            schema:
+              type: object
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the updated document.
+        "400":
+          description: Patch operation references a non-existent field.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: Condition evaluated to false.
+      summary: Patches the document with given path.
+      tags:
+      - Document
+    post:
+      operationId: createDocumentUnderParentByPath
+      parameters:
+      - allowEmptyValue: true
+        allowReserved: true
+        description: The document path.
+        in: path
+        name: docPath
+        required: true
+        schema:
+          type: string
+          pattern: (/)?(.)*
+      - description: Prevent sys_name from being renamed.
+        in: query
+        name: enforceSysName
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Document"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                main:
+                  $ref: "#/components/schemas/Document"
+                main1234:
+                  type: string
+                  format: binary
+              required:
+              - main
+              - main1234
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the created document.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Parent Document not found.
+      summary: Creates a document under parent with given path.
+      tags:
+      - Document
+    put:
+      operationId: updateDocumentByPath
+      parameters:
+      - allowEmptyValue: true
+        allowReserved: true
+        description: The document path.
+        in: path
+        name: docPath
+        required: true
+        schema:
+          type: string
+          pattern: (/)?(.)*
+      - description: Condition (an HXQL predicate).
+        in: query
+        name: condition
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Document"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                main:
+                  $ref: "#/components/schemas/Document"
+                main1234:
+                  type: string
+                  format: binary
+              required:
+              - main
+              - main1234
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the updated document.
+        "400":
+          description: Only one principal per ACE.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: Condition evaluated to false.
+      summary: Updates the document with given path.
+      tags:
+      - Document
+  /api/documents/{docId}:
+    delete:
+      operationId: deleteDocumentById
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "204":
+          description: Document deleted.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Deletes the document with given id.
+      tags:
+      - Document
+    get:
+      operationId: getDocumentById
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the document with given id in given repository.
+          links:
+            parent:
+              operationId: get
+              parameters:
+                docId: $response.body#/parentId
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the document with given id.
+      tags:
+      - Document
+    patch:
+      operationId: patchDocumentById
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: Condition (an HXQL predicate).
+        in: query
+        name: condition
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json-patch+json:
+            schema:
+              type: object
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the updated document.
+        "400":
+          description: Patch operation references a non-existent field.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: Condition evaluated to false.
+      summary: Patches the document with given id.
+      tags:
+      - Document
+    post:
+      operationId: createDocumentUnderParentById
+      parameters:
+      - allowReserved: true
+        description: The parent document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: Prevent sys_name from being renamed.
+        in: query
+        name: enforceSysName
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Document"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                main:
+                  $ref: "#/components/schemas/Document"
+                main1234:
+                  type: string
+                  format: binary
+              required:
+              - main
+              - main1234
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the created document.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Parent Document not found.
+      summary: Creates a document under parent with given id.
+      tags:
+      - Document
+    put:
+      operationId: updateDocumentById
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: Condition (an HXQL predicate).
+        in: query
+        name: condition
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Document"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                main:
+                  $ref: "#/components/schemas/Document"
+                main1234:
+                  type: string
+                  format: binary
+              required:
+              - main
+              - main1234
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the updated document.
+        "400":
+          description: Only one principal per ACE.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: Condition evaluated to false.
+      summary: Updates the document with given id.
+      tags:
+      - Document
+  /api/documents/{docId}/ancestors:
+    get:
+      operationId: getDocumentAncestors
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentAncestors"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/DocumentAncestors"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/DocumentAncestors"
+          description: Returns an object containing a list of the document's ancestors.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the document's ancestors.
+      tags:
+      - Document
+  /api/documents/{docId}/checkin:
+    post:
+      operationId: checkin
+      parameters:
+      - allowReserved: true
+        description: The id of the document to be checked in.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: "Whether the Check In should create a minor version. If false,\
+          \ a major version will be created instead."
+        in: query
+        name: minor
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the created document version.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "409":
+          description: The document is already checked in.
+        "412":
+          description: The document is not versionable.
+        "422":
+          description: A version cannot be checked in.
+      summary: "Checks in the document, creating a version."
+      tags:
+      - CheckIn
+  /api/documents/{docId}/copy:
+    post:
+      description: Copy a given document id to a given destination folder.  Requires
+        request body with target name and targetParentId
+      operationId: copy
+      parameters:
+      - allowReserved: true
+        description: The source document id to be copied.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyCommand"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the document information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Copies the source document inside the destination folder
+      tags:
+      - Copy
+  /api/documents/{docId}/embedding/{embeddingId}:
+    get:
+      operationId: getEmbedding
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: embeddingId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Embedding"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Embedding"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Embedding"
+          description: Returns the embedding
+        "401":
+          description: Not Authorized
+        "403":
+          description: Access forbidden to document.
+        "404":
+          description: Document not found.
+      summary: Get an embedding by id.
+      tags:
+      - Embeddings
+  /api/documents/{docId}/fulleffectiveacl:
+    get:
+      description: Fetch the full list of effective ACL on the document for the given
+        list of users.
+      operationId: fulleffectiveacl
+      parameters:
+      - allowReserved: true
+        description: The document id for which the ACL are fetched.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The list of users to fetch the ACL on the document.
+        in: query
+        name: usernames
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEffectiveACLDTO"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/ListEffectiveACLDTO"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/ListEffectiveACLDTO"
+          description: Returns the document full list of effective ACL.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Fetch the full list of effective ACL on the document.
+      tags:
+      - Document Permissions
+  /api/documents/{docId}/fulleffectivepermissions:
+    get:
+      description: Fetch the full list of effective permissions on the document for
+        the given list of users.
+      operationId: fulleffectivepermissions
+      parameters:
+      - allowReserved: true
+        description: The document id for which the ACL are fetched.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The list of users to fetch the ACL on the document.
+        in: query
+        name: usernames
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEffectivePermissionsDTO"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/ListEffectivePermissionsDTO"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/ListEffectivePermissionsDTO"
+          description: Returns the document full list of effective permissions.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Fetch the full list of effective permissions on the document.
+      tags:
+      - Document Permissions
+  /api/documents/{docId}/move:
+    post:
+      description: Move a given document to a given destination. Requires a request
+        body with targetParentId.
+      operationId: move
+      parameters:
+      - allowReserved: true
+        description: The document id to be moved.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: Condition (an HXQL predicate).
+        in: query
+        name: condition
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveCommand"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the document information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: Condition evaluated to false.
+      summary: Moves the source document to the provided destination
+      tags:
+      - Move
+  /api/documents/{docId}/renditions:
+    get:
+      operationId: getRenditions
+      parameters:
+      - allowReserved: true
+        description: The target document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+          description: Returns the existing renditions information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Access forbidden to source document.
+        "404":
+          description: Source document not found.
+      summary: Get all renditions for the given document.
+      tags:
+      - Renditions
+    post:
+      operationId: createRendition
+      parameters:
+      - allowReserved: true
+        description: The target document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Rendition"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the newly created rendition information.
+        "400":
+          description: Rendition id is missing.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Access forbidden to source document.
+        "404":
+          description: Source document not found.
+        "412":
+          description: Rendition creation is not allowed.
+      summary: Create a new rendition for the given document.
+      tags:
+      - Renditions
+  /api/documents/{docId}/renditions/{renditionId}:
+    get:
+      operationId: getRendition
+      parameters:
+      - allowReserved: true
+        description: The target document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The target rendition id.
+        in: path
+        name: renditionId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns the requested rendition information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Access forbidden to source document.
+        "404":
+          description: Source document or rendition not found.
+      summary: Get a rendition for the given document.
+      tags:
+      - Renditions
+  /api/documents/{versionId}/restore:
+    post:
+      operationId: restoreVersion
+      parameters:
+      - allowReserved: true
+        description: The id of the version to be restored
+        in: path
+        name: versionId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Document"
+          description: Returns a current working copy
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+        "412":
+          description: The document is not versionable.
+        "422":
+          description: The document to be restored is not a version
+      summary: Restore a document from given version
+      tags:
+      - Version
+  /api/download/url/{docId}/{propertyXPathAndFilename}:
+    get:
+      operationId: downloadUrlByIdAndXPath
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The xpath to the property holding the blob and the filename.
+        example: sysfile_blob/test.png or sysfiles_blobs/0/test.png
+        in: path
+        name: propertyXPathAndFilename
+        required: true
+        schema:
+          type: string
+          pattern: .*
+      - description: expiration value for generating the S3 pre-signed url in seconds.
+        in: query
+        name: expiration
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: uri
+          description: Returns the pre-signed S3 Url for a downloadable object.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the the pre-signed S3 Url for a downloadable object.
+      tags:
+      - Download
+  /api/download/{docId}/{propertyXPathAndFilename}:
+    get:
+      operationId: downloadByIdAndXPath
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The xpath to the property holding the blob and the filename.
+        example: sysfile_blob/test.png or sysfiles_blobs/0/test.png
+        in: path
+        name: propertyXPathAndFilename
+        required: true
+        schema:
+          type: string
+          pattern: .*
+      - description: Inline content disposition enablement.
+        in: query
+        name: inline
+        required: false
+        schema:
+          type: boolean
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+          description: Returns the document blob.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the document blob.
+      tags:
+      - Download
+    head:
+      operationId: downloadInfoByIdAndXPath
+      parameters:
+      - allowReserved: true
+        description: The document id.
+        in: path
+        name: docId
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The xpath to the property holding the blob and the filename.
+        example: sysfile_blob/test.png or sysfiles_blobs/0/test.png
+        in: path
+        name: propertyXPathAndFilename
+        required: true
+        schema:
+          type: string
+          pattern: .*
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "204":
+          content:
+            '*/*': {}
+          description: Returns the document blob information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Document not found.
+      summary: Returns the document blob information.
+      tags:
+      - Download
+  /api/feature-flags/{key}:
+    get:
+      operationId: getFeatureFlagByKey
+      parameters:
+      - allowReserved: true
+        description: The feature flag key.
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/FeatureFlag"
+          description: Returns the Feature Flag status. If the Feature Flag is unknown
+            the flag is inactive.
+      summary: Returns the feature flag with the given key.
+      tags:
+      - Feature Flags
+  /api/group:
+    get:
+      operationId: searchGroups
+      parameters:
+      - description: Part of the group name or label
+        in: query
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Group"
+            application/vnd.hxcs+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Group"
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Group"
+          description: Returns the list of groups which name or label contains the
+            given string.
+        "400":
+          description: Given name part for searching is null or empty.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns the list of groups which name or label contains the given string
+      tags:
+      - Group
+  /api/group/{groupId}:
+    get:
+      operationId: getGroupById
+      parameters:
+      - allowReserved: true
+        description: The group id.
+        in: path
+        name: groupId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Group"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Group"
+          description: Returns the group with given id.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Group not found.
+      summary: Returns the group with given id.
+      tags:
+      - Group
+  /api/import:
+    post:
+      operationId: createJob
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkImportModelDTO"
+        required: false
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+          description: Creates a bulk import job.
+        "400":
+          description: Invalid bulk import job details.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Creates a bulk import Job.
+      tags:
+      - Bulk Import
+  /api/import/job/{jobId}/purge:
+    delete:
+      operationId: DeleteJobById
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: Bulk Import Job deleted successfully.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Job not found.
+      summary: Deletes a bulk import Job.
+      tags:
+      - Bulk Import
+  /api/import/job/{jobId}/refresh-credentials:
+    post:
+      operationId: renewJobCredentialsByJobId
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportCredential"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/BulkImportCredential"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/BulkImportCredential"
+          description: The renewed credentials.
+        "400":
+          description: Invalid bulk import job details.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "412":
+          description: Temporary Credentials could not be generated for Job not in
+            CREATED status.
+      summary: Renews temporary credentials for a Job.
+      tags:
+      - Bulk Import
+  /api/import/job/{jobId}/report:
+    get:
+      operationId: reportJobById
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      - description: Format in which the report is to be generated. Currently supporting
+          onlyjson
+        in: query
+        name: format
+        required: false
+        schema:
+          type: string
+          default: json
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportBulkImport"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/ReportBulkImport"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/ReportBulkImport"
+          description: Generates a report for a COMPLETED bulk import job.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "412":
+          description: Report could not be generated for a Job not in COMPLETED status.
+      summary: Generates a report.
+      tags:
+      - Bulk Import
+  /api/import/job/{jobId}/start:
+    post:
+      operationId: startJobById
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      - description: "Whether to just validate the job details, without applying it."
+        in: query
+        name: dryRun
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+          description: Starts a bulk import job.
+        "400":
+          description: Invalid bulk import job details.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Starts a bulk import Job.
+      tags:
+      - Bulk Import
+  /api/import/job/{jobId}/status:
+    get:
+      operationId: getJobById
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+          description: Gets a bulk import job status.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Job not found.
+      summary: Lists a specific import job with its status.
+      tags:
+      - Bulk Import
+  /api/import/jobs:
+    get:
+      operationId: getJobs
+      parameters:
+      - description: The maximum number of Bulk jobs to return.
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+      - description: The initial document offset for pagination support.
+        in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Status"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Status"
+          description: Gets statuses for all bulk import jobs.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Lists all bulk import jobs with their statuses.
+      tags:
+      - Bulk Import
+  /api/import/jobs/{jobId}/abort:
+    post:
+      operationId: abortJob
+      parameters:
+      - allowReserved: true
+        description: The Bulk Import Job id.
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+          description: Abort an ongoing import job.
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Bulk"
+          description: Created
+        "400":
+          description: Invalid bulk import job details.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "412":
+          description: Job could not be aborted as it is not an ongoing job.
+      summary: Abort an ongoing import job.
+      tags:
+      - Bulk Import
+  /api/query:
+    post:
+      operationId: getDocumentsByQuery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Query"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+          description: Returns the search results for given query.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns the search results.
+      tags:
+      - Query
+  /api/query/advanced:
+    post:
+      operationId: getDocumentsByAdvancedQuery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdvancedQuery"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+          description: Returns the search results for given advanced query.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns the advanced search results.
+      tags:
+      - Query
+  /api/query/embeddings:
+    post:
+      operationId: getEmbeddingsByQuery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VectorQuery"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorSearchResult"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/VectorSearchResult"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/VectorSearchResult"
+          description: Returns the nearest embeddings for given query.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Vector search.
+      tags:
+      - Query
+  /api/query/named:
+    get:
+      operationId: getNamedQueries
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                namedQueries:
+                - query1
+                - query2
+              schema:
+                type: object
+            application/vnd.hxcs+json:
+              example:
+                namedQueries:
+                - query1
+                - query2
+              schema:
+                type: object
+            application/vnd.hxcs.v1+json:
+              example:
+                namedQueries:
+                - query1
+                - query2
+              schema:
+                type: object
+          description: Returns the named queries names.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns the named query definition names.
+      tags:
+      - Query
+    post:
+      operationId: getDocumentsByNamedQuery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NamedQuery"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+          description: Returns the search results for given named query.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Named query not found.
+      summary: Returns the search results for given named query.
+      tags:
+      - Query
+  /api/query/named/{namedQuery}:
+    get:
+      operationId: getNamedQuery
+      parameters:
+      - allowReserved: true
+        description: The named query id.
+        in: path
+        name: namedQuery
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedQueryDefinition"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/NamedQueryDefinition"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/NamedQueryDefinition"
+          description: Returns the named query definition.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Named query not found.
+      summary: Returns the named query definition.
+      tags:
+      - Query
+  /api/query/termsAggregation:
+    post:
+      operationId: queryTermsAggregation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TermsAggregationsQuery"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                aggregationsBuckets:
+                - key: key-1
+                  docCount: 79
+                - key: key-2
+                  docCount: 63
+                - key: key-3
+                  docCount: 54
+                documents: []
+                count: 0
+                limit: 0
+                offset: 0
+                query: SELECT * FROM SysContent
+                repositoryId: default
+                totalCount: 0
+                totalCountIsTruncated: true
+                trackTotalCount: true
+            application/vnd.hxcs+json:
+              example:
+                aggregationsBuckets:
+                - key: key-1
+                  docCount: 79
+                - key: key-2
+                  docCount: 63
+                - key: key-3
+                  docCount: 54
+                documents: []
+                count: 0
+                limit: 0
+                offset: 0
+                query: SELECT * FROM SysContent
+                repositoryId: default
+                totalCount: 0
+                totalCountIsTruncated: true
+                trackTotalCount: true
+            application/vnd.hxcs.v1+json:
+              example:
+                aggregationsBuckets:
+                - key: key-1
+                  docCount: 79
+                - key: key-2
+                  docCount: 63
+                - key: key-3
+                  docCount: 54
+                documents: []
+                count: 0
+                limit: 0
+                offset: 0
+                query: SELECT * FROM SysContent
+                repositoryId: default
+                totalCount: 0
+                totalCountIsTruncated: true
+                trackTotalCount: true
+          description: Returns the top N terms aggregations matching a given search
+            expression for the given property.
+        "400":
+          content:
+            application/json:
+              example:
+                entity-type: exception
+                message: Invalid input
+                status: 400
+              schema:
+                $ref: "#/components/schemas/HxprErrorResponse"
+          description: Invalid request body. Please be aware that termsAggregationProperty
+            is required
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Terms aggregation query on a given property.
+      tags:
+      - Query
+  /api/query/waitForFullTextSearchIndexing:
+    get:
+      operationId: waitForFullTextSearchIndexing
+      parameters:
+      - description: Refresh status.
+        in: query
+        name: refresh
+        required: false
+        schema:
+          type: boolean
+          default: true
+      - description: The timeout (in seconds).
+        in: query
+        name: timeout
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 5
+      - description: "Wait for audit (deprecated, unused)."
+        in: query
+        name: waitForAudit
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                indexing: done
+              schema:
+                type: object
+            application/vnd.hxcs+json:
+              example:
+                indexing: done
+              schema:
+                type: object
+            application/vnd.hxcs.v1+json:
+              example:
+                indexing: done
+              schema:
+                type: object
+          description: Waits for full text search indexing.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Waits for for full text search indexing.
+      tags:
+      - Query
+  /api/repository/model:
+    get:
+      operationId: getModel
+      parameters:
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs.v1+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+          description: Returns the model for the repository.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+      summary: Returns the model for the repository.
+      tags:
+      - Model
+    patch:
+      operationId: patchModel
+      parameters:
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json-patch+json:
+            example:
+            - op: add
+              path: /schemas/dublincore/fields/dc_foobar
+              value:
+                type: string
+            - op: remove
+              path: /primaryTypes/SysFile/projectId
+            - op: replace
+              path: /types/newType/fields/oldMember
+              value:
+                type: date
+            - op: test
+              path: /types/newType/fields/oldMember
+              value:
+                type: date
+            schema:
+              type: object
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs.v1+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+          description: Patches and returns the model for the repository.
+        "204":
+          description: The content model provided is valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "422":
+          description: Unprocessable Entity representing a validation error when updating
+            the content model.
+      summary: Patches the model for the repository.
+      tags:
+      - Model
+    put:
+      operationId: setModel
+      parameters:
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            example:
+              mixinTypes:
+                SysFolderish:
+                  noPerDocumentQuery: true
+                  projectId: HxP001
+              primaryTypes:
+                SysContent: {}
+                SysFile:
+                  extends: SysContent
+                  mixins:
+                  - SysFilish
+                  - SysVersionable
+                  schemas:
+                  - system
+                  - sysfile
+                  - sysfiles
+                  - identifier
+                  - address
+                SysFolder:
+                  extends: SysContent
+                  mixins:
+                  - SysFolderish
+                  schemas:
+                  - identifier
+                  subtypes:
+                  - SysFile
+              schemas:
+                identifier:
+                  fields:
+                    nm_firstname:
+                      type: string
+                    nm_lastname:
+                      type: string
+                  prefix: nm
+                address:
+                  fields:
+                    adr_home:
+                      type: string
+                    adr_office:
+                      type: string
+                  prefix: adr
+              types:
+                blob:
+                  fields:
+                    digest:
+                      type: string
+                    encoding:
+                      type: string
+                    filename:
+                      type: string
+                    key:
+                      type: binary
+                    length:
+                      type: long
+                    mimeType:
+                      type: string
+            schema:
+              $ref: "#/components/schemas/Model"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs.v1+json:
+              example:
+                mixinTypes:
+                  SysFolderish:
+                    noPerDocumentQuery: true
+                    projectId: HxP001
+                primaryTypes:
+                  SysContent: {}
+                  SysFile:
+                    extends: SysContent
+                    mixins:
+                    - SysFilish
+                    - SysVersionable
+                    schemas:
+                    - system
+                    - sysfile
+                    - sysfiles
+                    - identifier
+                    - address
+                  SysFolder:
+                    extends: SysContent
+                    mixins:
+                    - SysFolderish
+                    schemas:
+                    - identifier
+                    subtypes:
+                    - SysFile
+                schemas:
+                  identifier:
+                    fields:
+                      nm_firstname:
+                        type: string
+                      nm_lastname:
+                        type: string
+                    prefix: nm
+                  address:
+                    fields:
+                      adr_home:
+                        type: string
+                      adr_office:
+                        type: string
+                    prefix: adr
+                types:
+                  blob:
+                    fields:
+                      digest:
+                        type: string
+                      encoding:
+                        type: string
+                      filename:
+                        type: string
+                      key:
+                        type: binary
+                      length:
+                        type: long
+                      mimeType:
+                        type: string
+              schema:
+                $ref: "#/components/schemas/Model"
+          description: Sets and returns the model for the repository.
+        "204":
+          description: The content model provided is valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "422":
+          description: Unprocessable Entity representing a validation error when updating
+            the content model.
+      summary: Sets the model for the repository.
+      tags:
+      - Model
+  /api/repository/model/project/{projectId}:
+    get:
+      operationId: getModelItemsForProject
+      parameters:
+      - allowReserved: true
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs+json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs.v1+json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+          description: The model items specific to a project in the existing content
+            model and returns the model for the repository.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+      summary: Returns the model specific to a project for the repository.
+      tags:
+      - Model
+    put:
+      operationId: setModelItemsForProject
+      parameters:
+      - allowReserved: true
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            example:
+              mixinTypes:
+                testMT:
+                  noPerDocumentQuery: true
+              primaryTypes:
+                FileMT:
+                  extends: SysContent
+                  mixins:
+                  - SysVersionable
+                  schemas:
+                  - system
+                  - sysfile
+                  subtypes:
+                  - SysFile
+              schemas:
+                identifierMT:
+                  fields:
+                    nm_firstname:
+                      type: string
+                    nm_lastname:
+                      type: string
+                  prefix: nm
+            schema:
+              $ref: "#/components/schemas/Model"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs+json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+            application/vnd.hxcs.v1+json:
+              example:
+                mixinTypes:
+                  testMT:
+                    noPerDocumentQuery: true
+                    projectId: PF00002
+                primaryTypes:
+                  File1:
+                    extends: SysContent
+                    mixins:
+                    - SysVersionable
+                    projectId: PF00002
+                    schemas:
+                    - system
+                    - sysfile
+                    subtypes:
+                    - SysFile
+                    - SysFolder
+                schemas:
+                  test:
+                    fields:
+                      test_desc:
+                        type: string
+                    prefix: test
+                    projectId: PF00002
+              schema:
+                $ref: "#/components/schemas/Model"
+          description: Sets the model items specific to projects in the existing content
+            model and returns the model for the repository.
+        "204":
+          description: The content model provided is valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "409":
+          description: Conflict as content model item proposed for update already
+            exists.
+        "422":
+          description: Unprocessable Entity representing a validation error when updating
+            the content model.
+      summary: Sets the model items specific to projects in the existing content model
+        for the repository.
+      tags:
+      - Model
+  /api/repository/renditions:
+    get:
+      operationId: getRenditionsConfig
+      parameters:
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+          description: Returns the rendition configuration.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found.
+      summary: Get the rendition configuration
+      tags:
+      - Rendition Configurations
+    put:
+      operationId: putRenditionsConfig
+      parameters:
+      - description: "Whether to just validate the model changes, without applying\
+          \ it."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenditionsConfig"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+          description: Update of the rendition configuration was successful.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found.
+        "409":
+          description: The rendition already exists.
+      summary: Update the rendition configuration
+      tags:
+      - Rendition Configurations
+  /api/repository/renditions/project/{projectId}:
+    get:
+      operationId: getRenditionsForProject
+      parameters:
+      - allowReserved: true
+        description: The project id.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+          description: Returns the rendition configuration.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found.
+      summary: Get the rendition configuration for a specific project
+      tags:
+      - Rendition Configurations
+    put:
+      operationId: putRenditions
+      parameters:
+      - allowReserved: true
+        description: The project id.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+      - description: "Whether to just validate the model changes, without applying\
+          \ it."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenditionsConfig"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/RenditionsConfig"
+          description: Update of the rendition configuration was successful.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found.
+        "409":
+          description: The rendition already exists.
+      summary: Update the rendition configuration for a specific project
+      tags:
+      - Rendition Configurations
+  /api/repository/security/policies:
+    get:
+      operationId: getSecurityPolicies
+      parameters:
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs+json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs.v1+json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+          description: Returns the security policies for the repository.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+      summary: Returns the security policies for the repository.
+      tags:
+      - Security
+    patch:
+      operationId: patchSecurityPolicies
+      parameters:
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json-patch+json:
+            example:
+            - op: add
+              path: /organisational clearance
+              value:
+                engine: securitylevel
+                contentTypes:
+                - Invoice
+                mixin: Organisation
+                userAttribute: rank
+            - op: replace
+              path: /security clearance/userAttribute
+              value: user_clearance
+            - op: test
+              path: /security clearance/userAttribute
+              value: user_clearance
+            schema:
+              type: object
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs+json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs.v1+json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+          description: Patches and returns the security policies for the repository.
+        "204":
+          description: The security policies provided are valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "422":
+          description: Validation error.
+      summary: "Patches the security policies for the repository. Changes to or even\
+        \ tests on fixed security policies (such as acl, lock and retention) will\
+        \ result in an error."
+      tags:
+      - Security
+    put:
+      operationId: setSecurityPolicies
+      parameters:
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            example:
+              security clearance:
+                engine: securitylevel
+                contentTypes:
+                - Contract
+                mixin: Clearance
+                userAttribute: user_clearance
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/SecurityPolicyConfig"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  projectId: "12345"
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs+json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  projectId: "12345"
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs.v1+json:
+              example:
+                organisational clearance:
+                  engine: securitylevel
+                  projectId: "12345"
+                  contentTypes:
+                  - Invoice
+                  mixin: Organisation
+                  userAttribute: rank
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+          description: Sets and returns security policies for the repository.
+        "204":
+          description: The security policies provided are valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "422":
+          description: Validation error.
+      summary: "Sets the security policies for the repository. Changes to fixed security\
+        \ policies (such as acl, lock and retention) will be ignored."
+      tags:
+      - Security
+  /api/repository/security/policies/project/{projectId}:
+    put:
+      operationId: setSecurityPoliciesForProject
+      parameters:
+      - allowReserved: true
+        in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+      - description: "Whether to just validate the changes, without applying them."
+        in: query
+        name: validateOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            example:
+              organisational clearance:
+                engine: securitylevel
+                contentTypes:
+                - Invoice
+                mixin: Organisation
+                userAttribute: rank
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/SecurityPolicyConfig"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs+json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+            application/vnd.hxcs.v1+json:
+              example:
+                security clearance:
+                  engine: securitylevel
+                  contentTypes:
+                  - Contract
+                  mixin: Clearance
+                  userAttribute: user_clearance
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/SecurityPolicyConfig"
+          description: Sets the security policy specific to a project and returns
+            the security policies for the repository.
+        "204":
+          description: The security policies provided are valid and can be applied.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository not found
+        "409":
+          description: Conflict as security policy proposed for update already exists.
+        "422":
+          description: Validation error.
+      summary: Sets security policies for a specific project. Any security policies
+        in the request that have the same name as a system-wide security policy or
+        one for another project or will be ignored. The projectId is automatically
+        set in security policies in the request.
+      tags:
+      - Security
+  /api/repository/security/policies/{policyName}/externaluserrelations:
+    get:
+      operationId: getExternalUserRelations
+      parameters:
+      - allowReserved: true
+        description: The policy name.
+        in: path
+        name: policyName
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalUserRelationsSecurityPolicyRelations"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/ExternalUserRelationsSecurityPolicyRelations"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/ExternalUserRelationsSecurityPolicyRelations"
+          description: Returns the external user relations config for the policy.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository or external user relations policy not found.
+      summary: Returns the external user relations for a policy.
+      tags:
+      - Security
+    put:
+      operationId: setExternalUserRelations
+      parameters:
+      - allowReserved: true
+        description: The policy name.
+        in: path
+        name: policyName
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExternalUserRelationsSecurityPolicyRelations"
+        required: false
+      responses:
+        "204":
+          description: The provided external user relations config has been applied.
+        "400":
+          description: Invalid external user relations config payload.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository or external user relations policy not found.
+      summary: Sets the external user relations for a policy.
+      tags:
+      - Security
+  /api/repository/security/policies/{policyName}/externaluserrelations/status:
+    get:
+      operationId: getExternalUserRelationsStatus
+      parameters:
+      - allowReserved: true
+        description: The policy name.
+        in: path
+        name: policyName
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+            application/vnd.hxcs+json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+          description: Returns the status of the external user relations.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Repository or external user relations policy not found.
+      summary: Returns the status of the external user relations for a policy.
+      tags:
+      - Security
+  /api/upload:
+    post:
+      description: "Upload can be done in several parts, chunk by chunk."
+      operationId: upload
+      parameters:
+      - description: The body encoding (only base64 allowed).
+        in: query
+        name: bodyEncoding
+        required: false
+        schema:
+          type: string
+      - description: The total number of chunks.
+        in: query
+        name: chunkCount
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - description: "This chunk index, starting at 0.."
+        in: query
+        name: chunkIndex
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - description: Indicates that the upload is chunked.
+        in: query
+        name: chunked
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - description: The file encoding (for text files).
+        in: query
+        name: encoding
+        required: false
+        schema:
+          type: string
+      - description: The file name.
+        in: query
+        name: fileName
+        required: false
+        schema:
+          type: string
+      - description: The upload id. A new upload is created if null.
+        in: query
+        name: id
+        required: false
+        schema:
+          type: string
+      - description: The file mimetype.
+        in: query
+        name: mimeType
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+        required: false
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+          description: Returns the upload information after upload is finished.
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+          description: Returns the upload information after chunk addition to the
+            upload.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Upload with the given id not found or cannot be accessed by
+            user.
+      summary: Uploads a file or a chunk to a given upload.
+      tags:
+      - Upload
+  /api/upload/create:
+    post:
+      operationId: createUpload
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+          description: Returns the upload information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Creates a new upload and return its generated identifier and properties.
+      tags:
+      - Upload
+  /api/upload/{id}:
+    delete:
+      operationId: deleteUpload
+      parameters:
+      - allowReserved: true
+        description: The upload id.
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "[A-Za-z]{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+      responses:
+        "204":
+          content:
+            application/json: {}
+            application/vnd.hxcs+json: {}
+            application/vnd.hxcs.v1+json: {}
+          description: Upload has been removed.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Upload with the given id not found or cannot be accessed by
+            user.
+      summary: Cancels the upload with the given id.
+      tags:
+      - Upload
+    get:
+      operationId: getUploadInfo
+      parameters:
+      - allowReserved: true
+        description: The upload id.
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "[A-Za-z]{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+          description: Returns the upload information and upload is finished when
+            upload has content.
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+          description: Returns the upload information and upload by chunk is not finished.
+        "204":
+          description: Upload with the given id has no content.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Upload with the given id not found or cannot be accessed by
+            user.
+      summary: Returns the upload information for given id.
+      tags:
+      - Upload
+  /api/upload/{id}/complete:
+    post:
+      description: |-
+        Completion is mainly useful for s3 direct upload, where
+        the upload has been created thanks to this API, but download has been done directly on the target s3 bucket.
+      operationId: complete
+      parameters:
+      - allowReserved: true
+        description: The upload id.
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "[A-Za-z]{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadFileInfo"
+        required: false
+      responses:
+        "200":
+          description: Upload has been completed.
+        "400":
+          description: Missing or incorrect upload information.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Upload with the given id not found or cannot be accessed by
+            user.
+        "409":
+          description: Upload cannot be completed with given information.
+        "501":
+          description: Upload cannot be completed for current upload handler.
+      summary: 'Completes the upload with the given id. '
+      tags:
+      - Upload
+  /api/upload/{id}/renewCredentials:
+    post:
+      operationId: renewCredentials
+      parameters:
+      - allowReserved: true
+        description: The upload id.
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "[A-Za-z]{8}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+      responses:
+        "200":
+          description: Token has been refreshed.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Upload with the given id not found.
+        "501":
+          description: Token cannot be refreshed with current upload handler.
+      summary: Renews the credentials for the upload with the given id.
+      tags:
+      - Upload
+  /api/user:
+    get:
+      operationId: searchUsersByName
+      parameters:
+      - description: Part of the user name
+        in: query
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+            application/vnd.hxcs+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+          description: Returns the list of users which first name or last name contains
+            the given string
+        "400":
+          description: Given name part for searching is null or empty.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns the list of users which first name or last name contains the
+        given string
+      tags:
+      - User
+  /api/user/{userId}:
+    get:
+      operationId: getUserById
+      parameters:
+      - allowReserved: true
+        description: The user id.
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/User"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/User"
+          description: Returns the user with given id.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: User not found.
+      summary: Returns the user with given id.
+      tags:
+      - User
+  /api/vocabularies:
+    get:
+      operationId: getVocabularyList
+      parameters:
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyId"
+            application/vnd.hxcs+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyId"
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyId"
+          description: Returns the list of all vocabularies or empty.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      summary: Returns a list of all vocabularies
+      tags:
+      - Vocabulary
+    post:
+      operationId: createVocabulary
+      parameters:
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Vocabulary"
+        required: false
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vocabulary"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/Vocabulary"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/Vocabulary"
+          description: Returns the created vocabulary.
+        "400":
+          description: Invalid vocabulary id.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "409":
+          description: Vocabulary already exists.
+      summary: Creates a vocabulary
+      tags:
+      - Vocabulary
+  /api/vocabularies/{sysvocab_id}:
+    delete:
+      operationId: deleteVocabulary
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "204":
+          description: Vocabulary removed successfully.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary not found.
+      summary: Deletes vocabulary along with its entries
+      tags:
+      - Vocabulary
+    get:
+      operationId: getVocabularyEntries
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyEntry"
+          description: Returns the list of all vocabulary entries or empty.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary not found.
+      summary: Returns a list of all vocabulary entries
+      tags:
+      - Vocabulary
+    post:
+      operationId: createVocabularyEntry
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VocabularyEntryRequest"
+        required: false
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+          description: Returns the created vocabulary entry.
+        "400":
+          description: Invalid vocabulary entry key or label.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary not found.
+        "409":
+          description: Entry already exists in this vocabulary.
+      summary: Creates an entry for vocabulary
+      tags:
+      - Vocabulary
+    put:
+      operationId: updateVocabularyEntry
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VocabularyEntryRequest"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+          description: Returns the updated vocabulary entry.
+        "400":
+          description: Invalid vocabulary entry key or label.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary or vocabulary entry not found.
+      summary: Updates and returns particular VocabularyEntry
+      tags:
+      - Vocabulary
+  /api/vocabularies/{sysvocab_id}/{sysvocab_key}:
+    delete:
+      operationId: deleteVocabularyEntry
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The vocabulary key.
+        in: path
+        name: sysvocab_key
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "204":
+          description: Vocabulary entry removed successfully.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary or vocabulary entry not found.
+      summary: Deletes entry of a vocabulary
+      tags:
+      - Vocabulary
+    get:
+      operationId: getVocabularyEntry
+      parameters:
+      - allowReserved: true
+        description: The vocabulary id.
+        in: path
+        name: sysvocab_id
+        required: true
+        schema:
+          type: string
+      - allowReserved: true
+        description: The vocabulary key.
+        in: path
+        name: sysvocab_key
+        required: true
+        schema:
+          type: string
+      - description: The repository id.
+        in: header
+        name: HXCS-REPOSITORY
+        required: false
+        schema:
+          type: string
+          default: default
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+            application/vnd.hxcs.v1+json:
+              schema:
+                $ref: "#/components/schemas/VocabularyEntry"
+          description: Returns the vocabulary entry.
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "404":
+          description: Vocabulary or vocabulary entry not found.
+      summary: Returns particular vocabulary entry
+      tags:
+      - Vocabulary
+  /hello:
+    get:
+      operationId: hello
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: OK
+      tags:
+      - Greeting
+  /hello/protected:
+    get:
+      operationId: helloUser
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: OK
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      tags:
+      - Greeting
+components:
+  schemas:
+    ACE:
+      type: object
+      description: REST representation of ACEs.
+      properties:
+        begin:
+          type: string
+          format: date-time
+        creator:
+          type: string
+        end:
+          type: string
+          format: date-time
+        granted:
+          type: boolean
+        group:
+          $ref: "#/components/schemas/Group"
+        permission:
+          type: string
+        status:
+          $ref: "#/components/schemas/Status"
+        user:
+          $ref: "#/components/schemas/User"
+      title: ACE
+    AdvancedQuery:
+      type: object
+      description: Represents an advanced query.
+      properties:
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of documents retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: The initial document offset; for pagination support.
+          example: 0
+        parameters:
+          type: object
+          additionalProperties:
+            type: object
+        query:
+          type: string
+          description: The HXQL query.
+          example: SELECT * FROM SysContent
+        quickFilterClauses:
+          type: array
+          description: List of filters to be applied to the result.
+          example: "exclude documents that are not article: mydc_nature != 'article'"
+          items:
+            type: string
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository
+        sort:
+          type: array
+          description: List of fields used to sort the result.
+          example:
+          - sys_title
+          items:
+            type: string
+        trackTotalCount:
+          type: boolean
+          description: "If true, the total count of documents retrieved by the query\
+            \ will be computed."
+        trackTotalCountUpTo:
+          type: integer
+          format: int32
+          description: Max number of documents to count. This can be set to -1 to
+            remove the limit but it will be expensive on large indexes.
+          example: 100
+        whereClauseDefinition:
+          $ref: "#/components/schemas/WhereClause"
+      title: Advanced Query
+    Bulk:
+      type: object
+      description: Represents a Bulk Import Job Descriptor.
+      properties:
+        awsAccessKeyId:
+          type: string
+        awsSecretAccessKey:
+          type: string
+        awsSessionToken:
+          type: string
+        bucket:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        creator:
+          type: string
+        description:
+          type: string
+        dryRun:
+          type: boolean
+        failedDocuments:
+          type: integer
+          format: int64
+        importedDocuments:
+          type: integer
+          format: int64
+        jobId:
+          type: string
+        name:
+          type: string
+        queue:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+        totalDocuments:
+          type: integer
+          format: int64
+        uniqueKey:
+          type: string
+      readOnly: true
+      title: Bulk
+    BulkImportCredential:
+      type: object
+      description: Represents a Bulk Import Job Credential Descriptor.
+      properties:
+        awsAccessKeyId:
+          type: string
+        awsSecretAccessKey:
+          type: string
+        awsSessionToken:
+          type: string
+        jobId:
+          type: string
+      readOnly: true
+      title: BulkImportCredential
+    BulkImportFailureDTO:
+      type: object
+      properties:
+        error:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/BulkImportMetadata"
+        timestamp:
+          type: string
+          format: date-time
+    BulkImportMetadata:
+      type: object
+      properties:
+        bulkImport:
+          $ref: "#/components/schemas/Bulk"
+        bulkImportUpload:
+          $ref: "#/components/schemas/BulkImportUploadDTO"
+        jobId:
+          type: string
+        sys_acl:
+          type: array
+          items:
+            $ref: "#/components/schemas/ACE"
+        sys_ancestorIds:
+          type: array
+          items:
+            type: string
+        sys_changeToken:
+          type: string
+        sys_contributors:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        sys_created:
+          type: string
+          format: date-time
+        sys_creator:
+          $ref: "#/components/schemas/User"
+        sys_description:
+          type: string
+        sys_effectiveAcl:
+          type: array
+          items:
+            $ref: "#/components/schemas/ACE"
+        sys_effectivePermissions:
+          type: array
+          items:
+            type: string
+        sys_fulltextBinary:
+          type: string
+        sys_id:
+          type: string
+        sys_isFolderish:
+          type: boolean
+        sys_lastContributor:
+          $ref: "#/components/schemas/User"
+        sys_lifecycleState:
+          type: string
+        sys_lockCreated:
+          type: string
+          format: date-time
+        sys_lockOwner:
+          $ref: "#/components/schemas/User"
+        sys_mixinTypes:
+          type: array
+          items:
+            type: string
+        sys_modified:
+          type: string
+          format: date-time
+        sys_name:
+          type: string
+        sys_parentId:
+          type: string
+        sys_parentPath:
+          type: string
+        sys_path:
+          type: string
+        sys_pathDepth:
+          type: integer
+          format: int32
+        sys_pos:
+          type: integer
+          format: int64
+        sys_primaryType:
+          type: string
+          description: Required for document creation.
+        sys_repository:
+          type: string
+        sys_secpol:
+          type: array
+          items:
+            type: string
+        sys_title:
+          type: string
+        sysfile_blob:
+          $ref: "#/components/schemas/BulkImportUploadDTO"
+        the_unique_key:
+          type: string
+      required:
+      - sys_primaryType
+    BulkImportModelDTO:
+      type: object
+      properties:
+        creator:
+          type: string
+        description:
+          type: string
+        name:
+          type: string
+        queue:
+          type: string
+        uniqueKey:
+          type: string
+    BulkImportUploadDTO:
+      type: object
+      properties:
+        digest:
+          type: string
+        encoding:
+          type: string
+        filename:
+          type: string
+        import_key:
+          type: string
+        length:
+          type: integer
+          format: int64
+        mimeType:
+          type: string
+    Constraint:
+      type: object
+      description: Represents a constraint.
+      properties:
+        enumeration:
+          type: array
+          items:
+            type: object
+        maxExclusive:
+          type: object
+        maxInclusive:
+          type: object
+        maxLength:
+          type: integer
+          format: int64
+        minExclusive:
+          type: object
+        minInclusive:
+          type: object
+        minLength:
+          type: integer
+          format: int64
+        nullable:
+          type: boolean
+        pattern:
+          type: string
+        resolver:
+          $ref: "#/components/schemas/Resolver"
+    CopyCommand:
+      type: object
+      description: Represents Copy API's HTTP Post body.
+      properties:
+        name:
+          type: string
+          description: "Name of the document after copying.  Example: \"name\": \"\
+            Copied file name\""
+        targetParentId:
+          type: string
+          description: "Target parent id where the document will be copied.  Example:\
+            \ \"targetParentId\": \"097d50d7-f839-440a-b72c-f2a51ea214b7\""
+      required:
+      - name
+      - targetParentId
+      title: Copy Body
+    Document:
+      type: object
+      additionalProperties: true
+      description: Represents a document.
+      properties:
+        sys_acl:
+          type: array
+          items:
+            $ref: "#/components/schemas/ACE"
+        sys_ancestorIds:
+          type: array
+          items:
+            type: string
+        sys_changeToken:
+          type: string
+        sys_contributors:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        sys_created:
+          type: string
+          format: date-time
+        sys_creator:
+          $ref: "#/components/schemas/User"
+        sys_description:
+          type: string
+        sys_effectiveAcl:
+          type: array
+          items:
+            $ref: "#/components/schemas/ACE"
+        sys_effectivePermissions:
+          type: array
+          items:
+            type: string
+        sys_fulltextBinary:
+          type: string
+        sys_id:
+          type: string
+        sys_isFolderish:
+          type: boolean
+        sys_lastContributor:
+          $ref: "#/components/schemas/User"
+        sys_lifecycleState:
+          type: string
+        sys_lockCreated:
+          type: string
+          format: date-time
+        sys_lockOwner:
+          $ref: "#/components/schemas/User"
+        sys_mixinTypes:
+          type: array
+          items:
+            type: string
+        sys_modified:
+          type: string
+          format: date-time
+        sys_name:
+          type: string
+        sys_parentId:
+          type: string
+        sys_parentPath:
+          type: string
+        sys_path:
+          type: string
+        sys_pathDepth:
+          type: integer
+          format: int32
+        sys_pos:
+          type: integer
+          format: int64
+        sys_primaryType:
+          type: string
+          description: Required for document creation.
+        sys_repository:
+          type: string
+        sys_secpol:
+          type: array
+          items:
+            type: string
+        sys_title:
+          type: string
+      required:
+      - sys_primaryType
+    DocumentAncestors:
+      type: object
+      description: Represents a document's ancestors list.
+      properties:
+        ancestors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Document"
+    Embedding:
+      type: object
+      description: Represents the Embedding API's HTTP Post body.
+      properties:
+        sysembed_blobref:
+          type: string
+          description: Blob label for embeddings.
+        sysembed_docId:
+          type: string
+          description: The unique identifier for the document the embedding is associated
+            with.
+        sysembed_id:
+          type: string
+          description: The unique identifier for the embedding.
+        sysembed_location:
+          $ref: "#/components/schemas/LocationModel"
+        sysembed_score:
+          type: number
+          format: double
+          description: A score representing the relevance of the hit
+        sysembed_text:
+          type: string
+          description: Text label for the vector or the original chunk for text embeddings.
+        sysembed_type:
+          type: string
+          description: A label for the embedding type (used to ensure semantic queries
+            are against vectors of the same type).
+          maxLength: 256
+        sysembed_vector:
+          type: array
+          description: The vector as a list of floating point numbers.
+          items:
+            type: number
+            format: double
+            description: The vector as a list of floating point numbers.
+      required:
+      - sysembed_docId
+      - sysembed_id
+      - sysembed_text
+      - sysembed_type
+      - sysembed_vector
+      title: Embedding Body
+    ExternalUserRelationsSecurityPolicyRelations:
+      type: object
+      description: Configuration for the External User Relations Security Policy relations
+        data
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalUserRelationsSecurityPolicyUser"
+    ExternalUserRelationsSecurityPolicyUser:
+      type: object
+      description: User for the External User Relations Security Policy data
+      properties:
+        id:
+          type: string
+        relations:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - id
+      - relations
+    FeatureFlag:
+      type: object
+      description: Represents a feature flag status.
+      properties:
+        key:
+          type: string
+        status:
+          type: boolean
+      readOnly: true
+      title: Feature Flag
+    Field:
+      type: object
+      description: Represents a field.
+      properties:
+        constraints:
+          $ref: "#/components/schemas/Constraint"
+        default:
+          type: string
+        extends:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Field"
+        fullTextIndexed:
+          type: boolean
+        list:
+          $ref: "#/components/schemas/List"
+        type:
+          type: string
+    Group:
+      type: object
+      description: Represents a group.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      readOnly: true
+      title: Group
+    HxprErrorResponse:
+      type: object
+      properties:
+        entity-type:
+          type: string
+        exception:
+          type: object
+          properties:
+            cause:
+              type: object
+              properties:
+                localizedMessage:
+                  type: string
+                message:
+                  type: string
+                stackTrace:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      classLoaderName:
+                        type: string
+                      className:
+                        type: string
+                      fileName:
+                        type: string
+                      lineNumber:
+                        type: integer
+                        format: int32
+                      methodName:
+                        type: string
+                      moduleName:
+                        type: string
+                      moduleVersion:
+                        type: string
+                      nativeMethod:
+                        type: boolean
+            localizedMessage:
+              type: string
+            message:
+              type: string
+            stackTrace:
+              type: array
+              items:
+                type: object
+                properties:
+                  classLoaderName:
+                    type: string
+                  className:
+                    type: string
+                  fileName:
+                    type: string
+                  lineNumber:
+                    type: integer
+                    format: int32
+                  methodName:
+                    type: string
+                  moduleName:
+                    type: string
+                  moduleVersion:
+                    type: string
+                  nativeMethod:
+                    type: boolean
+            suppressed:
+              type: array
+              items:
+                type: object
+                properties:
+                  localizedMessage:
+                    type: string
+                  message:
+                    type: string
+                  stackTrace:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        classLoaderName:
+                          type: string
+                        className:
+                          type: string
+                        fileName:
+                          type: string
+                        lineNumber:
+                          type: integer
+                          format: int32
+                        methodName:
+                          type: string
+                        moduleName:
+                          type: string
+                        moduleVersion:
+                          type: string
+                        nativeMethod:
+                          type: boolean
+        message:
+          type: string
+        stackTrace:
+          type: array
+          items:
+            type: object
+            properties:
+              classLoaderName:
+                type: string
+              className:
+                type: string
+              fileName:
+                type: string
+              lineNumber:
+                type: integer
+                format: int32
+              methodName:
+                type: string
+              moduleName:
+                type: string
+              moduleVersion:
+                type: string
+              nativeMethod:
+                type: boolean
+        status:
+          type: integer
+          format: int32
+    ImageLocation:
+      type: object
+      properties:
+        bottom:
+          type: integer
+          format: int32
+        left:
+          type: integer
+          format: int32
+        right:
+          type: integer
+          format: int32
+        top:
+          type: integer
+          format: int32
+    List:
+      type: object
+      description: Represents a list.
+      properties:
+        constraints:
+          $ref: "#/components/schemas/Constraint"
+        extends:
+          type: string
+        type:
+          type: string
+    ListEffectiveACLDTO:
+      type: object
+      properties:
+        fullEffectiveACL:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListEffectiveACLPerUserDTO"
+        sys_id:
+          type: string
+    ListEffectiveACLPerUserDTO:
+      type: object
+      properties:
+        userAcl:
+          type: array
+          items:
+            $ref: "#/components/schemas/ACE"
+        userId:
+          type: string
+    ListEffectivePermissionsDTO:
+      type: object
+      properties:
+        fullEffectivePermissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListEffectivePermissionsPerUserDTO"
+        sys_id:
+          type: string
+    ListEffectivePermissionsPerUserDTO:
+      type: object
+      properties:
+        userId:
+          type: string
+        userPermissions:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    LocationModel:
+      type: object
+      description: Location the vector is derived from within the original document.
+        For example this could be the page and paragraph number or coordinates of
+        a bounding box.
+      properties:
+        position:
+          $ref: "#/components/schemas/ImageLocation"
+        spreadsheet:
+          $ref: "#/components/schemas/SpreadSheetLocation"
+        text:
+          $ref: "#/components/schemas/TextLocation"
+        timestamp:
+          $ref: "#/components/schemas/VideoLocation"
+    MixinType:
+      type: object
+      description: Represents a mixin.
+      properties:
+        noPerDocumentQuery:
+          type: boolean
+        projectId:
+          type: string
+        schemas:
+          type: array
+          items:
+            type: string
+    Model:
+      type: object
+      description: Represents a model.
+      properties:
+        mixinTypes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MixinType"
+        primaryTypes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/PrimaryType"
+        schemas:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Schema"
+        types:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Type"
+    MoveCommand:
+      type: object
+      description: Represents the Move API's HTTP Post body.
+      properties:
+        targetParentId:
+          type: string
+          description: "Target parent id where the document will be moved.  Example:\
+            \ \"targetParentId\": \"097d50d7-f839-440a-b72c-f2a51ea214b7\""
+      required:
+      - targetParentId
+      title: Move Body
+    NamedQuery:
+      type: object
+      description: Represents a query referencing a pre-defined named query definition
+        by name.
+      properties:
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of documents retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: The initial document offset; for pagination support.
+          example: 0
+        parameters:
+          type: object
+          additionalProperties: true
+        queryName:
+          type: string
+          description: Name of the query.
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository.
+        selectedQuickFilters:
+          type: array
+          description: List of filters to be applied to the result.
+          example: "exclude documents that are not article: mydc_nature != 'article'"
+          items:
+            type: string
+        sort:
+          type: array
+          description: List of fields used to sort the result.
+          example:
+          - sys_title
+          items:
+            type: string
+        trackTotalCount:
+          type: boolean
+          description: "If true, the total count of documents retrieved by the query\
+            \ will be computed."
+        trackTotalCountUpTo:
+          type: integer
+          format: int32
+          description: Max number of documents to count. This can be set to -1 to
+            remove the limit but it will be expensive on large indexes.
+          example: 100
+      title: Named Query
+    NamedQueryDefinition:
+      type: object
+      description: Represents a named query definition.
+      properties:
+        aliases:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+        quickFilters:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuickFilter"
+        sort:
+          type: array
+          items:
+            type: string
+        whereClauseDefinition:
+          $ref: "#/components/schemas/WhereClause"
+      title: Named Query Definition
+    Predicate:
+      type: object
+      description: Represents an advanced query predicate definition.
+      properties:
+        operator:
+          type: string
+        parameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/PredicateParameter"
+        searchParameter:
+          type: string
+      title: Query Predicate
+    PredicateParameter:
+      type: object
+      description: Represents an advanced query predicate parameter definition.
+      properties:
+        defaultValue:
+          type: object
+        name:
+          type: string
+      title: Query Predicate Parameter
+    PrimaryType:
+      type: object
+      description: Represents a primary type.
+      properties:
+        extends:
+          type: string
+        mixins:
+          type: array
+          items:
+            type: string
+        projectId:
+          type: string
+        schemas:
+          type: array
+          items:
+            type: string
+        special:
+          type: boolean
+        subtypes:
+          type: array
+          items:
+            type: string
+    Query:
+      type: object
+      description: Represents a query.
+      properties:
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of documents retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: The initial document offset; for pagination support.
+          example: 0
+        query:
+          type: string
+          description: The HXQL query.
+          example: SELECT * FROM SysContent
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository.
+        sort:
+          type: array
+          description: List of fields used to sort the result.
+          example:
+          - sys_title
+          items:
+            type: string
+        trackTotalCount:
+          type: boolean
+          description: "If true, the total count of documents retrieved by the query\
+            \ will be computed."
+        trackTotalCountUpTo:
+          type: integer
+          format: int32
+          description: Max number of documents to count. This can be set to -1 to
+            remove the limit but it will be expensive on large indexes.
+          example: 100
+      title: Query
+    QueryResult:
+      type: object
+      description: Represents a query result.
+      properties:
+        count:
+          type: integer
+          format: int64
+        documents:
+          type: array
+          description: The list of retrieved documents by the given query.
+          items:
+            $ref: "#/components/schemas/Document"
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of documents retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: Actual document offset; for pagination support.
+          example: 0
+        query:
+          type: string
+          description: The HXQL query.
+          example: SELECT * FROM SysContent
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository.
+        totalCount:
+          type: integer
+          format: int64
+          description: "The total number of documents that match the query: is approximated\
+            \ if trackTotalCount is set to false."
+        totalCountIsTruncated:
+          type: boolean
+          description: If true the total count of the query was truncated.
+        trackTotalCount:
+          type: boolean
+          description: If true the total count of the query was computed.
+      title: Query Result
+    QuickFilter:
+      type: object
+      description: Represents an advanced query quick filter definition.
+      properties:
+        clause:
+          type: string
+        name:
+          type: string
+        sort:
+          type: array
+          items:
+            type: string
+      title: Query Quick Filter
+    Rendition:
+      type: object
+      description: Represents Rendition API's HTTP Post body.
+      properties:
+        sysrendition_id:
+          type: string
+          description: "Name of the rendition requested.  Example: \"sysrendition_id\"\
+            : \"pdf\""
+      required:
+      - sysrendition_id
+      title: Rendition Body
+    RenditionConfig:
+      type: object
+      description: Represents a rendition configuration.
+      properties:
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/RenditionConfigOption"
+        projectId:
+          type: string
+        renditionId:
+          type: string
+        targetMimetype:
+          type: string
+    RenditionConfigOption:
+      type: object
+      description: Represents an option for a rendition config.
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+    RenditionsConfig:
+      type: object
+      description: Represents a list of renditions configuration.
+      properties:
+        renditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RenditionConfig"
+    ReportBulkImport:
+      type: object
+      properties:
+        documentsFailed:
+          type: array
+          items:
+            $ref: "#/components/schemas/BulkImportFailureDTO"
+        job:
+          $ref: "#/components/schemas/Bulk"
+    Resolver:
+      type: object
+      description: Represents a resolver.
+      properties:
+        name:
+          type: string
+        repository:
+          type: string
+        store:
+          type: string
+        type:
+          type: string
+        validation:
+          type: boolean
+        vocabulary:
+          type: string
+    Schema:
+      type: object
+      description: Represents a schema.
+      properties:
+        fields:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Field"
+        prefix:
+          type: string
+        projectId:
+          type: string
+        versionWritable:
+          type: boolean
+    SecurityPolicyConfig:
+      type: object
+      description: Configuration for a Security Policy
+      properties:
+        contentTypes:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        engine:
+          type: string
+        expression:
+          type: string
+        mixin:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        projectId:
+          type: string
+        relations:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        userAttribute:
+          type: string
+    SpreadSheetLocation:
+      type: object
+      properties:
+        column:
+          type: integer
+          format: int32
+        row:
+          type: integer
+          format: int32
+        sheet:
+          type: string
+    Status:
+      type: string
+      enum:
+      - PENDING
+      - EFFECTIVE
+      - ARCHIVED
+    TermsAggregationsQuery:
+      type: object
+      description: Represents a terms aggregations query.
+      properties:
+        limit:
+          type: integer
+          format: int32
+          default: 10
+          description: Max number of aggregation buckets retrieved by the given query.
+          example: 100
+        query:
+          $ref: "#/components/schemas/Query"
+        searchTerm:
+          type: string
+          description: The search term to filter the terms aggregation results.
+        termsAggregationProperty:
+          type: string
+          description: The property containing the array of keys to run the terms
+            aggregation on.
+      required:
+      - termsAggregationProperty
+    TextLocation:
+      type: object
+      properties:
+        page:
+          type: integer
+          format: int32
+        paragraph:
+          type: integer
+          format: int32
+    Type:
+      type: object
+      description: Represents a type.
+      properties:
+        constraints:
+          $ref: "#/components/schemas/Constraint"
+        extends:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Field"
+        list:
+          $ref: "#/components/schemas/List"
+        projectId:
+          type: string
+    Upload:
+      type: object
+      description: UploadAPI response object
+      properties:
+        chunkCount:
+          type: integer
+          format: int32
+          description: Number of chunks uploaded.
+        chunkIndexes:
+          type: array
+          description: The chunks that compose the Upload.
+          items:
+            type: integer
+            format: int32
+        chunksCompleted:
+          type: boolean
+          description: True if the number of loaded chunks is equals to the number
+            of chunks size.
+        encoding:
+          type: string
+          description: Encoding of the content.
+          example: UTF-8
+          nullable: true
+        fileName:
+          type: string
+          description: Name of the associated file of the upload.
+          nullable: true
+        fileSize:
+          type: integer
+          format: int64
+          description: File size in bytes; -1 is returned if the size in unknown.
+          nullable: true
+        hasContent:
+          type: boolean
+          description: If the upload has associated content is true
+          readOnly: true
+        id:
+          type: string
+          description: Upload identifier.
+        mimeType:
+          type: string
+          description: Mime type of the content.
+          example: plain/text
+          nullable: true
+        partialFileSize:
+          type: integer
+          format: int64
+          description: Partial size in bytes. Amount of bytes for all uploaded chunks.
+          nullable: true
+        properties:
+          type: object
+          additionalProperties:
+            type: object
+        status:
+          type: string
+          description: Status of the upload.
+          enum:
+          - INCOMPLETE
+          - PROCESSING
+          - READY
+          - ERROR
+          example: INCOMPLETE
+          nullable: true
+    UploadFileInfo:
+      type: object
+      description: Represents an uploaded file.
+      properties:
+        fileKey:
+          type: string
+          description: file key
+        fileName:
+          type: string
+          description: file name
+          example: myFile.txt
+        mimeType:
+          type: string
+          description: mimeType
+          example: text/plain
+      title: Upload File Info
+    User:
+      type: object
+      description: Represents a user.
+      properties:
+        email:
+          type: string
+        firstName:
+          type: string
+        id:
+          type: string
+        lastName:
+          type: string
+        properties:
+          type: object
+          additionalProperties:
+            type: object
+      readOnly: true
+      title: User
+    VectorQuery:
+      type: object
+      description: Represents a vector search query.
+      properties:
+        chunkFTS:
+          type: string
+          description: An optional space-separated list of terms to search for in
+            the chunk.
+        embeddingType:
+          type: string
+          default: '*'
+          description: A wildcard query for the embedding type.
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of embeddings retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: The initial embedding offset; for pagination support.
+          example: 0
+        query:
+          type: string
+          default: SELECT * FROM SysContent
+          description: The HXQL query used to filter the embeddings by the corresponding
+            document.
+          example: SELECT * FROM SysContent
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository.
+        trackTotalCount:
+          type: boolean
+          default: false
+          description: "If true, the total count of embeddings retrieved by the query\
+            \ will be computed."
+        trackTotalCountUpTo:
+          type: integer
+          format: int32
+          description: Max number of embeddings to count. This can be set to -1 to
+            remove the limit but it will be expensive on large indexes.
+          example: 100
+        vector:
+          type: array
+          description: The vector to search for.
+          items:
+            type: number
+            format: double
+            description: The vector to search for.
+      title: Vector Query
+    VectorSearchResult:
+      type: object
+      description: The results of a vector search query.
+      properties:
+        count:
+          type: integer
+          format: int64
+        embeddings:
+          type: array
+          description: The list of retrieved embeddings.
+          items:
+            $ref: "#/components/schemas/Embedding"
+        limit:
+          type: integer
+          format: int64
+          default: 0
+          description: Max number of embeddings retrieved by the given query.
+          example: 100
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          description: Actual embedding offset; for pagination support.
+          example: 0
+        query:
+          type: string
+          description: The HXQL query.
+          example: SELECT * FROM SysContent
+        repositoryId:
+          type: string
+          default: default
+          description: The id of the internal repository.
+        totalCount:
+          type: integer
+          format: int64
+          description: "The total number of embeddings that match the query: is approximated\
+            \ if trackTotalCount is set to false."
+        totalCountIsTruncated:
+          type: boolean
+          description: If true the total count of the query was truncated.
+        trackTotalCount:
+          type: boolean
+          description: If true the total count of the query was computed.
+        vector:
+          type: array
+          description: The supplied vector
+          items:
+            type: number
+            format: double
+            description: The supplied vector
+      title: Vector Search Results
+    VideoLocation:
+      type: object
+      properties:
+        end:
+          type: number
+          format: double
+        start:
+          type: number
+          format: double
+    Vocabulary:
+      type: object
+      description: Represents a Vocabulary
+      properties:
+        sysvocab_id:
+          type: string
+    VocabularyEntry:
+      type: object
+      description: Represents a VocabularyEntry.
+      properties:
+        sysvocab_id:
+          type: string
+        sysvocab_key:
+          type: string
+        sysvocab_label:
+          type: string
+    VocabularyEntryRequest:
+      type: object
+      description: Represents a request to create VocabularyEntry.
+      properties:
+        sysvocab_key:
+          type: string
+        sysvocab_label:
+          type: string
+    VocabularyId:
+      type: object
+      description: Represents a Vocabulary ID
+      properties:
+        sysvocab_id:
+          type: string
+    WhereClause:
+      type: object
+      description: Represents an advanced query where clause definition.
+      properties:
+        predicates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Predicate"
+        query:
+          type: string
+      title: Query Where Clause
+  securitySchemes:
+    SecurityScheme:
+      bearerFormat: JWT
+      description: Authentication
+      scheme: bearer
+      type: http

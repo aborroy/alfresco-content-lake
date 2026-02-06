@@ -1,0 +1,34 @@
+services:
+  batch-ingester:
+    build:
+      context: ./batch-ingester
+      dockerfile: Dockerfile
+    ports:
+      - "9090:9090"
+    environment:
+      # Alfresco SDK configuration
+      CONTENT_SERVICE_URL: http://host.docker.internal:8080
+      CONTENT_SERVICE_SECURITY_BASICAUTH_USERNAME: admin
+      CONTENT_SERVICE_SECURITY_BASICAUTH_PASSWORD: admin
+      
+      # hxpr
+      HXPR_URL: http://host.docker.internal:8080
+      HXPR_REPOSITORY_ID: default
+      HXPR_TARGET_PATH: /alfresco-sync
+      HXPR_IDP_TOKEN_URL: http://host.docker.internal:5002/idp/connect/token
+      HXPR_IDP_CLIENT_ID: nuxeo-client
+      HXPR_IDP_CLIENT_SECRET: secret
+      HXPR_IDP_USERNAME: testuser
+      HXPR_IDP_PASSWORD: password
+      
+      # Docker Model Runner
+      MODEL_RUNNER_URL: http://model-runner.docker.internal/engines/llama.cpp/v1
+      EMBEDDING_MODEL: text-embedding-nomic-embed-text-v1.5
+
+      # Transformation
+      TRANSFORM_WORKERS: 4
+      TRANSFORM_QUEUE_CAPACITY: 1000
+
+      # Embedding
+      EMBEDDING_CHUNK_SIZE: 1000
+      EMBEDDING_CHUNK_OVERLAP: 200

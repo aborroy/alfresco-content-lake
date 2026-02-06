@@ -1,0 +1,83 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: batch-ingester
+
+  ai:
+    openai:
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      api-key: ${MODEL_RUNNER_API_KEY:not-needed}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+
+# Alfresco SDK configuration
+content:
+  service:
+    url: ${ALFRESCO_URL:http://localhost:80}
+    security:
+      basicAuth:
+        username: ${ALFRESCO_USERNAME:admin}
+        password: ${ALFRESCO_PASSWORD:admin}
+
+# hxpr Content Lake connection
+hxpr:
+  url: ${HXPR_URL:http://localhost:8080}
+  repository-id: ${HXPR_REPOSITORY_ID:default}
+  target-path: ${HXPR_TARGET_PATH:/alfresco-sync}
+  idp:
+    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
+    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
+    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
+    username: ${HXPR_IDP_USERNAME:testuser}
+    password: ${HXPR_IDP_PASSWORD:password}
+  model:
+    bootstrap:
+      enabled: true
+    fragments: classpath:model-fragments.json
+
+# Alfresco Transform Core AIO (Local Transform) for text extraction
+transform:
+  url: ${TRANSFORM_URL:http://localhost:10090}
+  timeout-ms: ${TRANSFORM_TIMEOUT_MS:120000}
+  enabled: ${TRANSFORM_ENABLED:true}
+
+# Ingestion configuration
+ingestion:
+  sources:
+    - folder: ${INGESTION_FOLDER_1:}
+      recursive: true
+      types:
+        - cm:content
+      mime-types: []  # Empty means all mime types (transformation will handle non-text)
+  exclude:
+    paths:
+      - "*/surf-config/*"
+      - "*/thumbnails/*"
+    aspects:
+      - cm:workingcopy
+  transform:
+    worker-threads: ${TRANSFORM_WORKERS:4}
+    queue-capacity: ${TRANSFORM_QUEUE_CAPACITY:1000}
+  batch:
+    executor:
+      core-size: ${BATCH_INGESTION_CORE_SIZE:1}
+      max-size: ${BATCH_INGESTION_MAX_SIZE:1}
+      queue-capacity: ${BATCH_INGESTION_QUEUE_CAPACITY:1000}
+      await-termination-seconds: ${BATCH_INGESTION_AWAIT_TERMINATION_SECONDS:30}
+  embedding:
+    chunk-size: ${EMBEDDING_CHUNK_SIZE:900}
+    chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:120}
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    org.alfresco.contentlake: ${LOG_LEVEL:INFO}

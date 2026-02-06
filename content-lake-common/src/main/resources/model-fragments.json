@@ -1,0 +1,155 @@
+{
+  "mixinTypes": {
+    "CinContext": {
+      "schemas": [
+        "cincontext"
+      ]
+    },
+    "CinRemote": {
+      "schemas": [
+        "cinremote"
+      ]
+    }
+  },
+  "schemas": {
+    "cincontext": {
+      "fields": {
+        "cinctx_contextProperties": {
+          "type": "any"
+        },
+        "cinctx_contextPropertyNames": {
+          "type": "cincontext#stringList"
+        }
+      },
+      "prefix": "cinctx"
+    },
+    "cinremote": {
+      "fields": {
+        "cin_allAncestors": {
+          "type": "cinremote#stringList"
+        },
+        "cin_aspects": {
+          "type": "cinremote#stringList"
+        },
+        "cin_blobs": {
+          "type": "cinremote#cinBlobList"
+        },
+        "cin_createdBy": {
+          "type": "string"
+        },
+        "cin_dateCreated": {
+          "type": "date"
+        },
+        "cin_dateModified": {
+          "type": "date"
+        },
+        "cin_deny": {
+          "type": "cinremote#stringList"
+        },
+        "cin_digests": {
+          "type": "cinremote#contentDigestList"
+        },
+        "cin_directAncestors": {
+          "type": "cinremote#stringList"
+        },
+        "cin_id": {
+          "type": "string"
+        },
+        "cin_ingest": {
+          "type": "any"
+        },
+        "cin_ingestEventVersion": {
+          "type": "long"
+        },
+        "cin_ingestProperties": {
+          "type": "any"
+        },
+        "cin_ingestPropertyNames": {
+          "type": "cinremote#stringList"
+        },
+        "cin_ingestRaw": {
+          "type": "blob"
+        },
+        "cin_isOrgUnit": {
+          "type": "boolean"
+        },
+        "cin_modifiedBy": {
+          "type": "cinremote#stringList"
+        },
+        "cin_orgUnit": {
+          "type": "string"
+        },
+        "cin_paths": {
+          "type": "cinremote#stringList"
+        },
+        "cin_read": {
+          "type": "cinremote#stringList"
+        },
+        "cin_sourceId": {
+          "type": "string"
+        },
+        "cin_type": {
+          "type": "string"
+        }
+      },
+      "prefix": "cin"
+    }
+  },
+  "types": {
+    "cincontext#stringList": {
+      "list": {
+        "type": "string"
+      }
+    },
+    "cinremote#cinBlob": {
+      "fields": {
+        "blob": {
+          "type": "blob"
+        },
+        "label": {
+          "type": "string"
+        },
+        "originalDigest": {
+          "type": "string"
+        },
+        "originalFilename": {
+          "type": "string"
+        },
+        "originalLength": {
+          "type": "long"
+        },
+        "originalMimeType": {
+          "type": "string"
+        },
+        "uploadedMimeType": {
+          "type": "string"
+        }
+      }
+    },
+    "cinremote#cinBlobList": {
+      "list": {
+        "type": "cinremote#cinBlob"
+      }
+    },
+    "cinremote#contentDigest": {
+      "fields": {
+        "contentName": {
+          "type": "string"
+        },
+        "digestValue": {
+          "type": "string"
+        }
+      }
+    },
+    "cinremote#contentDigestList": {
+      "list": {
+        "type": "cinremote#contentDigest"
+      }
+    },
+    "cinremote#stringList": {
+      "list": {
+        "type": "string"
+      }
+    }
+  }
+}
