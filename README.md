@@ -212,7 +212,7 @@ ingestion:
 
 ## Roadmap
 
-### 🎯 Next (Q2 2026 - Open Source Release)
+### Next (Q2 2026 - Open Source Release)
 
 - [ ] RAG service with hybrid search
 - [ ] Event-driven sync (near real-time)
@@ -221,7 +221,7 @@ ingestion:
 - [ ] Comprehensive testing suite
 - [ ] Production deployment guide
 
-### 🔮 Future
+### Future
 
 - [ ] Multiple embedding models per document
 - [ ] Document versioning support
