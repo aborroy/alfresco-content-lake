@@ -1,105 +1,97 @@
-# Alfresco Content Lake PoC
+# Alfresco Content Lake
 
-Proof of Concept implementation for AI-powered semantic search and RAG (Retrieval-Augmented Generation) for Alfresco Content Services using **hxpr** as a Content Lake. This project enables high-quality AI search while keeping Alfresco as the source of truth, minimizing data duplication, enforcing end-user permissions server-side, and supporting on-premises AI execution.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Maven](https://img.shields.io/badge/Maven-3.9+-red.svg)](https://maven.apache.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://docs.docker.com/compose/)
+[![Status](https://img.shields.io/badge/Status-PoC-yellow.svg)]()
 
-## Architecture Overview
+**AI-powered semantic search and RAG for Alfresco using hxpr Content Lake**
 
-The solution implements a two-phase pipeline for content synchronization:
+[Features](#features) • [Quick Start](#quick-start) • [Architecture](#architecture) • [Authentication](#authentication)
+
+## Overview
+
+Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) on Alfresco Content Services. 
+
+Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
+
+* Keeping Alfresco as the source of truth
+* Enforcing server-side permissions via ACLs
+* Supporting on-premises AI execution
+* Minimizing data duplication
+
+## Features
+
+- Two-Phase Sync Pipeline: Fast metadata ingestion + async content processing
+- Semantic Search: Vector embeddings with hybrid search capabilities
+- Permission-Aware: Server-side ACL enforcement via hxpr
+- Local AI: On-premises LLM and embedding models using Spring AI
+- REST API: Generic connector using Alfresco REST APIs
+- Secured Endpoints: Alfresco authentication (username/password or tickets)
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 1: Fast Metadata Ingestion                           │
-│  Alfresco → Discovery → Metadata → hxpr Document (PENDING)  │
-└─────────────────────────────────────────────────────────────┘
-                           ↓
-                 Transformation Queue
-                           ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 2: Async Content Processing                          │
-│  Transform → Chunk → Embed → Update Document (INDEXED)      │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Phase 1: Fast Metadata Ingestion                        │
+│  Alfresco → Discovery → Metadata → hxpr (PENDING)        │
+└──────────────────────────────────────────────────────────┘
+                         ↓
+              Transformation Queue
+                         ↓
+┌──────────────────────────────────────────────────────────┐
+│  Phase 2: Async Content Processing                       │
+│  Transform → Chunk → Embed → Update (INDEXED)            │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Principles
+## Quick Start
 
-- Alfresco as Source of Truth: No full metadata or binary replication
-- Minimal Content Lake: Store only what search needs (one hxpr Document per Alfresco node, many Embeddings per Document)
-- Server-Side Permissions: End-user permissions enforced by hxpr via ACLs
-- On-Premises AI: Local LLM and embedding models using Spring AI
-- REST-Based Sync: Generic connector using Alfresco REST APIs (no database access)
+### Prerequisites
 
-## Project Modules
-
-| Module | Description |
-|--------|-------------|
-| `content-lake-common` | Shared clients, models, and services for Alfresco, hxpr, and AI |
-| `batch-ingester` | Selective batch synchronization service with async transformation pipeline |
-
-## Prerequisites
-
-### Required Services
-
-1. Alfresco Content Services 25.x+
-   - REST API accessible
-   - Admin credentials
-
-2. Alfresco Transform Service
-   - Transform Core AIO or equivalent
-   - For text extraction from documents
-   - Default: `http://localhost:10090`
-
-3. hxpr Content Lake
-   - Running instance with API access
-   - Identity Provider (IDP) for OAuth2
-   - Default: `http://localhost:8080`
-
-4. Docker Model Runner
-   - For local embedding generation
-   - Supports OpenAI-compatible API
-   - Required model: `ai/mxbai-embed-large` (or similar)
-
-### Development Environment
-
-- Java 21 (required)
-- Maven 3.9+
+- Java 21+ and Maven 3.9+
 - Docker and Docker Compose
+- Alfresco Content Services 25.x+
+  - Alfresco Transform Service (for text extraction)
+- hxpr Content Lake (with OAuth2 IDP)
+- Docker Model Runner (for embeddings and LLM)
 
-## Installation
-
-### 1. Clone the Repository
+### Installation
 
 ```bash
-git clone <repository-url>
+# Clone repository
+git clone https://github.com/aborroy/alfresco-content-lake.git
 cd alfresco-content-lake
-```
 
-### 2. Build the Project
-
-```bash
+# Build
 mvn clean package
+
+# Configure (see Environment Variables below)
+export ALFRESCO_URL=http://localhost:8080
+export ALFRESCO_INTERNAL_USERNAME=admin
+export ALFRESCO_INTERNAL_PASSWORD=admin
+# ... (see full configuration below)
+
+# Run
+java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
+
+# Or with Docker Compose
+docker-compose up
 ```
 
-This will:
-- Build the `content-lake-common` library
-- Build the `batch-ingester` service
-- Generate JAR files in `target/` directories
-
-### 3. Configure Environment
-
-Create a `.env` file or export environment variables:
+### Environment Variables
 
 ```bash
-# Alfresco Configuration
-export CONTENT_SERVICE_URL=http://localhost:8080
-export CONTENT_SERVICE_SECURITY_BASICAUTH_USERNAME=admin
-export CONTENT_SERVICE_SECURITY_BASICAUTH_PASSWORD=admin
+# Alfresco (Internal Service Account)
+export ALFRESCO_URL=http://localhost:8080
+export ALFRESCO_INTERNAL_USERNAME=admin
+export ALFRESCO_INTERNAL_PASSWORD=admin
 
 # hxpr Content Lake
 export HXPR_URL=http://localhost:8080
 export HXPR_REPOSITORY_ID=default
-export HXPR_TARGET_PATH=/alfresco-sync
-
-# hxpr Identity Provider
 export HXPR_IDP_TOKEN_URL=http://localhost:5002/idp/connect/token
 export HXPR_IDP_CLIENT_ID=nuxeo-client
 export HXPR_IDP_CLIENT_SECRET=secret
@@ -110,379 +102,182 @@ export HXPR_IDP_PASSWORD=password
 export TRANSFORM_URL=http://localhost:10090
 export TRANSFORM_ENABLED=true
 
-# Embedding Model (Docker Model Runner or Ollama)
+# AI/Embeddings
 export MODEL_RUNNER_URL=http://localhost:12434/engines/llama.cpp/v1
 export EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
 
-# Performance Tuning
+# Performance
 export TRANSFORM_WORKERS=4
-export TRANSFORM_QUEUE_CAPACITY=1000
 export EMBEDDING_CHUNK_SIZE=900
 export EMBEDDING_CHUNK_OVERLAP=120
 ```
 
-### 4. Configure Ingestion Sources
+## Authentication
+
+All REST API endpoints (`/api/**`) require authentication validated against Alfresco.
+
+### Supported Methods
+
+| Method | Example |
+|--------|---------|
+| **Basic Auth** | `curl -u admin:password http://localhost:9090/api/sync/status` |
+| **Ticket (query)** | `curl "http://localhost:9090/api/sync/status?alf_ticket=TICKET_xxx"` |
+| **Ticket (header)** | `curl -H "Authorization: Basic BASE64(TICKET_xxx)" ...` |
+
+**Note:** Bearer token authentication (OAuth2/OIDC with Keycloak) is not yet supported.
+
+### Quick Example
+
+```bash
+# Authenticate and start sync
+curl -X POST http://localhost:9090/api/sync/configured \
+  -u admin:admin
+
+# Or use Alfresco ticket
+TICKET=$(curl -X POST http://localhost:8080/alfresco/api/-default-/public/authentication/versions/1/tickets \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"admin","password":"admin"}' | jq -r '.entry.id')
+
+curl -X POST "http://localhost:9090/api/sync/configured?alf_ticket=$TICKET"
+```
+
+## API Usage
+
+### Start Synchronization
+
+```bash
+# Sync configured folders
+curl -X POST http://localhost:9090/api/sync/configured -u admin:admin
+
+# Sync specific folder
+curl -X POST http://localhost:9090/api/sync/batch \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"folders": ["node-id"], "recursive": true, "types": ["cm:content"]}'
+```
+
+### Monitor Progress
+
+```bash
+# Overall status
+curl http://localhost:9090/api/sync/status -u admin:admin
+
+# Job-specific status
+curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
+```
+
+### Health Check
+
+```bash
+# No authentication required
+curl http://localhost:9090/actuator/health
+```
+
+## Data Model
+
+Each Alfresco node → One hxpr Document with embeddings:
+
+```json
+{
+  "sys_name": "quarterly-report.pdf",
+  "cin_id": "alfresco-node-id",
+  "cin_sourceId": "alfresco",
+  "alfresco_readAuthorities": ["GROUP_EVERYONE"],
+  "sysFulltextBinary": "extracted text...",
+  "sysembed_embeddings": [
+    {
+      "type": "text-embedding-nomic-embed-text-v1.5",
+      "vector": [0.1, -0.2, 0.3, ...],
+      "text": "Q1 revenue increased..."
+    }
+  ]
+}
+```
+
+## Configuration
 
 Edit `batch-ingester/src/main/resources/application.yml`:
 
 ```yaml
 ingestion:
   sources:
-    - folder: abc-123-def-456  # Alfresco folder nodeId
+    - folder: your-folder-node-id
       recursive: true
-      types:
-        - cm:content
-      mime-types:
-        - application/pdf
-        - text/plain
-        - application/msword
+      types: [cm:content]
+      mime-types: []  # Empty = all types
   exclude:
-    paths:
-      - "*/surf-config/*"
-      - "*/thumbnails/*"
-    aspects:
-      - cm:workingcopy
+    paths: ["*/surf-config/*", "*/thumbnails/*"]
+    aspects: [cm:workingcopy]
 ```
 
-## Running the Application
+## Roadmap
 
-### Option 1: Run with Java
+### 🎯 Next (Q2 2026 - Open Source Release)
+
+- [ ] RAG service with hybrid search
+- [ ] Event-driven sync (near real-time)
+- [ ] User context propagation (operations as authenticated user)
+- [ ] OAuth2/Keycloak integration
+- [ ] Comprehensive testing suite
+- [ ] Production deployment guide
+
+### 🔮 Future
+
+- [ ] Multiple embedding models per document
+- [ ] Document versioning support
+- [ ] DocFilters integration (better text extraction)
+- [ ] Multilingual embeddings
+- [ ] Performance optimizations for 10K+ documents
+
+#### Core Functionality
+1. RAG Service: SearchService, PromptService, hybrid search, LLM integration
+2. Event-Driven Sync: Real-time updates, permission changes, incremental sync
+3. Permission Handling: Token forwarding, server-side filtering, group membership
+4. Custom Properties: Support for custom content model properties in search
+
+#### Enhanced Functionality
+5. DocFilters Integration: Markdown extraction, improved chunking
+6. Testing: Unit, integration, performance tests
+7. Documentation: Architecture diagrams, tuning guides, multi-repo setup
+8. Developer Experience: Docker Compose setup, sample data, health checks
+
+## Development
+
+### Build
 
 ```bash
+mvn clean package
+```
+
+### Run Tests
+
+```bash
+mvn test
+```
+
+### Run Locally
+
+```bash
+# With Maven
+mvn spring-boot:run -pl batch-ingester
+
+# With JAR
 java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
 ```
 
-### Option 2: Run with Docker Compose
-
-```bash
-docker-compose up -d
-```
-
-The service will be available at `http://localhost:9090`
-
-### Verify Startup
-
-Check service health:
-
-```bash
-curl http://localhost:9090/actuator/health
-```
-
-Expected response:
-```json
-{"status":"UP"}
-```
-
-## Usage
-
-### 1. Start Batch Synchronization
-
-#### Sync Configured Folders
-
-Synchronize folders defined in `application.yml`:
-
-```bash
-curl -X POST http://localhost:9090/api/sync/configured
-```
-
-#### Sync Specific Folders (Ad-hoc)
-
-```bash
-curl -X POST http://localhost:9090/api/sync/batch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "folders": ["abc-123-def"],
-    "recursive": true,
-    "types": ["cm:content"],
-    "mimeTypes": ["application/pdf", "text/plain"]
-  }'
-```
-
-### 2. Monitor Sync Status
-
-#### Check Overall Status
-
-```bash
-curl http://localhost:9090/api/sync/status
-```
-
-Response:
-```json
-{
-  "activeJobs": 1,
-  "queueSize": 45,
-  "completedCount": 150,
-  "failedCount": 2
-}
-```
-
-#### Check Specific Job Status
-
-```bash
-curl http://localhost:9090/api/sync/status/{jobId}
-```
-
-### 3. Clear Transformation Queue
-
-```bash
-curl -X DELETE http://localhost:9090/api/sync/queue
-```
-
-## Sync Status Values
-
-| Status | Description |
-|--------|-------------|
-| `PENDING` | Metadata ingested, waiting for transformation |
-| `PROCESSING` | Text extraction and embedding generation in progress |
-| `INDEXED` | Fully indexed with embeddings, ready for search |
-| `FAILED` | Transformation failed (check `sync_error` field) |
-
-## Data Model in hxpr
-
-### Document Structure
-
-Each Alfresco node creates one hxpr Document with these properties:
-
-| Property | Source | Purpose |
-|----------|--------|---------|
-| `sys_name` | Alfresco node name | Display name |
-| `sys_path` | Alfresco path | Navigation |
-| `cin_id` | Alfresco nodeId | Link back to Alfresco |
-| `cin_sourceId` | `"alfresco"` | Source system identifier |
-| `alfresco_repositoryId` | Repository ID | Multi-tenancy |
-| `alfresco_modifiedAt` | Last modified date | Change detection |
-| `alfresco_readAuthorities` | Read permissions | ACL filtering |
-| `alfresco_mimeType` | MIME type | Content type filtering |
-| `alfresco_path` | Full path | Hierarchical search |
-| `sysFulltextBinary` | Extracted text | Keyword search |
-
-### Embedding Structure
-
-Embeddings are stored inline using the `SysEmbed` mixin:
-
-```json
-{
-  "sys_primaryType": "SysFile",
-  "sys_name": "quarterly-report.pdf",
-  "sys_mixinTypes": ["CinRemote", "SysEmbed"],
-  "cin_id": "abc-123-def",
-  "cin_sourceId": "alfresco",
-  "sysembed_embeddings": [
-    {
-      "type": "text-embedding-nomic-embed-text-v1.5",
-      "text": "Q1 revenue increased by 15% compared to last year...",
-      "vector": [0.1, -0.2, 0.3, ...],
-      "location": {
-        "text": {
-          "chunkIndex": 0,
-          "page": 1
-        }
-      }
-    }
-  ]
-}
-```
-
-## Verifying Semantic Search
-
-### Prerequisites
-
-1. Complete at least one batch sync
-2. Wait for all documents to reach `INDEXED` status
-3. Obtain an access token from the IDP
-
-```bash
-TOKEN=$(curl -s -X POST http://localhost:5002/idp/connect/token \
-  -d "grant_type=password" \
-  -d "client_id=YOUR_CLIENT_ID" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "username=admin" \
-  -d "password=admin" \
-  -d "scope=openid profile email" | jq -r '.access_token')
-```
-
-### Step 1: Verify Documents Have Embeddings
-
-```bash
-curl -X POST http://localhost:8080/api/query \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "HXCS-REPOSITORY: default" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "SELECT sys_id, sys_name, sysembed_embeddings FROM SysFile WHERE cin_sourceId = '\''alfresco'\''",
-    "limit": 5
-  }'
-```
-
-### Step 2: Generate Query Vector
-
-```bash
-QUERY_VECTOR=$(curl -s http://localhost:12434/engines/llama.cpp/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "text-embedding-nomic-embed-text-v1.5",
-    "input": "quarterly sales revenue"
-  }' | jq -c '.data[0].embedding')
-```
-
-### Step 3: Execute Semantic Search (kNN)
-
-```bash
-curl -X POST http://localhost:8080/api/query/embeddings \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "HXCS-REPOSITORY: default" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vector": '"$QUERY_VECTOR"',
-    "embeddingType": "text-embedding-nomic-embed-text-v1.5",
-    "query": "SELECT * FROM SysFile",
-    "repositoryId": "default",
-    "limit": 10,
-    "trackTotalCount": true
-  }'
-```
-
-### Step 4: Filter by Metadata
-
-Search only PDF documents:
-
-```bash
-curl -X POST http://localhost:8080/api/query/embeddings \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "HXCS-REPOSITORY: default" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vector": '"$QUERY_VECTOR"',
-    "embeddingType": "*",
-    "query": "SELECT * FROM SysFile WHERE cin_ingestProperties.cm:content.mimeType = '\''application/pdf'\''",
-    "limit": 5
-  }'
-```
-
-## Configuration Reference
-
-### Transform Service Configuration
-
-```yaml
-transform:
-  url: http://localhost:10090
-  timeout-ms: 120000
-  enabled: true
-```
-
-### Embedding Configuration
-
-```yaml
-ingestion:
-  embedding:
-    chunk-size: 900        # Token size per chunk
-    chunk-overlap: 120     # Overlap between chunks
-```
-
-### Worker Thread Configuration
-
-```yaml
-ingestion:
-  transform:
-    worker-threads: 4           # Parallel transformation workers
-    queue-capacity: 1000        # Max queued transformations
-  batch:
-    executor:
-      core-size: 1
-      max-size: 1
-      queue-capacity: 1000
-```
-
-## TODO List
-
-### Core Functionality
-
-#### 1. RAG Service Implementation
-- [ ] Create `rag-api` module
-- [ ] Implement `SearchService` for keyword, kNN, and hybrid search
-- [ ] Implement `PromptService` using Spring AI for chat models
-- [ ] Add hybrid search implementation (combining vector + text match)
-- [ ] Configure normalization weights for hybrid search (e.g., 0.7 vector, 0.3 text)
-- [ ] Implement RAG retrieval order: vector/hybrid → extract chunks → call LLM
-- [ ] Add chat model integration (local LLM via Ollama/vLLM/Docker Model Runner)
-
-#### 2. Event-Driven Synchronization
-- [ ] Implement repository event consumer for near real-time sync
-- [ ] Handle node creation events
-- [ ] Handle node update events
-- [ ] Handle node move events
-- [ ] Handle node delete events
-- [ ] Handle permission change events (critical for ACL consistency)
-- [ ] Implement incremental sync based on `alfresco_modifiedAt`
-
-#### 3. Permission Handling Improvements
-- [ ] Map Alfresco read authorities to hxpr `sys_acl` during sync
-- [ ] Implement token forwarding from end-users to hxpr
-- [ ] Test server-side permission filtering in queries
-- [ ] Handle group membership changes
-- [ ] Add permission validation in read/search endpoints
-
-#### 4. Additional Properties for Hybrid Search
-- [ ] Allow explicit selection of Alfresco properties for sync
-- [ ] Add support for custom content model properties
-- [ ] Add property-based retrieval discriminators
-- [ ] Document additional property configuration
-
-### Enhanced Functionality
-
-#### 5. Document Filters Integration
-- [ ] Add DocFilters client for Markdown extraction
-- [ ] Implement Markdown chunking strategy
-- [ ] Compare quality of plain text vs. Markdown for embeddings
-- [ ] Document DocFilters deployment and configuration
-- [ ] Add configuration flag to switch between Transform Service and DocFilters
-
-#### 6. Testing & Validation
-- [ ] Add unit tests for core services (AlfrescoClient, HxprService, EmbeddingService)
-- [ ] Add integration tests for sync pipeline
-- [ ] Add semantic search validation tests
-- [ ] Test permission filtering with different user roles
-- [ ] Performance testing with large repositories (10K+ documents)
-- [ ] Test failure scenarios (Transform Service down, hxpr unavailable)
-
-#### 7. Documentation Improvements
-- [ ] Add architecture diagrams
-- [ ] Document Spring AI model configuration
-- [ ] Add examples for different embedding models
-- [ ] Document hybrid search tuning guidelines
-- [ ] Add performance tuning guide
-- [ ] Document multi-repository setup
-
-#### 8. Developer Experience
-- [ ] Add Docker Compose setup with all dependencies
-- [ ] Create sample data for testing
-- [ ] Add `httpie` collection for API testing
-- [ ] Implement health checks for all dependencies
-- [ ] Add startup validation (check connectivity to Alfresco, hxpr, etc.)
-- [ ] Create developer quickstart guide
-
-#### 9. Advanced Features (Future)
-- [ ] Support for multiple embedding models per document
-- [ ] Implement document versioning support
-- [ ] Add support for Alfresco aspects in filtering
-- [ ] Implement smart retry logic for failed transformations
-- [ ] Add support for binary content types (images, videos)
-- [ ] Implement change detection optimization (avoid re-processing unchanged documents)
-- [ ] Add multilingual support for embeddings
-- [ ] Implement A/B testing framework for embedding models
-
-#### 10. Security Enhancements
-- [ ] Implement OAuth2 token refresh
-- [ ] Add support for mTLS for hxpr communication
-- [ ] Add request authentication/authorization
-- [ ] Secure sensitive configuration (secrets management)
-- [ ] Add audit logging for sync operations
-
 ## Contributing
 
-Contributions are welcome! Please:
+Contributions welcome! Please:
 
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request with a clear description
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Acknowledgments
+
+- Built with [Spring AI](https://spring.io/projects/spring-ai)
+- Uses [Alfresco Java SDK](https://github.com/Alfresco/alfresco-java-sdk)
+- Powered by [hxpr Content Lake](https://www.hyland.com/)
+- Created for the Alfresco/Hyland community

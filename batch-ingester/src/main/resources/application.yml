@@ -14,13 +14,17 @@ spring:
           model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
 
 # Alfresco SDK configuration
+# Service account for internal batch operations (discovery, sync, etc.)
+# API endpoints require per-request authentication with user credentials
 content:
   service:
     url: ${ALFRESCO_URL:http://localhost:80}
     security:
       basicAuth:
-        username: ${ALFRESCO_USERNAME:admin}
-        password: ${ALFRESCO_PASSWORD:admin}
+        # Internal service account - used by AlfrescoClient for batch operations
+        # NOT used for API endpoint authentication
+        username: ${ALFRESCO_INTERNAL_USERNAME:admin}
+        password: ${ALFRESCO_INTERNAL_PASSWORD:admin}
 
 # hxpr Content Lake connection
 hxpr:
