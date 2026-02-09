@@ -8,8 +8,9 @@ import org.alfresco.contentlake.client.HxprTokenProvider;
 import org.alfresco.contentlake.client.TransformClient;
 import org.alfresco.contentlake.service.Chunker;
 import org.alfresco.contentlake.service.EmbeddingService;
+import org.alfresco.contentlake.service.chunking.*;
+import org.alfresco.contentlake.service.chunking.strategy.ChunkingStrategy.ChunkingConfig;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -125,6 +126,34 @@ public class AppConfig {
     @Bean
     public EmbeddingService embeddingService(EmbeddingModel embeddingModel, IngestionProperties props) {
         return new EmbeddingService(embeddingModel, props.getEmbedding().getModelName());
+    }
+
+    // ----------------------------------------------------------------------
+    // Chunking pipeline
+    // ----------------------------------------------------------------------
+
+    @Bean
+    public NoiseReductionService noiseReductionService(IngestionProperties props) {
+        return new NoiseReductionService(
+                props.getEmbedding().getNoiseReduction().isAggressive()
+        );
+    }
+
+    @Bean
+    public ChunkingConfig chunkingConfig() {
+        return new ChunkingConfig(
+                200,   // minChunkSize: Small enough for short paragraphs
+                1000,  // maxChunkSize: Safe for 512-token embedding models
+                120,   // overlapSize: Context preservation across boundaries
+                0.75   // similarityThreshold: Unused in adaptive strategy
+        );
+    }
+
+    @Bean
+    public SimpleChunkingService chunkingService(
+            NoiseReductionService noiseReduction,
+            ChunkingConfig config) {
+        return new SimpleChunkingService(noiseReduction, config);
     }
 
     // ----------------------------------------------------------------------

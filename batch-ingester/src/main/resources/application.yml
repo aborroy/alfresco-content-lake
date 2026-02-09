@@ -45,7 +45,7 @@ hxpr:
 # Alfresco Transform Core AIO (Local Transform) for text extraction
 transform:
   url: ${TRANSFORM_URL:http://localhost:10090}
-  timeout-ms: ${TRANSFORM_TIMEOUT_MS:120000}
+  timeout-ms: ${TRANSFORM_TIMEOUT_MS:300000}
   enabled: ${TRANSFORM_ENABLED:true}
 
 # Ingestion configuration
@@ -74,6 +74,9 @@ ingestion:
   embedding:
     chunk-size: ${EMBEDDING_CHUNK_SIZE:900}
     chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:120}
+    noise-reduction:
+      enabled: ${NOISE_REDUCTION_ENABLED:true}
+      aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}
 
 # Actuator
 management:

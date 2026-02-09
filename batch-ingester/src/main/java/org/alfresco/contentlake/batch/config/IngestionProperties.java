@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * Configuration for ingestion discovery, filtering, transformation and embedding.
  *
- * <p>Bound from {@code ingestion.*} in {@code application.yml}.
+ * <p>Bound from {@code ingestion.*} in {@code application.yml}.</p>
  */
 @Data
 @ConfigurationProperties(prefix = "ingestion")
@@ -45,5 +45,12 @@ public class IngestionProperties {
         private int chunkSize = 900;
         private int chunkOverlap = 120;
         private String modelName = "default";
+        private NoiseReduction noiseReduction = new NoiseReduction();
+    }
+
+    @Data
+    public static class NoiseReduction {
+        private boolean enabled = true;
+        private boolean aggressive = false;
     }
 }

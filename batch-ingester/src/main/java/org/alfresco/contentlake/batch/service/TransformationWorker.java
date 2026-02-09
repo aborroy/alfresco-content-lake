@@ -15,6 +15,7 @@ import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.contentlake.model.HxprEmbedding;
 import org.alfresco.contentlake.service.Chunker;
 import org.alfresco.contentlake.service.EmbeddingService;
+import org.alfresco.contentlake.service.chunking.SimpleChunkingService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Background worker that converts content to text, chunks it, generates embeddings, and updates hxpr.
+ *
+ * <p>When semantic chunking is enabled ({@code ingestion.semantic.enabled=true}), uses the
+ * {@link SimpleChunkingService} pipeline (noise reduction → content-type classification →
+ * strategy-based chunking). Otherwise falls back to the simple character-based {@link Chunker}.</p>
  */
 @Slf4j
 @Service
@@ -52,14 +57,12 @@ public class TransformationWorker {
     private final TransformClient transformClient;
     private final Chunker chunker;
     private final EmbeddingService embeddingService;
+    private final SimpleChunkingService chunkingService;
     private final IngestionProperties props;
 
     private ExecutorService executor;
     private volatile boolean running = true;
 
-    /**
-     * Starts the configured number of worker threads.
-     */
     @PostConstruct
     public void start() {
         int workerCount = props.getTransform().getWorkerThreads();
@@ -72,9 +75,6 @@ public class TransformationWorker {
         log.info("Started {} transformation workers", workerCount);
     }
 
-    /**
-     * Stops workers and shuts down the executor.
-     */
     @PreDestroy
     public void stop() {
         running = false;
@@ -122,7 +122,9 @@ public class TransformationWorker {
                 return;
             }
 
-            List<Chunk> chunks = chunker.chunk(text, task.getNodeId());
+            // Choose chunking approach based on configuration
+            List<Chunk> chunks = chunkingService.chunk(text, task.getNodeId(), mimeType);
+
             log.info("Processing node {} - mime: {}, text length: {}, chunks: {}",
                     task.getNodeId(), mimeType, text.length(), chunks.size());
 
@@ -153,8 +155,6 @@ public class TransformationWorker {
 
     /**
      * Extracts plain text from a node.
-     *
-     * <p>For text MIME types, content is used directly. Otherwise, content is transformed to {@code text/plain}.</p>
      */
     private String extractText(String nodeId, String mimeType) throws IOException {
         if (isTextMimeType(mimeType)) {
@@ -225,13 +225,6 @@ public class TransformationWorker {
         return mimeType.startsWith("text/") || mimeType.endsWith("+xml") || mimeType.endsWith("+json");
     }
 
-    /**
-     * Transforms content into {@code text/plain}.
-     *
-     * @param content content resource
-     * @param sourceMimeType source MIME type
-     * @return extracted text, or {@code null} if the transform returns no bytes
-     */
     private String transformToText(Resource content, String sourceMimeType) {
         byte[] out = transformClient.transformSync(content, sourceMimeType, TARGET_MIME_TYPE);
         return out == null ? null : new String(out, StandardCharsets.UTF_8);

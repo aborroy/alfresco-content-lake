@@ -13,12 +13,30 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Embedding service with intelligent fallback handling for oversized inputs.
+ *
+ * <p>IMPORTANT: This service expects properly chunked input from the chunking layer.
+ * If chunks are still too large for the embedding model, it will:
+ * <ol>
+ *   <li>Split the text at semantic boundaries</li>
+ *   <li>Embed each half separately</li>
+ *   <li>Average the vectors to create a single embedding</li>
+ * </ol>
+ *
+ * <p>To avoid this fallback entirely, ensure your chunking strategy uses
+ * appropriate maxChunkSize values (typically 800-1200 chars for most models).
+ */
 @Slf4j
 public class EmbeddingService {
 
     private static final Pattern TOO_LARGE = Pattern.compile("input \\((\\d+) tokens\\) is too large");
-    private static final int HARD_CHAR_CAP = 600;   // aggressive first cut; avoids most 512-token limits
-    private static final int MIN_CHARS = 200;       // do not split below this; if still failing, trim
+
+    // Safety cap for pathological inputs (e.g., malformed text, binary garbage)
+    // This should rarely trigger if chunking is working correctly
+    private static final int SAFETY_CAP = 3000;
+
+    private static final int MIN_CHARS = 200;
 
     private final EmbeddingModel embeddingModel;
 
@@ -51,34 +69,36 @@ public class EmbeddingService {
             return List.of();
         }
 
-        // Pre-cap by chars to reduce failures up front
-        if (text.length() > HARD_CHAR_CAP) {
-            log.warn("Embedding input exceeds HARD_CHAR_CAP ({} > {}). Truncating before embedding.",
-                    text.length(), HARD_CHAR_CAP);
-            text = text.substring(0, HARD_CHAR_CAP);
+        // Safety cap for pathological inputs
+        if (text.length() > SAFETY_CAP) {
+            log.warn("Embedding input exceeds SAFETY_CAP ({} > {}). " +
+                            "This indicates a chunking issue. Truncating and logging for investigation.",
+                    text.length(), SAFETY_CAP);
+            text = text.substring(0, SAFETY_CAP);
         }
 
         try {
             EmbeddingResponse response = embeddingModel.call(new EmbeddingRequest(List.of(text), null));
             float[] embedding = response.getResults().get(0).getOutput();
             return toDoubleList(embedding);
+
         } catch (TransientAiException ex) {
             if (!looksLikeTooLarge(ex)) {
                 throw ex;
             }
 
-            // If already small, trim harder (some tokenizers explode on certain substrings)
+            // If already small, try aggressive trimming
             if (text.length() <= MIN_CHARS) {
                 String trimmed = trimWorstParts(text);
                 if (trimmed.length() == text.length()) {
-                    // last resort: cut to half (but log it)
+                    // Last resort: cut to half
                     int newLen = Math.max(1, text.length() / 2);
-                    log.warn("Embedding request still too large at {} chars; last resort truncation to {} chars.",
-                            text.length(), newLen);
+                    log.warn("Embedding request still too large at {} chars; " +
+                            "last resort truncation to {} chars.", text.length(), newLen);
                     trimmed = text.substring(0, newLen);
                 } else {
-                    log.warn("Embedding request too large at {} chars; trimmed to {} chars using trimWorstParts().",
-                            text.length(), trimmed.length());
+                    log.warn("Embedding request too large at {} chars; " +
+                            "trimmed to {} chars using trimWorstParts().", text.length(), trimmed.length());
                 }
 
                 EmbeddingResponse response = embeddingModel.call(new EmbeddingRequest(List.of(trimmed), null));
@@ -86,12 +106,14 @@ public class EmbeddingService {
                 return toDoubleList(embedding);
             }
 
-            // Split and preserve both halves: embed each side, then average vectors into a single embedding.
+            // Split and average: preserve both halves by embedding each and averaging vectors
             int mid = findSplitPoint(text);
             String left = text.substring(0, mid);
             String right = text.substring(mid);
 
-            log.warn("Embedding request too large ({} chars). Splitting into two parts (left={}, right={}) and averaging.",
+            log.info("Embedding request too large ({} chars). " +
+                            "Splitting into two parts (left={}, right={}) and averaging vectors. " +
+                            "Consider reducing maxChunkSize in chunking config.",
                     text.length(), left.length(), right.length());
 
             List<Double> leftVec = embedWithFallback(left);
@@ -107,12 +129,13 @@ public class EmbeddingService {
 
             if (leftVec.size() != rightVec.size()) {
                 throw new IllegalStateException(
-                        "Embedding dimension mismatch after split: left=" + leftVec.size() + ", right=" + rightVec.size());
+                        "Embedding dimension mismatch after split: " +
+                                "left=" + leftVec.size() + ", right=" + rightVec.size());
             }
 
-            // average element-wise
+            // Average element-wise
             int dim = leftVec.size();
-            List<Double> avg = new java.util.ArrayList<>(dim);
+            List<Double> avg = new ArrayList<>(dim);
             for (int i = 0; i < dim; i++) {
                 avg.add((leftVec.get(i) + rightVec.get(i)) / 2.0d);
             }
@@ -130,7 +153,7 @@ public class EmbeddingService {
         int mid = text.length() / 2;
 
         // Prefer splitting on paragraph / sentence / whitespace near the midpoint
-        int best = -1;
+        int best;
 
         best = lastIndexBefore(text, '\n', mid, 120);
         if (best > 0) return best;
@@ -161,7 +184,7 @@ public class EmbeddingService {
     }
 
     private String trimWorstParts(String text) {
-        // Heuristic: drop very long “words” (often PDF garbage / encoded runs)
+        // Heuristic: drop very long "words" (often PDF garbage / encoded runs)
         String[] parts = text.split(" ");
         StringBuilder sb = new StringBuilder(text.length());
         for (String p : parts) {
