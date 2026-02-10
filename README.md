@@ -9,7 +9,7 @@
 
 **AI-powered semantic search and RAG for Alfresco using hxpr Content Lake**
 
-[Features](#features) • [Quick Start](#quick-start) • [Architecture](#architecture) • [Authentication](#authentication)
+[Features](#features) • [Quick Start](#quick-start) • [Architecture](#architecture) • [Authentication](#authentication) • [API Usage](#api-usage) • [Configuration](#configuration)
 
 ## Overview
 
@@ -171,27 +171,6 @@ curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
 ```bash
 # No authentication required
 curl http://localhost:9090/actuator/health
-```
-
-## Data Model
-
-Each Alfresco node → One hxpr Document with embeddings:
-
-```json
-{
-  "sys_name": "quarterly-report.pdf",
-  "cin_id": "alfresco-node-id",
-  "cin_sourceId": "alfresco",
-  "alfresco_readAuthorities": ["GROUP_EVERYONE"],
-  "sysFulltextBinary": "extracted text...",
-  "sysembed_embeddings": [
-    {
-      "type": "text-embedding-nomic-embed-text-v1.5",
-      "vector": [0.1, -0.2, 0.3, ...],
-      "text": "Q1 revenue increased..."
-    }
-  ]
-}
 ```
 
 ## Configuration
