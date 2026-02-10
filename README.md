@@ -156,6 +156,30 @@ curl -X POST http://localhost:9090/api/sync/batch \
   -d '{"folders": ["node-id"], "recursive": true, "types": ["cm:content"]}'
 ```
 
+### Semantic Search
+
+Semantic search applies a minimum similarity score to suppress low-quality vector matches when no strong semantic relation exists.
+
+* Default value: `0.5`
+* Applied server-side after vector retrieval
+* Can be overridden per request
+
+Configuration (`application.yaml`):
+
+```yaml
+semantic-search:
+  default-min-score: 0.5
+```
+
+Per-request override:
+
+```bash
+curl -X POST http://localhost:9090/api/search/semantic -u admin:admin \
+  -d '{ "query": "a girl falls in a crater", "topK": 5, "minScore": 0.6 }'
+```
+
+Only results with a similarity score greater than or equal to `minScore` are returned.
+
 ### Monitor Progress
 
 ```bash

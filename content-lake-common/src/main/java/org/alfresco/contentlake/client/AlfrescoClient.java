@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Alfresco REST client wrapper used by the ingestion pipeline.
@@ -38,6 +39,13 @@ public class AlfrescoClient {
     private static final Set<String> READ_ROLES = Set.of(
             "Consumer", "Contributor", "Collaborator", "Coordinator", "Manager"
     );
+
+    /**
+     * Tracks permission names that are ALLOWED but not recognized as read access.
+     *
+     * <p>Used only for debug logging to avoid noisy logs on large repositories.</p>
+     */
+    private static final Set<String> UNRECOGNIZED_ALLOWED_PERMISSION_NAMES = ConcurrentHashMap.newKeySet();
 
     private final NodesApi nodesApi;
     private final DiscoveryApi discoveryApi;
@@ -150,8 +158,9 @@ public class AlfrescoClient {
             return readers;
         }
 
-        addAllowedReaders(readers, node.getPermissions().getInherited(),
-                Boolean.TRUE.equals(node.getPermissions().isIsInheritanceEnabled()));
+        // Treat null as enabled; only explicit false disables inheritance.
+        Boolean inheritanceEnabled = node.getPermissions().isIsInheritanceEnabled();
+        addAllowedReaders(readers, node.getPermissions().getInherited(), !Boolean.FALSE.equals(inheritanceEnabled));
         addAllowedReaders(readers, node.getPermissions().getLocallySet(), true);
 
         return readers;
@@ -163,15 +172,45 @@ public class AlfrescoClient {
         }
 
         for (PermissionElement perm : permissions) {
-            if (PermissionElement.AccessStatusEnum.ALLOWED.equals(perm.getAccessStatus())
-                    && hasReadAccess(perm.getName())) {
+            if (!PermissionElement.AccessStatusEnum.ALLOWED.equals(perm.getAccessStatus())) {
+                continue;
+            }
+
+            String permissionName = perm.getName();
+            if (hasReadAccess(permissionName)) {
                 readers.add(perm.getAuthorityId());
+            } else {
+                // Useful when Alfresco returns site-scoped roles (SiteConsumer, SiteManager, etc.)
+                // or custom permission names. Log each unknown ALLOWED permission name only once.
+                if (permissionName != null
+                        && log.isDebugEnabled()
+                        && UNRECOGNIZED_ALLOWED_PERMISSION_NAMES.add(permissionName)) {
+                    log.debug("Ignoring ALLOWED permission name '{}' when computing read authorities", permissionName);
+                }
             }
         }
     }
 
     private boolean hasReadAccess(String role) {
-        return READ_ROLES.contains(role);
+        if (role == null) {
+            return false;
+        }
+
+        // Direct match (Consumer, Contributor, ...)
+        if (READ_ROLES.contains(role)) {
+            return true;
+        }
+
+        // Alfresco site roles (SiteConsumer, SiteManager, ...)
+        if (role.startsWith("Site") && role.length() > 4) {
+            String stripped = role.substring(4);
+            if (READ_ROLES.contains(stripped)) {
+                return true;
+            }
+        }
+
+        // Alfresco built-in read marker (seen in some permission payloads)
+        return "ReadPermissions".equals(role) || "Read".equals(role);
     }
 
     /**

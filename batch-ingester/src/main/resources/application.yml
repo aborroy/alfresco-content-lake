@@ -78,6 +78,10 @@ ingestion:
       enabled: ${NOISE_REDUCTION_ENABLED:true}
       aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}
 
+# Semantic Search configuration
+semantic-search:
+  default-min-score: 0.5
+
 # Actuator
 management:
   endpoints:
