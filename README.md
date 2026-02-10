@@ -156,6 +156,23 @@ curl -X POST http://localhost:9090/api/sync/batch \
   -d '{"folders": ["node-id"], "recursive": true, "types": ["cm:content"]}'
 ```
 
+### Monitor Progress
+
+```bash
+# Overall status
+curl http://localhost:9090/api/sync/status -u admin:admin
+
+# Job-specific status
+curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
+```
+
+### Health Check
+
+```bash
+# No authentication required
+curl http://localhost:9090/actuator/health
+```
+
 ### Semantic Search
 
 Semantic search applies a minimum similarity score to suppress low-quality vector matches when no strong semantic relation exists.
@@ -179,23 +196,6 @@ curl -X POST http://localhost:9090/api/search/semantic -u admin:admin \
 ```
 
 Only results with a similarity score greater than or equal to `minScore` are returned.
-
-### Monitor Progress
-
-```bash
-# Overall status
-curl http://localhost:9090/api/sync/status -u admin:admin
-
-# Job-specific status
-curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
-```
-
-### Health Check
-
-```bash
-# No authentication required
-curl http://localhost:9090/actuator/health
-```
 
 ## Configuration
 
