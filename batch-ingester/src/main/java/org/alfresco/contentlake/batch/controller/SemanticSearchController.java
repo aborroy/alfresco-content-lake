@@ -18,7 +18,7 @@ import java.util.Map;
  *
  * <p>All endpoints require Alfresco authentication (Basic Auth or ticket).
  * Results are filtered by the authenticated user's document permissions using
- * {@code cin_read} authority matching.</p>
+ * {@code sys_racl} authority matching.</p>
  *
  * <h3>Usage examples</h3>
  * <pre>

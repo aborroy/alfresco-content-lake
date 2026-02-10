@@ -8,6 +8,7 @@ import org.alfresco.contentlake.batch.model.SemanticSearchResponse.ChunkMetadata
 import org.alfresco.contentlake.batch.model.SemanticSearchResponse.SearchHit;
 import org.alfresco.contentlake.batch.model.SemanticSearchResponse.SourceDocument;
 import org.alfresco.contentlake.batch.security.SecurityContextService;
+import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprService;
 import org.alfresco.contentlake.hxpr.api.model.Embedding;
 import org.alfresco.contentlake.hxpr.api.model.VectorSearchResult;
@@ -29,15 +30,18 @@ import java.util.stream.Collectors;
  * <ol>
  *   <li>Embed the query text using the same model used at ingestion time</li>
  *   <li>Retrieve the authenticated user group memberships from Alfresco</li>
- *   <li>Build an HXQL permission filter matching the user authorities against {@code cin_read}</li>
+ *   <li>Build an HXQL permission filter matching the user authorities against {@code sys_racl}</li>
  *   <li>Execute kNN vector search via HXPR</li>
  *   <li>Enrich results with parent document metadata</li>
  * </ol>
  *
  * <h3>Permission model</h3>
- * <p>HXPR does not know Alfresco users or groups. Instead, ingestion stores the authorities that can read
- * the document into {@code cin_read} (multi-valued keyword). Search builds a filter such that a document
- * matches when {@code cin_read} contains any of the user authorities.</p>
+ * <p>HXPR does not know Alfresco users or groups. Ingestion writes structured ACE entries
+ * via {@code sys_acl} in the HXPR REST API. Internally HXPR flattens these into
+ * {@code sys_racl} — a flat keyword array in OpenSearch with entries like
+ * {@code __Everyone__}, {@code admin_#_<repoId>}, and
+ * {@code g:GROUP_xxx_#_<repoId>}. Search builds a filter against {@code sys_racl}
+ * matching any of the authenticated user's authorities.</p>
  */
 @Slf4j
 @Service
@@ -48,9 +52,19 @@ public class SemanticSearchService {
     private static final String BASE_QUERY = "SELECT * FROM SysContent";
 
     /**
-     * ACL field used at query time (multi-valued keyword).
+     * Read-ACL field in the OpenSearch index. HXPR accepts structured ACE objects
+     * via {@code sys_acl} in the REST API, but internally flattens them into
+     * {@code sys_racl} — a flat keyword array in OpenSearch with the format:
+     * <ul>
+     *   <li>{@code __Everyone__}</li>
+     *   <li>{@code username_#_<sourceSystemId>}</li>
+     *   <li>{@code g:GROUP_xxx_#_<sourceSystemId>}</li>
+     * </ul>
      */
-    private static final String READ_FIELD = "cin_read";
+    private static final String RACL_FIELD = "sys_racl";
+    private static final String EVERYONE_PRINCIPAL = "__Everyone__";
+    private static final String GROUP_PREFIX = "GROUP_";
+    private static final String GROUP_RACL_PREFIX = "g:";
 
     /**
      * Default minimum score if the request does not provide one.
@@ -60,6 +74,7 @@ public class SemanticSearchService {
     private final HxprService hxprService;
     private final EmbeddingService embeddingService;
     private final SecurityContextService securityContextService;
+    private final AlfrescoClient alfrescoClient;
 
     @Value("${content.service.url}")
     private String alfrescoUrl;
@@ -92,7 +107,7 @@ public class SemanticSearchService {
             return emptyResponse(request, 0, System.currentTimeMillis() - startTime);
         }
 
-        // 2) Build permission filter using cin_read
+        // 2) Build permission filter using sys_racl
         String hxqlFilter = buildPermissionFilter(username, request.getFilter());
 
         // 3) Vector search
@@ -157,7 +172,7 @@ public class SemanticSearchService {
     }
 
     // ---------------------------------------------------------------
-    // Permission filter (cin_read)
+    // Permission filter (sys_racl)
     // ---------------------------------------------------------------
 
     String buildPermissionFilter(String username, String additionalFilter) {
@@ -173,16 +188,34 @@ public class SemanticSearchService {
                 .distinct()
                 .toList();
 
+        String suffix = buildSourceSystemSuffix();
+
+        // Build sys_racl filter matching the flat keyword format produced by HXPR:
+        //   __Everyone__                                    (well-known principal)
+        //   username_#_<repositoryId>                       (users)
+        //   g:GROUP_xxx_#_<repositoryId>                    (groups)
+        List<String> raclClauses = new ArrayList<>();
+        raclClauses.add(RACL_FIELD + " = '" + escapeHxql(EVERYONE_PRINCIPAL) + "'");
+
         if (!authorities.isEmpty()) {
-            String authFilter = authorities.stream()
-                    .map(a -> READ_FIELD + " = '" + escapeHxql(a) + "'")
-                    .collect(Collectors.joining(" OR "));
-            conditions.add("(" + authFilter + ")");
-            log.debug("Permission filter with {} authorities for user: {}", authorities.size(), username);
+            for (String authority : authorities) {
+                if ("GROUP_EVERYONE".equals(authority)) {
+                    // GROUP_EVERYONE is already covered by __Everyone__ above
+                    continue;
+                } else if (authority.startsWith(GROUP_PREFIX)) {
+                    raclClauses.add(RACL_FIELD + " = '" + escapeHxql(GROUP_RACL_PREFIX + authority + suffix) + "'");
+                } else {
+                    raclClauses.add(RACL_FIELD + " = '" + escapeHxql(authority + suffix) + "'");
+                }
+            }
+            log.debug("Permission filter with {} authorities for user: {} (suffix='{}')",
+                    authorities.size(), username, suffix);
         } else {
-            conditions.add("(" + READ_FIELD + " = '" + escapeHxql(username) + "')");
+            raclClauses.add(RACL_FIELD + " = '" + escapeHxql(username + suffix) + "'");
             log.debug("No authorities resolved, falling back to username only for user: {}", username);
         }
+
+        conditions.add("(" + String.join(" OR ", raclClauses) + ")");
 
         if (additionalFilter != null && !additionalFilter.isBlank()) {
             conditions.add("(" + additionalFilter.trim() + ")");
@@ -377,6 +410,13 @@ public class SemanticSearchService {
 
     private static String escapeHxql(String value) {
         return value == null ? "" : value.replace("'", "''");
+    }
+
+    /**
+     * Returns the {@code _#_<repositoryId>} suffix for CIC external identity syntax.
+     */
+    private String buildSourceSystemSuffix() {
+        return "_#_" + alfrescoClient.getRepositoryId();
     }
 
 }

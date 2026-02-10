@@ -7,6 +7,9 @@ import org.alfresco.contentlake.batch.model.TransformationTask;
 import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprService;
+import org.alfresco.contentlake.hxpr.api.model.ACE;
+import org.alfresco.contentlake.hxpr.api.model.Group;
+import org.alfresco.contentlake.hxpr.api.model.User;
 import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.core.model.Node;
 import org.springframework.stereotype.Service;
@@ -27,6 +30,10 @@ public class MetadataIngester {
     private static final String P_ALF_NAME = "alfresco_name";
     private static final String P_ALF_MIME = "alfresco_mimeType";
     private static final String P_ALF_MODIFIED_AT = "alfresco_modifiedAt";
+
+    private static final String EVERYONE_PRINCIPAL = "__Everyone__";
+    private static final String GROUP_PREFIX = "GROUP_";
+    private static final String PERMISSION_READ = "Read";
 
     private final AlfrescoClient alfrescoClient;
     private final HxprDocumentApi documentApi;
@@ -73,10 +80,9 @@ public class MetadataIngester {
         doc.setCinSourceId(alfrescoClient.getRepositoryId());
         doc.setCinPaths(buildCinPaths(node));
 
-        // Use cin_read as the ACL field
+        // Use sys_acl for permission enforcement (CIC-compatible ACE format)
         List<String> readerList = buildReaderList(node);
-        doc.setCinRead(readerList);
-        doc.setCinDeny(List.of());
+        doc.setSysAcl(buildSysAcl(readerList));
 
         // Ingest properties
         Map<String, Object> props = buildIngestProperties(node, doc.getCinSourceId());
@@ -109,6 +115,61 @@ public class MetadataIngester {
         }
 
         return new ArrayList<>(readers);
+    }
+
+    /**
+     * Builds a {@code sys_acl} list from the Alfresco read authorities.
+     *
+     * <p>Converts each authority into an {@link ACE} entry following the format
+     * specified in the CIC Ingest contract:
+     * <ul>
+     *   <li>{@code GROUP_EVERYONE} → ACE with user id {@code __Everyone__}</li>
+     *   <li>Authorities prefixed with {@code GROUP_} → ACE with a {@link Group} principal
+     *       and id suffixed with {@code _#_<repositoryId>}</li>
+     *   <li>User authorities → ACE with a {@link User} principal
+     *       and id suffixed with {@code _#_<repositoryId>}</li>
+     * </ul>
+     *
+     * <p>The {@code _#_<repositoryId>} suffix follows the CIC external identity syntax
+     * for separating external user/group ids from the source system id.
+     * The repository id is obtained from {@link AlfrescoClient#getRepositoryId()}.</p>
+     */
+    private List<ACE> buildSysAcl(List<String> authorities) {
+        List<ACE> acl = new ArrayList<>();
+        String suffix = "_#_" + alfrescoClient.getRepositoryId();
+
+        for (String authority : authorities) {
+            if ("GROUP_EVERYONE".equals(authority)) {
+                // __Everyone__ is a well-known principal — never suffixed
+                acl.add(buildUserAce(EVERYONE_PRINCIPAL));
+            } else if (authority.startsWith(GROUP_PREFIX)) {
+                acl.add(buildGroupAce(authority + suffix));
+            } else {
+                acl.add(buildUserAce(authority + suffix));
+            }
+        }
+
+        return acl;
+    }
+
+    private ACE buildUserAce(String userId) {
+        ACE ace = new ACE();
+        ace.setGranted(true);
+        ace.setPermission(PERMISSION_READ);
+        User user = new User();
+        user.setId(userId);
+        ace.setUser(user);
+        return ace;
+    }
+
+    private ACE buildGroupAce(String groupId) {
+        ACE ace = new ACE();
+        ace.setGranted(true);
+        ace.setPermission(PERMISSION_READ);
+        Group group = new Group();
+        group.setId(groupId);
+        ace.setGroup(group);
+        return ace;
     }
 
     private Map<String, Object> buildIngestProperties(Node node, String repositoryId) {
