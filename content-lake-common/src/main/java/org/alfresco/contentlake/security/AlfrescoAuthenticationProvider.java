@@ -1,4 +1,4 @@
-package org.alfresco.contentlake.batch.security;
+package org.alfresco.contentlake.security;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

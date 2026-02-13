@@ -1,13 +1,13 @@
-package org.alfresco.contentlake.batch.service;
+package org.alfresco.contentlake.rag.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.alfresco.contentlake.batch.model.SemanticSearchRequest;
-import org.alfresco.contentlake.batch.model.SemanticSearchResponse;
-import org.alfresco.contentlake.batch.model.SemanticSearchResponse.ChunkMetadata;
-import org.alfresco.contentlake.batch.model.SemanticSearchResponse.SearchHit;
-import org.alfresco.contentlake.batch.model.SemanticSearchResponse.SourceDocument;
-import org.alfresco.contentlake.batch.security.SecurityContextService;
+import org.alfresco.contentlake.rag.model.SemanticSearchRequest;
+import org.alfresco.contentlake.rag.model.SemanticSearchResponse;
+import org.alfresco.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
+import org.alfresco.contentlake.rag.model.SemanticSearchResponse.SearchHit;
+import org.alfresco.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
+import org.alfresco.contentlake.security.SecurityContextService;
 import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprService;
 import org.alfresco.contentlake.hxpr.api.model.Embedding;
@@ -34,14 +34,6 @@ import java.util.stream.Collectors;
  *   <li>Execute kNN vector search via HXPR</li>
  *   <li>Enrich results with parent document metadata</li>
  * </ol>
- *
- * <h3>Permission model</h3>
- * <p>HXPR does not know Alfresco users or groups. Ingestion writes structured ACE entries
- * via {@code sys_acl} in the HXPR REST API. Internally HXPR flattens these into
- * {@code sys_racl} — a flat keyword array in OpenSearch with entries like
- * {@code __Everyone__}, {@code admin_#_<repoId>}, and
- * {@code g:GROUP_xxx_#_<repoId>}. Search builds a filter against {@code sys_racl}
- * matching any of the authenticated user's authorities.</p>
  */
 @Slf4j
 @Service
@@ -51,24 +43,11 @@ public class SemanticSearchService {
     private static final int MAX_TOP_K = 50;
     private static final String BASE_QUERY = "SELECT * FROM SysContent";
 
-    /**
-     * Read-ACL field in the OpenSearch index. HXPR accepts structured ACE objects
-     * via {@code sys_acl} in the REST API, but internally flattens them into
-     * {@code sys_racl} — a flat keyword array in OpenSearch with the format:
-     * <ul>
-     *   <li>{@code __Everyone__}</li>
-     *   <li>{@code username_#_<sourceSystemId>}</li>
-     *   <li>{@code g:GROUP_xxx_#_<sourceSystemId>}</li>
-     * </ul>
-     */
     private static final String RACL_FIELD = "sys_racl";
     private static final String EVERYONE_PRINCIPAL = "__Everyone__";
     private static final String GROUP_PREFIX = "GROUP_";
     private static final String GROUP_RACL_PREFIX = "g:";
 
-    /**
-     * Default minimum score if the request does not provide one.
-     */
     private static final double FALLBACK_MIN_SCORE = 0.5d;
 
     private final HxprService hxprService;
@@ -94,7 +73,6 @@ public class SemanticSearchService {
         int topK = Math.min(Math.max(request.getTopK(), 1), MAX_TOP_K);
         String username = securityContextService.getCurrentUsername();
 
-        // Resolve minScore: request value wins, otherwise use configured default (fallback 0.5)
         double minScore = resolveMinScore(request);
 
         // 1) Embed
@@ -124,7 +102,7 @@ public class SemanticSearchService {
             return emptyResponse(request, queryVector.size(), System.currentTimeMillis() - startTime);
         }
 
-        // 4) Enrich with parent document metadata, vector search returns chunk-level hits (Embeddings), not document-level records
+        // 4) Enrich with parent document metadata
         Map<String, SourceDocument> documentCache = fetchDocumentMetadata(vectorResult.getEmbeddings());
 
         // 5) Build response (apply minScore)
@@ -147,8 +125,6 @@ public class SemanticSearchService {
     }
 
     private double resolveMinScore(SemanticSearchRequest request) {
-        // If request.getMinScore() is a primitive double, it can not be null.
-        // In that case, treat <=0 as "not provided" (common pattern) and apply default.
         try {
             double req = request.getMinScore();
             if (Double.isNaN(req) || req <= 0d) {
@@ -156,7 +132,6 @@ public class SemanticSearchService {
             }
             return clampMinScore(req);
         } catch (Exception ignore) {
-            // Defensive in case request.getMinScore() is absent or throws
             return clampMinScore(defaultMinScore);
         }
     }
@@ -190,17 +165,12 @@ public class SemanticSearchService {
 
         String suffix = buildSourceSystemSuffix();
 
-        // Build sys_racl filter matching the flat keyword format produced by HXPR:
-        //   __Everyone__                                    (well-known principal)
-        //   username_#_<repositoryId>                       (users)
-        //   g:GROUP_xxx_#_<repositoryId>                    (groups)
         List<String> raclClauses = new ArrayList<>();
         raclClauses.add(RACL_FIELD + " = '" + escapeHxql(EVERYONE_PRINCIPAL) + "'");
 
         if (!authorities.isEmpty()) {
             for (String authority : authorities) {
                 if ("GROUP_EVERYONE".equals(authority)) {
-                    // GROUP_EVERYONE is already covered by __Everyone__ above
                     continue;
                 } else if (authority.startsWith(GROUP_PREFIX)) {
                     raclClauses.add(RACL_FIELD + " = '" + escapeHxql(GROUP_RACL_PREFIX + authority + suffix) + "'");
@@ -412,11 +382,7 @@ public class SemanticSearchService {
         return value == null ? "" : value.replace("'", "''");
     }
 
-    /**
-     * Returns the {@code _#_<repositoryId>} suffix for CIC external identity syntax.
-     */
     private String buildSourceSystemSuffix() {
         return "_#_" + alfrescoClient.getRepositoryId();
     }
-
 }

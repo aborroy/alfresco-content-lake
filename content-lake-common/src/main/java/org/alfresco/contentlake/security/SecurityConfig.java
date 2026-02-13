@@ -1,8 +1,5 @@
-package org.alfresco.contentlake.batch.config;
+package org.alfresco.contentlake.security;
 
-import org.alfresco.contentlake.batch.security.AlfrescoAuthenticationProvider;
-import org.alfresco.contentlake.batch.security.AlfrescoTicketAuthenticationFilter;
-import org.alfresco.contentlake.batch.security.AlfrescoTicketAuthenticationProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;

@@ -14,6 +14,18 @@
     <name>Content Lake Common</name>
 
     <dependencies>
+        <!-- Spring Security (for Alfresco authentication infrastructure) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- Spring Web (for RestTemplate used in auth providers) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
         <!-- Alfresco Java SDK - REST API -->
         <dependency>
             <groupId>org.alfresco</groupId>

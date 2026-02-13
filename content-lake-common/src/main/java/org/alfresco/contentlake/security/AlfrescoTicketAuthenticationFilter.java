@@ -1,4 +1,4 @@
-package org.alfresco.contentlake.batch.security;
+package org.alfresco.contentlake.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

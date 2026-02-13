@@ -13,7 +13,7 @@
 
 ## Overview
 
-Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) on Alfresco Content Services. 
+Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) on Alfresco Content Services.
 
 Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 
@@ -25,7 +25,8 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 ## Features
 
 - Two-Phase Sync Pipeline: Fast metadata ingestion + async content processing
-- Semantic Search: Vector embeddings with hybrid search capabilities
+- Semantic Search: Vector embeddings with permission-aware kNN search
+- RAG: LLM-powered question answering grounded in Alfresco document content
 - Permission-Aware: Server-side ACL enforcement via hxpr
 - Local AI: On-premises LLM and embedding models using Spring AI
 - REST API: Generic connector using Alfresco REST APIs
@@ -45,7 +46,20 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 │  Phase 2: Async Content Processing                       │
 │  Transform → Chunk → Embed → Update (INDEXED)            │
 └──────────────────────────────────────────────────────────┘
+                         ↓
+┌──────────────────────────────────────────────────────────┐
+│  Phase 3: RAG (Retrieval-Augmented Generation)           │
+│  Query → Embed → Search → Augment → LLM → Answer         │
+└──────────────────────────────────────────────────────────┘
 ```
+
+### Modules
+
+| Module | Port | Description |
+|--------|------|-------------|
+| `content-lake-common` | — | Shared clients (hxpr, Alfresco), embedding service, chunking |
+| `batch-ingester` | 9090 | Document discovery, sync, transformation, and embedding ingestion |
+| `rag-service` | 9091 | Semantic search and RAG question answering |
 
 ## Quick Start
 
@@ -65,7 +79,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 git clone https://github.com/aborroy/alfresco-content-lake.git
 cd alfresco-content-lake
 
-# Build
+# Build all modules
 mvn clean package
 
 # Configure (see Environment Variables below)
@@ -74,10 +88,13 @@ export ALFRESCO_INTERNAL_USERNAME=admin
 export ALFRESCO_INTERNAL_PASSWORD=admin
 # ... (see full configuration below)
 
-# Run
+# Run ingestion
 java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
 
-# Or with Docker Compose
+# Run RAG service
+java -jar rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
+
+# Or with Docker Compose (both services)
 docker-compose up
 ```
 
@@ -98,15 +115,25 @@ export HXPR_IDP_CLIENT_SECRET=secret
 export HXPR_IDP_USERNAME=testuser
 export HXPR_IDP_PASSWORD=password
 
-# Transform Service
+# Transform Service (batch-ingester only)
 export TRANSFORM_URL=http://localhost:10090
 export TRANSFORM_ENABLED=true
 
-# AI/Embeddings
+# AI/Embeddings (both services)
 export MODEL_RUNNER_URL=http://localhost:12434/engines/llama.cpp/v1
 export EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
 
-# Performance
+# LLM (rag-service only)
+export LLM_MODEL=ai/gpt-oss
+export LLM_TEMPERATURE=0.3
+export LLM_MAX_TOKENS=1024
+
+# RAG defaults (rag-service only)
+export RAG_DEFAULT_TOP_K=5
+export RAG_DEFAULT_MIN_SCORE=0.5
+export RAG_MAX_CONTEXT_LENGTH=4000
+
+# Performance (batch-ingester only)
 export TRANSFORM_WORKERS=4
 export EMBEDDING_CHUNK_SIZE=900
 export EMBEDDING_CHUNK_OVERLAP=120
@@ -114,7 +141,7 @@ export EMBEDDING_CHUNK_OVERLAP=120
 
 ## Authentication
 
-All REST API endpoints (`/api/**`) require authentication validated against Alfresco.
+All REST API endpoints (`/api/**`) on both services require authentication validated against Alfresco.
 
 ### Supported Methods
 
@@ -143,7 +170,9 @@ curl -X POST "http://localhost:9090/api/sync/configured?alf_ticket=$TICKET"
 
 ## API Usage
 
-### Start Synchronization
+### Batch Ingester (port 9090)
+
+#### Start Synchronization
 
 ```bash
 # Sync configured folders
@@ -156,7 +185,7 @@ curl -X POST http://localhost:9090/api/sync/batch \
   -d '{"folders": ["node-id"], "recursive": true, "types": ["cm:content"]}'
 ```
 
-### Monitor Progress
+#### Monitor Progress
 
 ```bash
 # Overall status
@@ -166,14 +195,73 @@ curl http://localhost:9090/api/sync/status -u admin:admin
 curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
 ```
 
-### Health Check
+### RAG Service (port 9091)
+
+#### RAG Prompt
+
+Ask a question and get an LLM-generated answer grounded in your Alfresco documents:
 
 ```bash
-# No authentication required
-curl http://localhost:9090/actuator/health
+curl -X POST http://localhost:9091/api/rag/prompt -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{ "question": "What are the key findings in the Q4 report?" }'
 ```
 
-### Semantic Search
+With options:
+
+```bash
+curl -X POST http://localhost:9091/api/rag/prompt -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Summarize the budget proposal",
+    "topK": 10,
+    "minScore": 0.6,
+    "includeContext": true
+  }'
+```
+
+Response:
+
+```json
+{
+  "answer": "The Q4 report highlights a 12% revenue increase...",
+  "question": "What are the key findings in the Q4 report?",
+  "model": "ai/gpt-oss",
+  "searchTimeMs": 245,
+  "generationTimeMs": 1830,
+  "totalTimeMs": 2075,
+  "sourcesUsed": 3,
+  "sources": [
+    {
+      "documentId": "abc-123",
+      "nodeId": "e4f5a6b7-...",
+      "name": "Q4-Financial-Report.pdf",
+      "path": "/Company Home/Reports/Q4-Financial-Report.pdf",
+      "chunkText": "Revenue for Q4 increased by 12%...",
+      "score": 0.87
+    }
+  ]
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `question` | String | *required* | Natural-language question |
+| `topK` | int | 5 | Number of chunks to retrieve for context |
+| `minScore` | double | 0.5 | Minimum similarity threshold |
+| `filter` | String | — | Additional HXQL filter |
+| `systemPrompt` | String | — | Override the default LLM system prompt |
+| `includeContext` | boolean | false | Include retrieved chunks in response |
+
+#### Semantic Search
+
+Search directly against the embedded chunks without LLM generation:
+
+```bash
+curl -X POST http://localhost:9091/api/search/semantic -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{ "query": "a girl falls in a crater", "topK": 5, "minScore": 0.6 }'
+```
 
 Semantic search applies a minimum similarity score to suppress low-quality vector matches when no strong semantic relation exists.
 
@@ -181,23 +269,22 @@ Semantic search applies a minimum similarity score to suppress low-quality vecto
 * Applied server-side after vector retrieval
 * Can be overridden per request
 
-Configuration (`application.yaml`):
-
-```yaml
-semantic-search:
-  default-min-score: 0.5
-```
-
-Per-request override:
+### Health Checks
 
 ```bash
-curl -X POST http://localhost:9090/api/search/semantic -u admin:admin \
-  -d '{ "query": "a girl falls in a crater", "topK": 5, "minScore": 0.6 }'
+# Batch ingester (no auth required)
+curl http://localhost:9090/actuator/health
+
+# RAG service (no auth required)
+curl http://localhost:9091/actuator/health
+
+# RAG service detailed health (auth required)
+curl http://localhost:9091/api/rag/health -u admin:admin
 ```
 
-Only results with a similarity score greater than or equal to `minScore` are returned.
-
 ## Configuration
+
+### Ingestion
 
 Edit `batch-ingester/src/main/resources/application.yml`:
 
@@ -213,19 +300,49 @@ ingestion:
     aspects: [cm:workingcopy]
 ```
 
+### RAG
+
+Edit `rag-service/src/main/resources/application.yml`:
+
+```yaml
+spring:
+  ai:
+    openai:
+      chat:
+        options:
+          model: ${LLM_MODEL:ai/gpt-oss}
+          temperature: ${LLM_TEMPERATURE:0.3}
+          maxTokens: ${LLM_MAX_TOKENS:1024}
+
+rag:
+  default-top-k: 5
+  default-min-score: 0.5
+  max-context-length: 4000
+  default-system-prompt: >
+    You are a helpful assistant that answers questions based on the provided
+    document context. Use ONLY the information from the context below to answer
+    the question. If the context does not contain enough information to answer,
+    say so clearly. Always cite the source document name when referencing
+    specific information.
+
+semantic-search:
+  default-min-score: 0.5
+```
+
 ## Roadmap
 
 ### Next (Q2 2026 - Open Source Release)
 
-- [ ] RAG service with hybrid search
 - [ ] Event-driven sync (near real-time)
-- [ ] User context propagation (operations as authenticated user)
 - [ ] OAuth2/Keycloak integration
 - [ ] Comprehensive testing suite
 - [ ] Production deployment guide
 
 ### Future
 
+- [ ] Streaming responses (SSE) for progressive answer generation
+- [ ] Conversation history / multi-turn chat sessions
+- [ ] Re-ranking with cross-encoder models
 - [ ] Multiple embedding models per document
 - [ ] Document versioning support
 - [ ] DocFilters integration (better text extraction)
@@ -261,11 +378,15 @@ mvn test
 ### Run Locally
 
 ```bash
-# With Maven
+# Batch Ingester
 mvn spring-boot:run -pl batch-ingester
-
-# With JAR
+# or
 java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
+
+# RAG Service
+mvn spring-boot:run -pl rag-service
+# or
+java -jar rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
 ```
 
 ## Contributing

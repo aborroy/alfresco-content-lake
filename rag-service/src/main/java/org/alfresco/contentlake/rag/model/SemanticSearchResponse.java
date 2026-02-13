@@ -1,20 +1,23 @@
-package org.alfresco.contentlake.batch.model;
+package org.alfresco.contentlake.rag.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
 /**
- * Response payload for the semantic search validation endpoint.
+ * Response payload for the semantic search endpoint.
  *
  * <p>Each result contains the matched chunk text, source document metadata,
- * the cosine similarity score, and chunk-level metadata useful for
- * evaluating search quality before building the full RAG pipeline.</p>
+ * the cosine similarity score, and chunk-level metadata.</p>
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class SemanticSearchResponse {
 
@@ -39,11 +42,10 @@ public class SemanticSearchResponse {
     /** Ordered list of search hits. */
     private List<SearchHit> results;
 
-    /**
-     * A single search hit combining chunk content, source document info and metadata.
-     */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SearchHit {
 
@@ -63,11 +65,10 @@ public class SemanticSearchResponse {
         private ChunkMetadata chunkMetadata;
     }
 
-    /**
-     * Source document identification and metadata retrieved from the parent document.
-     */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SourceDocument {
 
@@ -87,11 +88,10 @@ public class SemanticSearchResponse {
         private String mimeType;
     }
 
-    /**
-     * Metadata about the chunk within the source document.
-     */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class ChunkMetadata {
 

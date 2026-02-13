@@ -1,0 +1,68 @@
+server:
+  port: 9091
+
+spring:
+  application:
+    name: rag-service
+
+  ai:
+    openai:
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      api-key: ${MODEL_RUNNER_API_KEY:not-needed}
+      chat:
+        options:
+          model: ${LLM_MODEL:ai/gpt-oss}
+          temperature: ${LLM_TEMPERATURE:0.3}
+          maxTokens: ${LLM_MAX_TOKENS:1024}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+
+# Alfresco SDK configuration
+# Service account for internal operations (group resolution, metadata enrichment)
+# API endpoints require per-request authentication with user credentials
+content:
+  service:
+    url: ${ALFRESCO_URL:http://localhost:80}
+    security:
+      basicAuth:
+        username: ${ALFRESCO_INTERNAL_USERNAME:admin}
+        password: ${ALFRESCO_INTERNAL_PASSWORD:admin}
+
+# hxpr Content Lake connection
+hxpr:
+  url: ${HXPR_URL:http://localhost:8080}
+  repository-id: ${HXPR_REPOSITORY_ID:default}
+  target-path: ${HXPR_TARGET_PATH:/alfresco-sync}
+  idp:
+    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
+    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
+    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
+    username: ${HXPR_IDP_USERNAME:testuser}
+    password: ${HXPR_IDP_PASSWORD:password}
+
+# RAG configuration
+rag:
+  default-top-k: ${RAG_DEFAULT_TOP_K:5}
+  default-min-score: ${RAG_DEFAULT_MIN_SCORE:0.5}
+  max-context-length: ${RAG_MAX_CONTEXT_LENGTH:4000}
+  default-system-prompt: >
+    You are a helpful assistant that answers questions based on the provided document context.
+    Use ONLY the information from the context below to answer the question.
+    If the context does not contain enough information to answer, say so clearly.
+    Always cite the source document name when referencing specific information.
+
+# Semantic Search configuration
+semantic-search:
+  default-min-score: 0.5
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    org.alfresco.contentlake: ${LOG_LEVEL:INFO}
