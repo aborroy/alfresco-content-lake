@@ -354,18 +354,6 @@ semantic-search:
 - [ ] Multilingual embeddings
 - [ ] Performance optimizations for 10K+ documents
 
-#### Core Functionality
-1. RAG Service: SearchService, PromptService, hybrid search, LLM integration
-2. Event-Driven Sync: Real-time updates, permission changes, incremental sync
-3. Permission Handling: Token forwarding, server-side filtering, group membership
-4. Custom Properties: Support for custom content model properties in search
-
-#### Enhanced Functionality
-5. DocFilters Integration: Markdown extraction, improved chunking
-6. Testing: Unit, integration, performance tests
-7. Documentation: Architecture diagrams, tuning guides, multi-repo setup
-8. Developer Experience: Docker Compose setup, sample data, health checks
-
 ## Development
 
 ### Build
