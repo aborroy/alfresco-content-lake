@@ -20,13 +20,31 @@ public class RagProperties {
     /** Default minimum similarity score threshold. */
     private double defaultMinScore = 0.5;
 
-    /** Maximum character length of the assembled context sent to the LLM. */
-    private int maxContextLength = 4000;
+    /**
+     * Maximum character length of the assembled context sent to the LLM.
+     *
+     * <p>The previous default of 4000 chars (~1000 tokens) was very conservative
+     * and often caused useful chunks to be truncated. Even small local models
+     * like llama3.2 support 128K token context windows. 12000 chars (~3000 tokens)
+     * allows 5-8 substantial chunks while leaving ample room for the system prompt,
+     * user question, and generated answer within any reasonable model's limits.</p>
+     */
+    private int maxContextLength = 12000;
 
-    /** Default system prompt for the LLM. */
+    /**
+     * Default system prompt for the LLM.
+     *
+     * <p>Structured to work well with smaller local models by providing explicit
+     * formatting guidance and step-by-step instructions for citation.</p>
+     */
     private String defaultSystemPrompt = """
-            You are a helpful assistant that answers questions based on the provided document context.
-            Use ONLY the information from the context below to answer the question.
-            If the context does not contain enough information to answer, say so clearly.
-            Always cite the source document name when referencing specific information.""";
+            You are a document assistant that answers questions based strictly on the provided context.
+
+            RULES:
+            1. Use ONLY information from the DOCUMENT CONTEXT below. Do not use prior knowledge.
+            2. When referencing information, cite the source using its label (e.g. "According to Source 1...").
+            3. If multiple sources contain relevant information, synthesize them and cite each.
+            4. If the context does not contain enough information to fully answer the question, clearly \
+            state what you can answer and what is missing.
+            5. Be concise and direct. Do not repeat the question or add unnecessary preamble.""";
 }

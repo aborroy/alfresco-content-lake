@@ -134,7 +134,13 @@ public class TransformationWorker {
                 return;
             }
 
-            List<EmbeddingService.ChunkWithEmbedding> embeddings = embeddingService.embedChunks(chunks);
+            // Build document context for metadata-enriched embedding.
+            // This is prepended to each chunk's text ONLY for the embedding call
+            // (the stored chunk text stays clean). Gives the embedding model richer
+            // context about where each chunk comes from, improving retrieval quality.
+            String documentContext = buildDocumentContext(task);
+            List<EmbeddingService.ChunkWithEmbedding> embeddings =
+                    embeddingService.embedChunks(chunks, documentContext);
 
             deleteEmbeddingsIfAny(task.getHxprDocumentId());
 
@@ -151,6 +157,35 @@ public class TransformationWorker {
             log.error("Failed transformation for node: {}", task.getNodeId(), e);
             queue.markFailed();
         }
+    }
+
+    /**
+     * Builds a metadata context string for embedding enrichment.
+     *
+     * <p>Example output: {@code "Document: Annual_Report_2025.pdf | Path: /Company Home/Reports"}</p>
+     *
+     * <p>This is prepended to chunk text only during the embedding call so that the
+     * resulting vector captures the document's identity. The stored chunk text in HXPR
+     * is not modified — source attribution for the LLM is handled separately by
+     * {@code RagService.assembleContext()}.</p>
+     *
+     * @param task transformation task containing document metadata
+     * @return context string, or null if no metadata is available
+     */
+    private String buildDocumentContext(TransformationTask task) {
+        StringBuilder context = new StringBuilder();
+
+        if (task.getDocumentName() != null && !task.getDocumentName().isBlank()) {
+            context.append("Document: ").append(task.getDocumentName());
+        }
+        if (task.getDocumentPath() != null && !task.getDocumentPath().isBlank()) {
+            if (!context.isEmpty()) {
+                context.append(" | ");
+            }
+            context.append("Path: ").append(task.getDocumentPath());
+        }
+
+        return context.isEmpty() ? null : context.toString();
     }
 
     /**

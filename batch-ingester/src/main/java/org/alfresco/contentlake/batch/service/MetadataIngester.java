@@ -46,10 +46,14 @@ public class MetadataIngester {
         HxprDocument existing = hxprService.findByNodeId(node.getId());
         HxprDocument doc = (existing != null) ? updateDocument(existing, node) : createDocument(node);
 
+        String documentPath = (node.getPath() != null) ? node.getPath().getName() : null;
+
         return new TransformationTask(
                 node.getId(),
                 doc.getSysId(),
-                node.getContent() != null ? node.getContent().getMimeType() : null
+                node.getContent() != null ? node.getContent().getMimeType() : null,
+                node.getName(),
+                documentPath
         );
     }
 

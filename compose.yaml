@@ -65,4 +65,4 @@ services:
       # RAG configuration
       RAG_DEFAULT_TOP_K: 5
       RAG_DEFAULT_MIN_SCORE: 0.5
-      RAG_MAX_CONTEXT_LENGTH: 4000
+      RAG_MAX_CONTEXT_LENGTH: 12000

@@ -26,6 +26,17 @@ import java.util.regex.Pattern;
  *
  * <p>To avoid this fallback entirely, ensure your chunking strategy uses
  * appropriate maxChunkSize values (typically 800-1200 chars for most models).
+ *
+ * <h3>Asymmetric embedding (instruction prefix)</h3>
+ * <p>Models like {@code mxbai-embed-large} are trained with an instruction-aware
+ * protocol. Query-time embeddings should be prefixed with a task instruction so
+ * that the resulting vector is closer in space to relevant passage vectors.
+ * Document/chunk embeddings are stored <em>without</em> any prefix.</p>
+ *
+ * <ul>
+ *   <li>{@link #embed(String)} — document/chunk embedding (no prefix)</li>
+ *   <li>{@link #embedQuery(String)} — query embedding (with instruction prefix)</li>
+ * </ul>
  */
 @Slf4j
 public class EmbeddingService {
@@ -38,6 +49,20 @@ public class EmbeddingService {
 
     private static final int MIN_CHARS = 200;
 
+    /**
+     * Instruction prefix for query-time embedding.
+     *
+     * <p>mxbai-embed-large (and many E5/GTE family models) are trained with an
+     * asymmetric protocol: queries are prefixed with a task instruction while
+     * documents are embedded as-is. This significantly improves retrieval
+     * relevance (typically +5-15% MRR) at zero extra infrastructure cost.</p>
+     *
+     * <p>If you switch to a different embedding model, update or disable this
+     * prefix according to the model's documentation.</p>
+     */
+    private static final String QUERY_INSTRUCTION_PREFIX =
+            "Represent this sentence for searching relevant passages: ";
+
     private final EmbeddingModel embeddingModel;
 
     @Getter
@@ -48,18 +73,74 @@ public class EmbeddingService {
         this.modelName = modelName;
     }
 
+    /**
+     * Embeds document/chunk text <em>without</em> any instruction prefix.
+     * Use this for ingestion-time embedding of document chunks.
+     *
+     * @param text document or chunk text
+     * @return embedding vector
+     */
     public List<Double> embed(String text) {
         return embedWithFallback(sanitize(text));
     }
 
+    /**
+     * Embeds a search query <em>with</em> the instruction prefix required by
+     * asymmetric embedding models (e.g. mxbai-embed-large).
+     *
+     * <p>This should be used at query time in the semantic search path so that
+     * the query vector is aligned with the document vectors stored at ingestion
+     * time via {@link #embed(String)}.</p>
+     *
+     * @param query user's natural-language search query
+     * @return embedding vector
+     */
+    public List<Double> embedQuery(String query) {
+        String prefixed = QUERY_INSTRUCTION_PREFIX + sanitize(query);
+        return embedWithFallback(prefixed);
+    }
+
+    /**
+     * Embeds a list of chunks (document-side, no instruction prefix).
+     */
     public List<ChunkWithEmbedding> embedChunks(List<Chunk> chunks) {
+        return embedChunks(chunks, null);
+    }
+
+    /**
+     * Embeds a list of chunks with optional document metadata context.
+     *
+     * <p>When {@code documentContext} is provided, it is prepended to each chunk's
+     * text <em>only for the embedding call</em>. The stored chunk text is unchanged.
+     * This improves retrieval quality by giving the embedding model richer context
+     * about the document each chunk belongs to — particularly useful for disambiguating
+     * chunks from different documents that contain similar language.</p>
+     *
+     * <p>Example enriched text sent to the embedding model:</p>
+     * <pre>
+     * Document: Annual_Report_2025.pdf | Path: /Company Home/Reports
+     *
+     * Revenue increased by 15% year-over-year...
+     * </pre>
+     *
+     * @param chunks          list of chunks to embed
+     * @param documentContext  metadata prefix (e.g. "Document: name | Path: path"), or null to skip
+     * @return chunks paired with their embedding vectors
+     */
+    public List<ChunkWithEmbedding> embedChunks(List<Chunk> chunks, String documentContext) {
         List<ChunkWithEmbedding> results = new ArrayList<>();
         for (Chunk chunk : chunks) {
             String text = chunk.getText();
             if (text == null || text.isBlank()) {
                 continue;
             }
-            results.add(new ChunkWithEmbedding(chunk, embed(text)));
+
+            // Enrich text for embedding only — the chunk's stored text is not modified
+            String textToEmbed = (documentContext != null && !documentContext.isBlank())
+                    ? documentContext + "\n\n" + text
+                    : text;
+
+            results.add(new ChunkWithEmbedding(chunk, embed(textToEmbed)));
         }
         return results;
     }

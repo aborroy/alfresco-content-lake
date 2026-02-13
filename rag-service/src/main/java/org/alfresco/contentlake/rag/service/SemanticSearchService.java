@@ -75,10 +75,10 @@ public class SemanticSearchService {
 
         double minScore = resolveMinScore(request);
 
-        // 1) Embed
+        // 1) Embed (using query-specific instruction prefix for asymmetric models)
         log.info("Embedding query: \"{}\" (topK={}, minScore={}, user={})", request.getQuery(), topK, minScore, username);
 
-        List<Double> queryVector = embeddingService.embed(request.getQuery());
+        List<Double> queryVector = embeddingService.embedQuery(request.getQuery());
 
         if (queryVector.isEmpty()) {
             log.warn("Empty embedding vector for query: {}", request.getQuery());
