@@ -41,10 +41,10 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
 
         // Step 2: If sections are too large or too few, try paragraphs
         if (hasOversizedSegments(segments, config.maxChunkSize())) {
-            segments = splitRecursive(segments, config.maxChunkSize());
+            segments = splitRecursive(segments, config.maxChunkSize(), config.overlapSize());
         }
 
-        // Step 3: Group segments while enforcing size limits
+        // Step 3: Group segments while enforcing size limits (with overlap)
         List<TextSegment> grouped = groupWithHardLimit(segments, config);
 
         // Step 4: Convert to chunks
@@ -53,9 +53,9 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
 
     /**
      * Recursively splits oversized segments down to the required size.
-     * Tries: paragraphs → sentences → hard split.
+     * Tries: paragraphs → sentences → hard split (with overlap).
      */
-    private List<TextSegment> splitRecursive(List<TextSegment> segments, int maxSize) {
+    private List<TextSegment> splitRecursive(List<TextSegment> segments, int maxSize, int overlapSize) {
         List<TextSegment> result = new ArrayList<>();
 
         for (TextSegment segment : segments) {
@@ -78,18 +78,25 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
                 continue;
             }
 
-            // Last resort: hard split by character count
+            // Last resort: hard split by character count (with overlap)
             log.warn("Oversized segment ({} chars) requires hard splitting at {} char boundary",
                     segment.length(), maxSize);
-            result.addAll(hardSplit(segment.text(), maxSize));
+            result.addAll(hardSplit(segment.text(), maxSize, overlapSize));
         }
 
         return result;
     }
 
     /**
-     * Groups segments while enforcing a HARD limit on chunk size.
-     * If a single segment exceeds maxSize, it will be split further.
+     * Groups segments while enforcing a HARD limit on chunk size, with overlap.
+     *
+     * <p>When a chunk is flushed, the last {@code overlapSize} characters (broken at a
+     * word boundary) are carried into the start of the next chunk. This preserves
+     * context at chunk boundaries, which is critical for retrieval quality — without
+     * overlap, sentences or ideas that straddle two chunks may not match any single
+     * chunk's embedding well enough to be retrieved.</p>
+     *
+     * <p>If a single segment exceeds maxSize, it will be split recursively first.</p>
      */
     private List<TextSegment> groupWithHardLimit(List<TextSegment> segments, ChunkingConfig config) {
         List<TextSegment> grouped = new ArrayList<>();
@@ -97,21 +104,38 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
         int currentStart = -1;
         int currentEnd = 0;
 
+        int overlapSize = config.overlapSize();
+
         for (TextSegment segment : segments) {
             String text = segment.text();
 
             // CRITICAL FIX: If this single segment is already too large, split it
             if (text.length() > config.maxChunkSize()) {
-                // Flush current accumulated content
+                // Flush current accumulated content (with overlap carry)
                 if (!current.isEmpty()) {
-                    grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd));
+                    String flushed = current.toString().strip();
+                    grouped.add(new TextSegment(flushed, currentStart, currentEnd));
+
+                    // Carry overlap tail into the next chunk
+                    String overlapText = extractOverlapTail(flushed, overlapSize);
                     current.setLength(0);
-                    currentStart = -1;
+                    if (!overlapText.isEmpty()) {
+                        current.append(overlapText);
+                        // Overlap region starts from within the previous chunk's span
+                        currentStart = currentEnd - overlapText.length();
+                    } else {
+                        currentStart = -1;
+                    }
                 }
 
                 // Split the oversized segment and add all parts
-                List<TextSegment> split = splitRecursive(List.of(segment), config.maxChunkSize());
+                List<TextSegment> split = splitRecursive(List.of(segment), config.maxChunkSize(), config.overlapSize());
                 grouped.addAll(split);
+
+                // After injecting split segments, reset accumulator (overlap from the
+                // last split segment will be handled naturally on the next flush)
+                current.setLength(0);
+                currentStart = -1;
                 continue;
             }
 
@@ -119,9 +143,18 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
             if (current.length() + text.length() + 1 > config.maxChunkSize()
                     && current.length() >= config.minChunkSize()) {
                 // Flush current group
-                grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd));
+                String flushed = current.toString().strip();
+                grouped.add(new TextSegment(flushed, currentStart, currentEnd));
+
+                // Carry overlap tail into the next chunk
+                String overlapText = extractOverlapTail(flushed, overlapSize);
                 current.setLength(0);
-                currentStart = -1;
+                if (!overlapText.isEmpty()) {
+                    current.append(overlapText);
+                    currentStart = currentEnd - overlapText.length();
+                } else {
+                    currentStart = -1;
+                }
             }
 
             if (currentStart < 0) {
@@ -135,7 +168,7 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
             currentEnd = segment.endOffset();
         }
 
-        // Flush remaining
+        // Flush remaining (no overlap needed for the last chunk)
         if (!current.isEmpty()) {
             grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd));
         }
@@ -144,10 +177,50 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
     }
 
     /**
-     * Hard split at character boundaries (last resort).
+     * Extracts the last {@code targetLength} characters from text, breaking at a word
+     * boundary to avoid splitting words. Returns empty string if the text is too short
+     * to produce a meaningful overlap.
+     *
+     * @param text         the flushed chunk text
+     * @param targetLength desired overlap length in characters
+     * @return overlap tail text, or empty string
+     */
+    private String extractOverlapTail(String text, int targetLength) {
+        if (targetLength <= 0 || text.length() <= targetLength) {
+            return "";
+        }
+
+        // Start from (length - targetLength) and find the next word boundary
+        int cutPoint = text.length() - targetLength;
+
+        // Move forward to the next space to avoid splitting a word
+        int nextSpace = text.indexOf(' ', cutPoint);
+        if (nextSpace > 0 && nextSpace < text.length() - 1) {
+            cutPoint = nextSpace + 1;
+        }
+
+        String overlap = text.substring(cutPoint).strip();
+
+        // Don't return trivially short overlaps (less than ~20 chars is noise)
+        return overlap.length() >= 20 ? overlap : "";
+    }
+
+    /**
+     * Hard split at character boundaries (last resort), with overlap.
+     *
+     * <p>Advances by {@code maxSize - overlapSize} per iteration so that consecutive
+     * chunks share an overlapping region of approximately {@code overlapSize} characters.</p>
      */
     private List<TextSegment> hardSplit(String text, int maxSize) {
+        return hardSplit(text, maxSize, 0);
+    }
+
+    /**
+     * Hard split with configurable overlap.
+     */
+    private List<TextSegment> hardSplit(String text, int maxSize, int overlapSize) {
         List<TextSegment> segments = new ArrayList<>();
+        int stride = Math.max(maxSize / 2, maxSize - overlapSize); // Ensure forward progress
         int offset = 0;
 
         while (offset < text.length()) {
@@ -165,7 +238,13 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
             if (!chunk.isEmpty()) {
                 segments.add(new TextSegment(chunk, offset, end));
             }
-            offset = end;
+
+            // Advance by stride (not end) to create overlap region.
+            // For the last chunk we break out to avoid an infinite loop.
+            if (end >= text.length()) {
+                break;
+            }
+            offset += stride;
         }
 
         return segments;

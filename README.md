@@ -121,7 +121,7 @@ export TRANSFORM_ENABLED=true
 
 # AI/Embeddings (both services)
 export MODEL_RUNNER_URL=http://localhost:12434/engines/llama.cpp/v1
-export EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
+export EMBEDDING_MODEL=ai/mxbai-embed-large
 
 # LLM (rag-service only)
 export LLM_MODEL=ai/gpt-oss
@@ -131,7 +131,7 @@ export LLM_MAX_TOKENS=1024
 # RAG defaults (rag-service only)
 export RAG_DEFAULT_TOP_K=5
 export RAG_DEFAULT_MIN_SCORE=0.5
-export RAG_MAX_CONTEXT_LENGTH=4000
+export RAG_MAX_CONTEXT_LENGTH=12000
 
 # Performance (batch-ingester only)
 export TRANSFORM_WORKERS=4
@@ -317,13 +317,18 @@ spring:
 rag:
   default-top-k: 5
   default-min-score: 0.5
-  max-context-length: 4000
+  max-context-length: 12000
   default-system-prompt: >
-    You are a helpful assistant that answers questions based on the provided
-    document context. Use ONLY the information from the context below to answer
-    the question. If the context does not contain enough information to answer,
-    say so clearly. Always cite the source document name when referencing
-    specific information.
+    You are a document assistant that answers questions based strictly on
+    the provided context.
+
+    RULES:
+    1. Use ONLY information from the DOCUMENT CONTEXT below. Do not use prior knowledge.
+    2. When referencing information, cite the source using its label (e.g. "According to Source 1...").
+    3. If multiple sources contain relevant information, synthesize them and cite each.
+    4. If the context does not contain enough information to fully answer the question,
+    clearly state what you can answer and what is missing.
+    5. Be concise and direct. Do not repeat the question or add unnecessary preamble.
 
 semantic-search:
   default-min-score: 0.5
