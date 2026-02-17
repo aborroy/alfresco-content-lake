@@ -18,7 +18,10 @@ import java.util.Map;
 
 /**
  * Authentication provider that validates Alfresco tickets.
- * Validates tickets by making a test API call to Alfresco.
+ * Validates tickets by calling the {@code /people/-me-} Alfresco API and
+ * resolves the real username from the response, so that downstream code
+ * (e.g.&nbsp;{@code SecurityContextService.getCurrentUsername()}) receives
+ * the actual user id rather than the raw ticket string.
  */
 @Slf4j
 @Component
@@ -38,10 +41,11 @@ public class AlfrescoTicketAuthenticationProvider implements AuthenticationProvi
 
         log.debug("Authenticating with ticket: {}...", ticket.substring(0, Math.min(20, ticket.length())));
 
-        if (validateAlfrescoTicket(ticket)) {
-            log.info("Successfully authenticated with ticket");
+        String username = validateAlfrescoTicket(ticket);
+        if (username != null) {
+            log.info("Successfully authenticated user '{}' with ticket", username);
             return new PreAuthenticatedAuthenticationToken(
-                    ticket,
+                    username,
                     ticket,
                     Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
             );
@@ -51,9 +55,17 @@ public class AlfrescoTicketAuthenticationProvider implements AuthenticationProvi
         throw new BadCredentialsException("Invalid Alfresco ticket");
     }
 
-    private boolean validateAlfrescoTicket(String ticket) {
+    /**
+     * Validates the ticket against the Alfresco People API and resolves the
+     * actual username.  The {@code /people/-me-} endpoint returns the person
+     * entry for the ticket owner, whose {@code id} field is the username.
+     *
+     * @return the resolved username, or {@code null} when the ticket is invalid
+     */
+    @SuppressWarnings("unchecked")
+    private String validateAlfrescoTicket(String ticket) {
         try {
-            String url = alfrescoUrl + "/alfresco/api/-default-/public/alfresco/versions/1/-me-?alf_ticket=" + ticket;
+            String url = alfrescoUrl + "/alfresco/api/-default-/public/alfresco/versions/1/people/-me-?alf_ticket=" + ticket;
 
             HttpHeaders headers = new HttpHeaders();
             HttpEntity<?> request = new HttpEntity<>(headers);
@@ -65,14 +77,21 @@ public class AlfrescoTicketAuthenticationProvider implements AuthenticationProvi
                     Map.class
             );
 
-            return response.getStatusCode() == HttpStatus.OK;
+            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                Map<String, Object> body = response.getBody();
+                Map<String, Object> entry = (Map<String, Object>) body.get("entry");
+                if (entry != null && entry.get("id") != null) {
+                    return entry.get("id").toString();
+                }
+            }
+            return null;
 
         } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
             log.debug("Alfresco rejected ticket");
-            return false;
+            return null;
         } catch (Exception e) {
             log.error("Error validating ticket with Alfresco: {}", e.getMessage());
-            return false;
+            return null;
         }
     }
 

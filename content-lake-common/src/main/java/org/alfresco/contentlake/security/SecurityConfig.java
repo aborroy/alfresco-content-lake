@@ -4,12 +4,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+
+import java.util.List;
 
 /**
  * Spring Security configuration for the batch ingester REST API.
@@ -66,16 +68,16 @@ public class SecurityConfig {
     /**
      * Configures the authentication manager with Alfresco authentication providers.
      * Ticket authentication is checked first, then username/password.
+     *
+     * Uses a standalone ProviderManager (no parent) to prevent infinite recursion.
+     * When using HttpSecurity's AuthenticationManagerBuilder, Spring Security 6.x
+     * wires a parent AuthenticationManager that re-delegates failed authentications,
+     * causing a StackOverflowError when all providers reject the token.
      */
     @Bean
-    public AuthenticationManager authenticationManager(HttpSecurity http) throws Exception {
-        AuthenticationManagerBuilder authenticationManagerBuilder =
-                http.getSharedObject(AuthenticationManagerBuilder.class);
-
-        authenticationManagerBuilder
-                .authenticationProvider(alfrescoTicketAuthProvider)
-                .authenticationProvider(alfrescoAuthProvider);
-
-        return authenticationManagerBuilder.build();
+    public AuthenticationManager authenticationManager() {
+        return new ProviderManager(
+                List.of(alfrescoTicketAuthProvider, alfrescoAuthProvider)
+        );
     }
 }

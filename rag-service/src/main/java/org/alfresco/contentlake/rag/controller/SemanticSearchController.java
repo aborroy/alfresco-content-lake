@@ -19,7 +19,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/search/semantic")
+@RequestMapping("/api/rag/search/semantic")
 @RequiredArgsConstructor
 public class SemanticSearchController {
 
@@ -55,7 +55,7 @@ public class SemanticSearchController {
      *
      * @return health status including model and index information
      */
-    @GetMapping("/health")
+    @GetMapping("/api/rag/search/health")
     public ResponseEntity<Map<String, Object>> health() {
         try {
             var embedding = semanticSearchService.search(
