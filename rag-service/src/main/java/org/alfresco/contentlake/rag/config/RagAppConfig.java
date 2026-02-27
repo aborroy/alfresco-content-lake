@@ -111,7 +111,6 @@ public class RagAppConfig {
     public static class HxprProperties {
         private String url = "http://localhost:8080";
         private String repositoryId = "default";
-        private String targetPath = "/alfresco-sync";
         private IdpConfig idp = new IdpConfig();
 
         @Data

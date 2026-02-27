@@ -10,10 +10,15 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriUtils;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Business-logic layer on top of the hxpr REST API.
@@ -56,7 +61,7 @@ public class HxprService {
         String cleanPath = stripLeadingSlash(absolutePath);
         try {
             restClient.get()
-                    .uri("/api/documents/path/{path}", cleanPath)
+                    .uri(buildDocumentPathUri(cleanPath, null))
                     .retrieve()
                     .toBodilessEntity();
             return true;
@@ -81,7 +86,7 @@ public class HxprService {
         String cleanPath = stripLeadingSlash(parentPath);
         log.debug("Creating document at path: {}", cleanPath);
         return restClient.post()
-                .uri("/api/documents/path/{path}?enforceSysName=true", cleanPath)
+                .uri(buildDocumentPathUri(cleanPath, "enforceSysName=true"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(document)
                 .retrieve()
@@ -105,7 +110,7 @@ public class HxprService {
 
         try {
             restClient.post()
-                    .uri("/api/documents/path/{path}?enforceSysName=true", cleanParent)
+                    .uri(buildDocumentPathUri(cleanParent, "enforceSysName=true"))
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(folder)
                     .retrieve()
@@ -116,26 +121,33 @@ public class HxprService {
     }
 
     /**
-     * Recursively ensures that the full folder path exists.
+     * Ensures that the full folder path exists by creating segments sequentially.
      *
      * @param absolutePath absolute folder path
      */
     public void ensureFolder(String absolutePath) {
         String normalized = normalizeAbsolutePath(absolutePath);
-        if ("/".equals(normalized) || existsByPath(normalized)) {
+        ensureFolderCreateOnly(normalized);
+    }
+
+    private void ensureFolderCreateOnly(String absolutePath) {
+        String cleanPath = stripLeadingSlash(normalizeAbsolutePath(absolutePath));
+        if (cleanPath == null || cleanPath.isBlank()) {
             return;
         }
 
-        int lastSlash = normalized.lastIndexOf('/');
-        String parent = lastSlash <= 0 ? "/" : normalized.substring(0, lastSlash);
-        String name = normalized.substring(lastSlash + 1);
-
-        ensureFolder(parent);
-
-        try {
-            createFolder("/".equals(parent) ? "" : parent, name);
-        } catch (HttpClientErrorException.Conflict e) {
-            // Race condition: someone else created it.
+        String parent = "";
+        for (String segment : cleanPath.split("/")) {
+            if (segment == null || segment.isBlank()) {
+                continue;
+            }
+            String currentPath = parent.isEmpty() ? "/" + segment : "/" + parent + "/" + segment;
+            try {
+                createFolder(parent, segment);
+            } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
+                throw new IllegalStateException("HXPR denied folder creation at path '" + currentPath + "'", e);
+            }
+            parent = parent.isEmpty() ? segment : parent + "/" + segment;
         }
     }
 
@@ -294,6 +306,32 @@ public class HxprService {
         query.setLimit((long) limit);
         query.setOffset((long) offset);
         return query;
+    }
+
+    /**
+     * Encodes each segment of a slash-delimited path using RFC 3986 path-segment
+     * encoding (spaces -> {@code %20}, etc.) while leaving the {@code /} separators
+     * as literal characters so Tomcat does not reject the request with
+     * "encoded slash character is not allowed".
+     *
+     * @param path slash-delimited path, without leading slash
+     * @return encoded path safe to embed in a URI string
+     */
+    private static String encodePathSegments(String path) {
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        return Arrays.stream(path.split("/", -1))
+                .map(segment -> UriUtils.encodePathSegment(segment, StandardCharsets.UTF_8))
+                .collect(Collectors.joining("/"));
+    }
+
+    private static URI buildDocumentPathUri(String cleanPath, String query) {
+        String path = "/api/documents/path/" + encodePathSegments(cleanPath);
+        if (query == null || query.isBlank()) {
+            return URI.create(path);
+        }
+        return URI.create(path + "?" + query);
     }
 
     private static String normalizeAbsolutePath(String path) {

@@ -1,5 +1,6 @@
 package org.alfresco.contentlake.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -27,11 +28,9 @@ public class SecurityConfig {
     private final AlfrescoAuthenticationProvider alfrescoAuthProvider;
     private final AlfrescoTicketAuthenticationProvider alfrescoTicketAuthProvider;
 
-    public SecurityConfig(
-            AlfrescoAuthenticationProvider alfrescoAuthProvider,
-            AlfrescoTicketAuthenticationProvider alfrescoTicketAuthProvider) {
-        this.alfrescoAuthProvider = alfrescoAuthProvider;
-        this.alfrescoTicketAuthProvider = alfrescoTicketAuthProvider;
+    public SecurityConfig(@Value("${content.service.url}") String alfrescoUrl) {
+        this.alfrescoAuthProvider = new AlfrescoAuthenticationProvider(alfrescoUrl);
+        this.alfrescoTicketAuthProvider = new AlfrescoTicketAuthenticationProvider(alfrescoUrl);
     }
 
     /**

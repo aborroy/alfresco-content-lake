@@ -33,7 +33,6 @@ content:
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}
   repository-id: ${HXPR_REPOSITORY_ID:default}
-  target-path: ${HXPR_TARGET_PATH:/alfresco-sync}
   idp:
     token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
     client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}

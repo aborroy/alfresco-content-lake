@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.alfresco.contentlake.batch.model.BatchSyncRequest;
 import org.alfresco.contentlake.batch.model.IngestionJob;
 import org.alfresco.contentlake.batch.model.TransformationTask;
-import org.alfresco.contentlake.client.HxprService;
 import org.alfresco.core.model.Node;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -22,12 +21,9 @@ import java.util.concurrent.Executor;
 @Service
 public class BatchIngestionService {
 
-    private static final String TARGET_FOLDER = "/alfresco-sync";
-
     private final NodeDiscoveryService discoveryService;
     private final MetadataIngester metadataIngester;
     private final TransformationQueue transformationQueue;
-    private final HxprService hxprService;
     private final Executor batchIngestionExecutor;
 
     private final Map<String, IngestionJob> jobsById = new ConcurrentHashMap<>();
@@ -38,20 +34,17 @@ public class BatchIngestionService {
      * @param discoveryService service to discover nodes to ingest
      * @param metadataIngester component that ingests node metadata into hxpr
      * @param transformationQueue queue for transformation tasks
-     * @param hxprService hxpr client used for setup operations
      * @param batchIngestionExecutor executor for asynchronous ingestion jobs
      */
     public BatchIngestionService(
             NodeDiscoveryService discoveryService,
             MetadataIngester metadataIngester,
             TransformationQueue transformationQueue,
-            HxprService hxprService,
             @Qualifier("batchIngestionExecutor") Executor batchIngestionExecutor
     ) {
         this.discoveryService = discoveryService;
         this.metadataIngester = metadataIngester;
         this.transformationQueue = transformationQueue;
-        this.hxprService = hxprService;
         this.batchIngestionExecutor = batchIngestionExecutor;
     }
 
@@ -113,8 +106,6 @@ public class BatchIngestionService {
     private void runBatchSync(IngestionJob job, BatchSyncRequest request) {
         String jobId = job.getJobId();
         try {
-            hxprService.ensureFolder(TARGET_FOLDER);
-
             discoveryService.discoverNodes(request).forEach(node -> ingestNode(node, job));
 
             job.complete();

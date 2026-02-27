@@ -30,7 +30,11 @@ content:
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}
   repository-id: ${HXPR_REPOSITORY_ID:default}
+  # Base target path in HXPR where hierarchy is created.
   target-path: ${HXPR_TARGET_PATH:/alfresco-sync}
+  # Optional override for the repository-id segment in that hierarchy.
+  # If empty, uses Alfresco Discovery repository ID.
+  path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
   idp:
     token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
     client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}

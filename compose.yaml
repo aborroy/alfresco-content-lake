@@ -15,12 +15,13 @@ services:
       HXPR_URL: http://localhost:8080
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
+      HXPR_PATH_REPOSITORY_ID:
       HXPR_IDP_TOKEN_URL: http://localhost:5002/idp/connect/token
       HXPR_IDP_CLIENT_ID: nuxeo-client
       HXPR_IDP_CLIENT_SECRET: secret
       HXPR_IDP_USERNAME: testuser
       HXPR_IDP_PASSWORD: password
-      
+
       # Docker Model Runner
       MODEL_RUNNER_URL: http://model-runner.docker.internal/engines/llama.cpp/v1
       EMBEDDING_MODEL: ai/mxbai-embed-large
@@ -49,6 +50,7 @@ services:
       HXPR_URL: http://localhost:8080
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
+      HXPR_PATH_REPOSITORY_ID:
       HXPR_IDP_TOKEN_URL: http://localhost:5002/idp/connect/token
       HXPR_IDP_CLIENT_ID: nuxeo-client
       HXPR_IDP_CLIENT_SECRET: secret

@@ -1,7 +1,6 @@
 package org.alfresco.contentlake.security;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -9,7 +8,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
@@ -22,13 +20,12 @@ import java.util.Map;
  * Uses the Alfresco tickets endpoint to verify username/password combinations.
  */
 @Slf4j
-@Component
 public class AlfrescoAuthenticationProvider implements AuthenticationProvider {
 
     private final String alfrescoUrl;
     private final RestTemplate restTemplate;
 
-    public AlfrescoAuthenticationProvider(@Value("${content.service.url}") String alfrescoUrl) {
+    public AlfrescoAuthenticationProvider(String alfrescoUrl) {
         this.alfrescoUrl = alfrescoUrl;
         this.restTemplate = new RestTemplate();
     }

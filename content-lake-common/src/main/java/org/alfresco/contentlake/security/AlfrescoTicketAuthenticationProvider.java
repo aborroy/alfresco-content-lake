@@ -1,7 +1,6 @@
 package org.alfresco.contentlake.security;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -9,7 +8,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
@@ -24,13 +22,12 @@ import java.util.Map;
  * the actual user id rather than the raw ticket string.
  */
 @Slf4j
-@Component
 public class AlfrescoTicketAuthenticationProvider implements AuthenticationProvider {
 
     private final String alfrescoUrl;
     private final RestTemplate restTemplate;
 
-    public AlfrescoTicketAuthenticationProvider(@Value("${content.service.url}") String alfrescoUrl) {
+    public AlfrescoTicketAuthenticationProvider(String alfrescoUrl) {
         this.alfrescoUrl = alfrescoUrl;
         this.restTemplate = new RestTemplate();
     }

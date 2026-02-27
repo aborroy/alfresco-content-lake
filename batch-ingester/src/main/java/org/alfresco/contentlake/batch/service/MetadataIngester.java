@@ -13,6 +13,7 @@ import org.alfresco.contentlake.hxpr.api.model.User;
 import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.core.model.Node;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.*;
 
@@ -58,11 +59,77 @@ public class MetadataIngester {
     }
 
     private HxprDocument createDocument(Node node) {
-        hxprService.ensureFolder(hxprProps.getTargetPath());
+        String pathRepositoryId = resolvePathRepositoryId();
+        String parentPath = buildContentLakeParentPath(node, pathRepositoryId);
+        return createDocumentAtPath(node, parentPath);
+    }
+
+    private HxprDocument createDocumentAtPath(Node node, String parentPath) {
+        hxprService.ensureFolder(parentPath);
         HxprDocument doc = buildDocument(node);
-        HxprDocument created = hxprService.createDocument(hxprProps.getTargetPath(), doc);
-        log.info("Created hxpr document: {} for node: {}", created.getSysId(), node.getId());
-        return created;
+        doc.setCinPaths(List.of(joinPath(parentPath, node.getId())));
+        try {
+            HxprDocument created = hxprService.createDocument(parentPath, doc);
+            log.info("Created hxpr document: {} for node: {} at path: {}",
+                    created.getSysId(), node.getId(), joinPath(parentPath, node.getId()));
+            return created;
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
+            throw new IllegalStateException("HXPR denied document creation at path '" + parentPath
+                    + "'. Configure hxpr.path-repository-id (HXPR_PATH_REPOSITORY_ID) "
+                    + "or grant write permissions for this hierarchy.", e);
+        }
+    }
+
+    private String buildContentLakeParentPath(Node node, String repositoryId) {
+        String base = buildRepositoryRootPath(repositoryId);
+        if (node.getPath() == null
+                || node.getPath().getName() == null
+                || node.getPath().getName().isBlank()) {
+            return base;
+        }
+        String alfrescoPath = normalizeAbsolutePath(node.getPath().getName());
+        if ("/".equals(base)) {
+            return alfrescoPath;
+        }
+        return base + alfrescoPath;
+    }
+
+    private String buildRepositoryRootPath(String repositoryId) {
+        String targetPath = normalizeAbsolutePath(hxprProps.getTargetPath());
+        if (repositoryId == null || repositoryId.isBlank()) {
+            return targetPath;
+        }
+        String cleanRepositoryId = repositoryId.startsWith("/")
+                ? repositoryId.substring(1)
+                : repositoryId;
+        return joinPath(targetPath, cleanRepositoryId);
+    }
+
+    private String resolvePathRepositoryId() {
+        String configured = hxprProps.getPathRepositoryId();
+        if (configured != null && !configured.isBlank()) {
+            return configured.trim();
+        }
+        return alfrescoClient.getRepositoryId();
+    }
+
+    private String normalizeAbsolutePath(String path) {
+        if (path == null || path.isBlank()) {
+            return "/";
+        }
+        String normalized = path.startsWith("/") ? path : "/" + path;
+        if (normalized.length() > 1 && normalized.endsWith("/")) {
+            return normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private String joinPath(String parentPath, String leaf) {
+        String parent = normalizeAbsolutePath(parentPath);
+        if ("/".equals(parent)) {
+            return "/" + leaf;
+        }
+        return parent + "/" + leaf;
     }
 
     private HxprDocument updateDocument(HxprDocument existing, Node node) {
@@ -201,10 +268,8 @@ public class MetadataIngester {
     }
 
     private List<String> buildCinPaths(Node node) {
-        if (node.getPath() == null || node.getPath().getName() == null) {
-            return List.of();
-        }
-        String path = node.getPath().getName();
-        return path.isBlank() ? List.of() : List.of(path);
+        String repositoryId = resolvePathRepositoryId();
+        String parentPath = buildContentLakeParentPath(node, repositoryId);
+        return List.of(joinPath(parentPath, node.getId()));
     }
 }
