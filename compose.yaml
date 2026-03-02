@@ -5,18 +5,20 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Alfresco SDK configuration
-      CONTENT_SERVICE_URL: http://localhost:8080
-      CONTENT_SERVICE_SECURITY_BASICAUTH_USERNAME: admin
-      CONTENT_SERVICE_SECURITY_BASICAUTH_PASSWORD: admin
+      ALFRESCO_URL: ${ALFRESCO_URL:-http://alfresco:8080}
+      ALFRESCO_INTERNAL_USERNAME: admin
+      ALFRESCO_INTERNAL_PASSWORD: admin
       
       # hxpr
-      HXPR_URL: http://localhost:8080
+      HXPR_URL: ${HXPR_URL:-http://host.docker.internal:8080}
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: http://localhost:5002/idp/connect/token
+      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
       HXPR_IDP_CLIENT_ID: nuxeo-client
       HXPR_IDP_CLIENT_SECRET: secret
       HXPR_IDP_USERNAME: testuser
@@ -33,6 +35,9 @@ services:
       # Embedding
       EMBEDDING_CHUNK_SIZE: 1000
       EMBEDDING_CHUNK_OVERLAP: 200
+      TRANSFORM_URL: ${TRANSFORM_URL:-http://transform-core-aio:8090}
+    networks:
+      - alfresco_default
 
   live-ingester:
     build:
@@ -40,24 +45,26 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9092:9092"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # ActiveMQ — connect to the broker managed by the Alfresco deployment
-      ACTIVEMQ_URL: ${ACTIVEMQ_URL:tcp://localhost:61616}
-      ACTIVEMQ_USER: ${ACTIVEMQ_USER:admin}
-      ACTIVEMQ_PASSWORD: ${ACTIVEMQ_PASSWORD:admin}
+      ACTIVEMQ_URL: ${ACTIVEMQ_URL:-tcp://activemq:61616}
+      ACTIVEMQ_USER: ${ACTIVEMQ_USER:-admin}
+      ACTIVEMQ_PASSWORD: ${ACTIVEMQ_PASSWORD:-admin}
       ALFRESCO_EVENT_TOPIC: alfresco.repo.event2
 
       # Alfresco SDK configuration
-      ALFRESCO_URL: http://localhost:8080
+      ALFRESCO_URL: ${ALFRESCO_URL:-http://alfresco:8080}
       ALFRESCO_INTERNAL_USERNAME: admin
       ALFRESCO_INTERNAL_PASSWORD: admin
 
       # hxpr
-      HXPR_URL: http://localhost:8080
+      HXPR_URL: ${HXPR_URL:-http://host.docker.internal:8080}
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: http://localhost:5002/idp/connect/token
+      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
       HXPR_IDP_CLIENT_ID: nuxeo-client
       HXPR_IDP_CLIENT_SECRET: secret
       HXPR_IDP_USERNAME: testuser
@@ -68,11 +75,13 @@ services:
       EMBEDDING_MODEL: ai/mxbai-embed-large
 
       # Transform Service
-      TRANSFORM_URL: http://localhost:10090
+      TRANSFORM_URL: ${TRANSFORM_URL:-http://transform-core-aio:8090}
       TRANSFORM_TIMEOUT_MS: 300000
 
       # Concurrency
       LIVE_INGESTER_CONCURRENCY: 1-4
+    networks:
+      - alfresco_default
 
   rag-service:
     build:
@@ -80,18 +89,20 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9091:9091"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Alfresco SDK configuration
-      CONTENT_SERVICE_URL: http://localhost:8080
-      CONTENT_SERVICE_SECURITY_BASICAUTH_USERNAME: admin
-      CONTENT_SERVICE_SECURITY_BASICAUTH_PASSWORD: admin
+      ALFRESCO_URL: ${ALFRESCO_URL:-http://alfresco:8080}
+      ALFRESCO_INTERNAL_USERNAME: admin
+      ALFRESCO_INTERNAL_PASSWORD: admin
 
       # hxpr
-      HXPR_URL: http://localhost:8080
+      HXPR_URL: ${HXPR_URL:-http://host.docker.internal:8080}
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: http://localhost:5002/idp/connect/token
+      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
       HXPR_IDP_CLIENT_ID: nuxeo-client
       HXPR_IDP_CLIENT_SECRET: secret
       HXPR_IDP_USERNAME: testuser
@@ -108,4 +119,9 @@ services:
       RAG_DEFAULT_TOP_K: 5
       RAG_DEFAULT_MIN_SCORE: 0.5
       RAG_MAX_CONTEXT_LENGTH: 12000
+    networks:
+      - alfresco_default
 
+networks:
+  alfresco_default:
+    external: true

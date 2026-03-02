@@ -17,6 +17,7 @@ public class IngestionProperties {
 
     private List<Source> sources = new ArrayList<>();
     private Exclude exclude = new Exclude();
+    private Scope scope = new Scope();
     private Transform transform = new Transform();
     private Embedding embedding = new Embedding();
 
@@ -35,6 +36,11 @@ public class IngestionProperties {
     }
 
     @Data
+    public static class Scope {
+        private List<String> adminUsers = new ArrayList<>(List.of("admin"));
+    }
+
+    @Data
     public static class Transform {
         private int workerThreads = 4;
         private int queueCapacity = 1000;
@@ -42,8 +48,14 @@ public class IngestionProperties {
 
     @Data
     public static class Embedding {
-        private int chunkSize = 900;
+        /** Minimum chunk size in characters; short paragraphs are merged up to this floor. */
+        private int minChunkSize = 200;
+        /** Maximum chunk size in characters; maps to {@code ChunkingConfig.maxChunkSize}. */
+        private int chunkSize = 1000;
+        /** Overlap between consecutive chunks in characters. */
         private int chunkOverlap = 120;
+        /** Cosine-similarity threshold for adaptive chunk merging (0.0–1.0). */
+        private double similarityThreshold = 0.75;
         private String modelName = "default";
         private NoiseReduction noiseReduction = new NoiseReduction();
     }

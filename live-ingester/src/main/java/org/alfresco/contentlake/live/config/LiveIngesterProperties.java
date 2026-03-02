@@ -19,8 +19,8 @@ public class LiveIngesterProperties {
     /** Event filtering rules (mirrors batch-ingester exclusion config). */
     private Filter filter = new Filter();
 
-    /** Scope rules used after fetching the full Alfresco node snapshot. */
-    private Scope scope = new Scope();
+    /** Text chunking parameters for the embedding pipeline. */
+    private Chunking chunking = new Chunking();
 
     /** In-memory duplicate suppression for repeated Event2 deliveries. */
     private Dedup dedup = new Dedup();
@@ -37,9 +37,15 @@ public class LiveIngesterProperties {
     }
 
     @Data
-    public static class Scope {
-        private List<String> includePaths = new ArrayList<>();
-        private List<String> requiredAspects = new ArrayList<>();
+    public static class Chunking {
+        /** Minimum chunk size in characters; short paragraphs are merged up to this floor. */
+        private int minChunkSize = 200;
+        /** Maximum chunk size in characters. */
+        private int maxChunkSize = 1000;
+        /** Overlap between consecutive chunks in characters. */
+        private int overlapSize = 120;
+        /** Cosine-similarity threshold for adaptive chunk merging (0.0–1.0). */
+        private double similarityThreshold = 0.75;
     }
 
     @Data

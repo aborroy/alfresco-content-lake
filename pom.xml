@@ -18,6 +18,7 @@
     <name>Alfresco Content Lake</name>
 
     <modules>
+        <module>content-lake-repo-model</module>
         <module>content-lake-common</module>
         <module>batch-ingester</module>
         <module>live-ingester</module>

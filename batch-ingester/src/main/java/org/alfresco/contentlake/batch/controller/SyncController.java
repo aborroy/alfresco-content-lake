@@ -3,8 +3,12 @@ package org.alfresco.contentlake.batch.controller;
 import lombok.RequiredArgsConstructor;
 import org.alfresco.contentlake.batch.model.BatchSyncRequest;
 import org.alfresco.contentlake.batch.model.IngestionJob;
+import org.alfresco.contentlake.batch.model.ScopeUpdateRequest;
+import org.alfresco.contentlake.batch.model.ScopeUpdateResponse;
 import org.alfresco.contentlake.batch.service.BatchIngestionService;
+import org.alfresco.contentlake.batch.service.RepositoryScopeAdminService;
 import org.alfresco.contentlake.batch.service.TransformationQueue;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -21,6 +25,7 @@ import java.util.Map;
 public class SyncController {
 
     private final BatchIngestionService batchIngestionService;
+    private final RepositoryScopeAdminService repositoryScopeAdminService;
     private final TransformationQueue transformationQueue;
 
     /**
@@ -42,6 +47,19 @@ public class SyncController {
     @PostMapping("/configured")
     public IngestionJob startConfiguredSync() {
         return batchIngestionService.startConfiguredSync();
+    }
+
+    /**
+     * Explicit admin endpoint used to add or remove the {@code cl:indexed}
+     * aspect on an Alfresco folder.
+     *
+     * <p>Authorization is restricted to configured admin user ids. The actual
+     * repository update is performed through the internal Alfresco client.</p>
+     */
+    @PostMapping("/scope/indexed")
+    public ScopeUpdateResponse updateIndexedScope(@RequestBody ScopeUpdateRequest request,
+                                                  Authentication authentication) {
+        return repositoryScopeAdminService.setIndexedFolderScope(authentication.getName(), request);
     }
 
     /**

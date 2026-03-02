@@ -30,6 +30,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 - RAG: LLM-powered question answering grounded in Alfresco document content
 - Permission-Aware: Server-side ACL enforcement via hxpr
 - Local AI: On-premises LLM and embedding models using Spring AI
+- Repository Scope Model: `cl:indexed` and `cl:excludeFromLake` for Alfresco-native scope control
 - REST API: Generic connector using Alfresco REST APIs
 - Secured Endpoints: Alfresco authentication (username/password or tickets)
 - Shared Ingestion Core: Common metadata, transform, chunking, embedding, ACL, and delete/update logic in `content-lake-common`
@@ -72,6 +73,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 
 | Module | Port | Description |
 |--------|------|-------------|
+| `content-lake-repo-model` | — | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
 | `content-lake-common` | — | Shared clients and ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
 | `batch-ingester` | 9090 | Folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
 | `live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |
@@ -98,6 +100,11 @@ cd alfresco-content-lake
 # Build all modules
 mvn clean package
 
+# Deploy the repository content model to ACS before starting the ingesters
+# Artifact:
+#   content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
+# Deploy it to the Alfresco Repository classpath.
+
 # Configure (see Environment Variables below)
 export ALFRESCO_URL=http://localhost:8080
 export ALFRESCO_INTERNAL_USERNAME=admin
@@ -116,6 +123,70 @@ java -jar rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
 # Or with Docker Compose (both services)
 docker-compose up
 ```
+
+### Alfresco Repo Model
+
+The batch and live ingesters now rely on an Alfresco content model for scope control:
+
+- `cl:indexed` marks a folder subtree as in scope for Content Lake ingestion
+- `cl:excludeFromLake` lets a child node opt out even when an ancestor folder is indexed
+
+Build artifact:
+
+```bash
+content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
+```
+
+Deploy that JAR to the Alfresco Repository classpath before enabling ingestion. Typical options are:
+
+- include it in an ACS SDK `modules/platform` build
+- copy or mount it into an Alfresco Repository image under `webapps/alfresco/WEB-INF/lib`
+
+### Starting From A Non-Indexed Repository
+
+If your Alfresco Repository does not yet use `cl:indexed`, the recommended startup sequence is:
+
+1. Build the project and deploy the repository model JAR to Alfresco Repository.
+   After deployment, restart the repository so `cl:indexed` and `cl:excludeFromLake` are available.
+2. Start `batch-ingester`.
+   This gives you the admin endpoint used to mark the first scope root.
+3. Mark the folder you want as the initial scope root.
+   To index every site, mark `Company Home/Sites` with `cl:indexed`.
+4. Run one batch synchronization rooted at that same folder.
+   This performs the initial backfill into Content Lake.
+5. Start `live-ingester`.
+   Live ingestion then keeps that indexed subtree up to date.
+
+Example for indexing all sites under `Company Home/Sites`:
+
+1. Resolve the Alfresco node id for `Company Home/Sites`.
+   You can obtain it from Alfresco UI tools or the Alfresco REST API.
+2. Mark that folder as indexed:
+
+```bash
+curl -X POST http://localhost:9090/api/sync/scope/indexed \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"nodeId":"SITES_FOLDER_NODE_ID","indexed":true}'
+```
+
+3. Run the initial batch backfill from that folder:
+
+```bash
+curl -X POST http://localhost:9090/api/sync/batch \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"folders":["SITES_FOLDER_NODE_ID"],"recursive":true,"types":["cm:content"]}'
+```
+
+4. After the batch completes, start `live-ingester` so new or changed content under `Company Home/Sites` continues to sync automatically.
+
+Important:
+
+- `cl:indexed` defines repository scope; it does not itself trigger a historical backfill
+- the first batch run is still required to ingest existing content
+- batch discovery root and scope root are related but separate; for the first full load, use the same folder for both
+- if you later want to index only one site, put `cl:indexed` on that site folder instead of on `Company Home/Sites`
 
 ### Environment Variables
 
@@ -162,6 +233,9 @@ export RAG_MAX_CONTEXT_LENGTH=12000
 export TRANSFORM_WORKERS=4
 export EMBEDDING_CHUNK_SIZE=900
 export EMBEDDING_CHUNK_OVERLAP=120
+
+# Scope administration (batch-ingester only)
+export SCOPE_ADMIN_USERS=admin
 ```
 
 ## Authentication
@@ -219,6 +293,28 @@ curl http://localhost:9090/api/sync/status -u admin:admin
 # Job-specific status
 curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
 ```
+
+#### Manage Repository Scope
+
+Explicitly mark or unmark a folder as a Content Lake scope root:
+
+```bash
+curl -X POST http://localhost:9090/api/sync/scope/indexed \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"nodeId":"folder-node-id","indexed":true}'
+```
+
+Remove the scope marker:
+
+```bash
+curl -X POST http://localhost:9090/api/sync/scope/indexed \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"nodeId":"folder-node-id","indexed":false}'
+```
+
+Only users listed in `SCOPE_ADMIN_USERS` can call this endpoint. The actual repository update is performed with the internal Alfresco client configured for the batch ingester.
 
 ### RAG Service (port 9091)
 

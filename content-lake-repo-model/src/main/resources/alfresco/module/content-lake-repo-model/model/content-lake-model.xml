@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model name="cl:contentLakeModel"
+       xmlns="http://www.alfresco.org/model/dictionary/1.0"
+       xmlns:cl="http://www.alfresco.org/model/contentlake/1.0">
+
+    <description>Content Lake scope control model</description>
+    <author>Alfresco Content Lake</author>
+    <version>1.0</version>
+
+    <imports>
+        <import uri="http://www.alfresco.org/model/dictionary/1.0" prefix="d"/>
+        <import uri="http://www.alfresco.org/model/content/1.0" prefix="cm"/>
+    </imports>
+
+    <namespaces>
+        <namespace uri="http://www.alfresco.org/model/contentlake/1.0" prefix="cl"/>
+    </namespaces>
+
+    <aspects>
+
+        <!--
+          Applied to FOLDERS only. Marks the entire subtree as in scope for
+          Content Lake ingestion. No properties — presence alone defines the
+          scope boundary. Managed via the batch-ingester admin API.
+        -->
+        <aspect name="cl:indexed">
+            <title>Content Lake Indexed</title>
+            <description>Marks a folder subtree as in scope for Content Lake ingestion. Presence alone defines the scope boundary.</description>
+        </aspect>
+
+        <!--
+          Applied to individual FILES to override the folder-level scope.
+          When cl:excludeFromLake is true, the node is skipped even if an
+          ancestor folder has cl:indexed. Applied independently of cl:indexed
+          so files do not need the folder marker to opt out.
+        -->
+        <aspect name="cl:fileScope">
+            <title>Content Lake File Scope Override</title>
+            <description>Allows individual nodes to opt out of Content Lake ingestion even if an ancestor folder has cl:indexed.</description>
+            <properties>
+                <property name="cl:excludeFromLake">
+                    <title>Exclude From Content Lake</title>
+                    <description>Set to true to opt this node out of Content Lake even if an ancestor folder is indexed.</description>
+                    <type>d:boolean</type>
+                    <mandatory>false</mandatory>
+                    <default>false</default>
+                </property>
+            </properties>
+        </aspect>
+
+    </aspects>
+
+</model>

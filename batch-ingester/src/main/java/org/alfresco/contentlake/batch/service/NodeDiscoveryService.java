@@ -5,11 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.alfresco.contentlake.batch.config.IngestionProperties;
 import org.alfresco.contentlake.batch.model.BatchSyncRequest;
 import org.alfresco.contentlake.client.AlfrescoClient;
+import org.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.alfresco.core.model.Node;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -22,6 +22,7 @@ public class NodeDiscoveryService {
 
     private final AlfrescoClient alfrescoClient;
     private final IngestionProperties props;
+    private final ContentLakeScopeResolver scopeResolver;
 
     /**
      * Discovers nodes from the folders specified in the request.
@@ -68,13 +69,16 @@ public class NodeDiscoveryService {
 
     private Stream<Node> toCandidateStream(Node node, boolean recursive, List<String> types, List<String> mimeTypes) {
         if (Boolean.TRUE.equals(node.isIsFolder()) && recursive) {
+            if (!scopeResolver.shouldTraverse(node)) {
+                return Stream.empty();
+            }
             return discoverFromFolder(node.getId(), true, types, mimeTypes);
         }
 
         if (Boolean.FALSE.equals(node.isIsFolder())
                 && matchesType(node, types)
                 && matchesMimeType(node, mimeTypes)
-                && notExcluded(node)) {
+                && scopeResolver.isInScope(node)) {
             return Stream.of(node);
         }
 
@@ -93,50 +97,5 @@ public class NodeDiscoveryService {
             return false;
         }
         return mimeTypes.contains(node.getContent().getMimeType());
-    }
-
-    private boolean notExcluded(Node node) {
-        Set<String> excludedAspects = Set.copyOf(props.getExclude().getAspects());
-        List<String> excludedPathPatterns = props.getExclude().getPaths();
-
-        if (hasExcludedAspect(node, excludedAspects)) {
-            return false;
-        }
-
-        return !matchesExcludedPath(node, excludedPathPatterns);
-    }
-
-    private boolean hasExcludedAspect(Node node, Set<String> excludedAspects) {
-        if (node.getAspectNames() == null) {
-            return false;
-        }
-        for (String aspect : node.getAspectNames()) {
-            if (excludedAspects.contains(aspect)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean matchesExcludedPath(Node node, List<String> excludedPathPatterns) {
-        if (node.getPath() == null || node.getPath().getName() == null) {
-            return false;
-        }
-
-        String fullPath = node.getPath().getName();
-        for (String pattern : excludedPathPatterns) {
-            if (matchesPattern(fullPath, pattern)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean matchesPattern(String path, String pattern) {
-        return path.matches(wildcardToRegex(pattern));
-    }
-
-    private String wildcardToRegex(String pattern) {
-        return pattern.replace("*", ".*");
     }
 }

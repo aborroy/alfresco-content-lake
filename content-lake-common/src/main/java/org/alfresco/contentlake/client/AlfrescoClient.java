@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.alfresco.core.handler.NodesApi;
 import org.alfresco.core.model.Node;
+import org.alfresco.core.model.NodeBodyUpdate;
 import org.alfresco.core.model.NodeChildAssociationEntry;
 import org.alfresco.core.model.NodeChildAssociationPaging;
 import org.alfresco.core.model.PermissionElement;
@@ -20,8 +21,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -126,6 +129,38 @@ public class AlfrescoClient {
         } catch (Exception e) {
             log.debug("Could not fetch node {}: {}", nodeId, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Updates node aspects and optional properties.
+     *
+     * @param nodeId node identifier
+     * @param aspectNames complete aspect list to persist
+     * @param properties optional property map to persist
+     * @return updated node entry
+     */
+    public Node updateNode(String nodeId, List<String> aspectNames, @Nullable Map<String, Object> properties) {
+        try {
+            NodeBodyUpdate body = new NodeBodyUpdate();
+            body.setAspectNames(new ArrayList<>(aspectNames));
+            if (properties != null) {
+                body.setProperties(new LinkedHashMap<>(properties));
+            }
+
+            var response = nodesApi.updateNode(nodeId, body, INCLUDE, null);
+            if (response == null || response.getBody() == null || response.getBody().getEntry() == null) {
+                throw new IllegalStateException("Empty response while updating node " + nodeId);
+            }
+
+            return response.getBody().getEntry();
+        } catch (RestClientResponseException e) {
+            throw new IllegalStateException(
+                    "Failed to update node " + nodeId + ": status=" + e.getStatusCode() + " body=" + e.getResponseBodyAsString(),
+                    e
+            );
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to update node " + nodeId, e);
         }
     }
 

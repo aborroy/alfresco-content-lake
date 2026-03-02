@@ -7,6 +7,9 @@ import org.alfresco.contentlake.client.HxprQueryApi;
 import org.alfresco.contentlake.client.HxprService;
 import org.alfresco.contentlake.client.HxprTokenProvider;
 import org.alfresco.contentlake.client.TransformClient;
+import org.alfresco.contentlake.config.HxprProperties;
+import org.alfresco.contentlake.config.TransformProperties;
+import org.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.alfresco.contentlake.service.EmbeddingService;
 import org.alfresco.contentlake.service.NodeSyncService;
 import org.alfresco.contentlake.service.chunking.NoiseReductionService;
@@ -31,8 +34,8 @@ import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 @Configuration
 @EnableConfigurationProperties({
         LiveIngesterProperties.class,
-        LiveIngesterConfig.HxprProperties.class,
-        LiveIngesterConfig.TransformProperties.class,
+        HxprProperties.class,
+        TransformProperties.class,
         LiveIngesterConfig.EmbeddingProperties.class
 })
 public class LiveIngesterConfig {
@@ -100,13 +103,29 @@ public class LiveIngesterConfig {
     }
 
     @Bean
-    public ChunkingConfig chunkingConfig() {
-        return new ChunkingConfig(200, 1000, 120, 0.75);
+    public ChunkingConfig chunkingConfig(LiveIngesterProperties props) {
+        LiveIngesterProperties.Chunking ch = props.getChunking();
+        return new ChunkingConfig(
+                ch.getMinChunkSize(),
+                ch.getMaxChunkSize(),
+                ch.getOverlapSize(),
+                ch.getSimilarityThreshold()
+        );
     }
 
     @Bean
     public SimpleChunkingService chunkingService(NoiseReductionService nr, ChunkingConfig cfg) {
         return new SimpleChunkingService(nr, cfg);
+    }
+
+    @Bean
+    public ContentLakeScopeResolver contentLakeScopeResolver(LiveIngesterProperties props,
+                                                              AlfrescoClient alfrescoClient) {
+        return new ContentLakeScopeResolver(
+                props.getFilter().getExcludePaths(),
+                props.getFilter().getExcludeAspects(),
+                alfrescoClient
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -151,36 +170,10 @@ public class LiveIngesterConfig {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // Configuration properties (same shape as batch-ingester)
+    // Module-local configuration properties
     // ──────────────────────────────────────────────────────────────────────
 
-    @Data
-    @ConfigurationProperties(prefix = "hxpr")
-    public static class HxprProperties {
-        private String url = "http://localhost:8080";
-        private String repositoryId = "default";
-        private String targetPath = "/alfresco-sync";
-        private String pathRepositoryId;
-        private IdpConfig idp = new IdpConfig();
-
-        @Data
-        public static class IdpConfig {
-            private String tokenUrl;
-            private String clientId;
-            private String clientSecret;
-            private String username;
-            private String password;
-        }
-    }
-
-    @Data
-    @ConfigurationProperties(prefix = "transform")
-    public static class TransformProperties {
-        private String url = "http://localhost:10090";
-        private long timeoutMs = 300000;
-        private boolean enabled = true;
-    }
-
+    /** Embedding model name, separate from chunking config. Bound from {@code embedding.*}. */
     @Data
     @ConfigurationProperties(prefix = "embedding")
     public static class EmbeddingProperties {

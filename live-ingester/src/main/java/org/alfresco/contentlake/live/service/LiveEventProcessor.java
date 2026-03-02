@@ -3,6 +3,7 @@ package org.alfresco.contentlake.live.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.alfresco.contentlake.client.AlfrescoClient;
+import org.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.alfresco.contentlake.service.NodeSyncService;
 import org.alfresco.core.model.Node;
 import org.alfresco.repo.event.v1.model.ChildAssociationResource;
@@ -25,7 +26,8 @@ public class LiveEventProcessor {
 
     private final AlfrescoClient alfrescoClient;
     private final NodeSyncService nodeSyncService;
-    private final NodeScopeService nodeScopeService;
+    private final ContentLakeScopeResolver scopeResolver;
+    private final FolderSubtreeReconciler folderSubtreeReconciler;
     private final RecentEventDeduplicator deduplicator;
     private final LiveIngesterMetrics metrics;
 
@@ -57,7 +59,7 @@ public class LiveEventProcessor {
                     log.warn("Node {} not found for event {}", nodeId, event.getId());
                     return;
                 }
-            } else if (nodeScopeService.isInScope(node)) {
+            } else if (scopeResolver.isInScope(node)) {
                 nodeSyncService.syncNode(node);
             } else {
                 nodeSyncService.deleteNode(nodeId, resolveEventTimestamp(event, node));
@@ -121,7 +123,7 @@ public class LiveEventProcessor {
                 return;
             }
 
-            if (!nodeScopeService.isInScope(node)) {
+            if (!scopeResolver.isInScope(node)) {
                 nodeSyncService.deleteNode(node.getId(), resolveEventTimestamp(event, node));
                 metrics.recordFiltered();
                 log.debug("Node {} is out of scope during permission event {}", node.getId(), event.getId());
@@ -133,6 +135,62 @@ public class LiveEventProcessor {
         } catch (Exception e) {
             metrics.recordError();
             log.error("Failed to process permission event {}: {}", event.getType(), e.getMessage(), e);
+        }
+    }
+
+    public void processFolderScopeChange(RepoEvent<DataAttributes<Resource>> event) {
+        metrics.recordReceived();
+
+        String nodeId = extractPrimaryNodeId(event);
+        if (nodeId == null || nodeId.isBlank()) {
+            metrics.recordFiltered();
+            log.warn("Skipping folder scope change event {} — missing node id", event.getId());
+            return;
+        }
+        if (deduplicator.shouldSkip(event, nodeId)) {
+            metrics.recordDeduplicated();
+            log.debug("Skipping duplicate folder scope change event {} for folder {}", event.getId(), nodeId);
+            return;
+        }
+
+        try {
+            Node folder = alfrescoClient.getNode(nodeId);
+            if (folder == null) {
+                metrics.recordFiltered();
+                log.warn("Folder {} not found for scope change event {}", nodeId, event.getId());
+                return;
+            }
+            if (!Boolean.TRUE.equals(folder.isIsFolder())) {
+                metrics.recordFiltered();
+                log.debug("Node {} is not a folder for scope change event {}", nodeId, event.getId());
+                return;
+            }
+            if (!scopeResolver.shouldTraverse(folder)) {
+                metrics.recordFiltered();
+                log.debug("Folder {} is excluded from subtree reconciliation for event {}", nodeId, event.getId());
+                return;
+            }
+
+            // Invalidate the folder's cached aspect state so that hasIndexedAncestor()
+            // reflects the aspect change that triggered this event.
+            scopeResolver.invalidateFolderScope(nodeId);
+
+            FolderSubtreeReconciler.ReconciliationResult result =
+                    folderSubtreeReconciler.reconcile(folder, resolveEventTimestamp(event, folder));
+
+            metrics.recordProcessed();
+            log.info(
+                    "Reconciled subtree for folder {} after {}: synced={}, deleted={}, skipped={}, failed={}",
+                    nodeId,
+                    event.getType(),
+                    result.synced(),
+                    result.deleted(),
+                    result.skipped(),
+                    result.failed()
+            );
+        } catch (Exception e) {
+            metrics.recordError();
+            log.error("Failed to process folder scope change {} for folder {}: {}", event.getType(), nodeId, e.getMessage(), e);
         }
     }
 
