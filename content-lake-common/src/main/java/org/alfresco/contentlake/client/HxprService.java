@@ -202,15 +202,20 @@ public class HxprService {
     }
 
     /**
-     * Finds a document by Alfresco node identifier stored in {@code sys_name}.
+     * Finds a document by the stable Alfresco source identifier stored in
+     * {@code (cin_sourceId, cin_id)}.
      *
      * @param nodeId Alfresco node identifier
+     * @param sourceId Alfresco repository identifier
      * @return matching document, or {@code null} if not found
      */
-    public HxprDocument findByNodeId(String nodeId) {
+    public HxprDocument findByNodeId(String nodeId, String sourceId) {
         try {
-            String hxql = "SELECT * FROM SysContent WHERE sys_primaryType = 'SysFile' AND sys_name = '"
+            String hxql = "SELECT * FROM SysContent WHERE sys_primaryType = 'SysFile' AND cin_id = '"
                     + escapeHxql(nodeId) + "'";
+            if (sourceId != null && !sourceId.isBlank()) {
+                hxql += " AND cin_sourceId = '" + escapeHxql(sourceId) + "'";
+            }
 
             Query query = newQuery(hxql, 1, 0);
 
@@ -219,10 +224,21 @@ public class HxprService {
                 return result.getDocuments().get(0);
             }
         } catch (Exception e) {
-            log.warn("Failed to query hxpr for sys_name={} (will create new document): {}", nodeId, e.getMessage());
+            log.warn("Failed to query hxpr for cin_sourceId={}, cin_id={} (will create new document): {}",
+                    sourceId, nodeId, e.getMessage());
         }
 
         return null;
+    }
+
+    /**
+     * Finds a document by Alfresco node identifier only.
+     *
+     * <p>Kept for backward compatibility when the source repository identifier is
+     * not available, but callers should prefer {@link #findByNodeId(String, String)}.</p>
+     */
+    public HxprDocument findByNodeId(String nodeId) {
+        return findByNodeId(nodeId, null);
     }
 
     /**

@@ -44,7 +44,8 @@ public class MetadataIngester {
     public TransformationTask ingestMetadata(Node node) {
         log.debug("Ingesting metadata for node: {} ({})", node.getName(), node.getId());
 
-        HxprDocument existing = hxprService.findByNodeId(node.getId());
+        String sourceId = alfrescoClient.getRepositoryId();
+        HxprDocument existing = hxprService.findByNodeId(node.getId(), sourceId);
         HxprDocument doc = (existing != null) ? updateDocument(existing, node) : createDocument(node);
 
         String documentPath = (node.getPath() != null) ? node.getPath().getName() : null;
@@ -67,11 +68,11 @@ public class MetadataIngester {
     private HxprDocument createDocumentAtPath(Node node, String parentPath) {
         hxprService.ensureFolder(parentPath);
         HxprDocument doc = buildDocument(node);
-        doc.setCinPaths(List.of(joinPath(parentPath, node.getId())));
+        doc.setCinPaths(List.of(buildDocumentPath(parentPath, node)));
         try {
             HxprDocument created = hxprService.createDocument(parentPath, doc);
             log.info("Created hxpr document: {} for node: {} at path: {}",
-                    created.getSysId(), node.getId(), joinPath(parentPath, node.getId()));
+                    created.getSysId(), node.getId(), buildDocumentPath(parentPath, node));
             return created;
         } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
             throw new IllegalStateException("HXPR denied document creation at path '" + parentPath
@@ -144,7 +145,7 @@ public class MetadataIngester {
         HxprDocument doc = new HxprDocument();
 
         doc.setSysPrimaryType(SYS_FILE);
-        doc.setSysName(node.getId());
+        doc.setSysName(resolveDocumentName(node));
         doc.setSysMixinTypes(List.of(MIXIN_CIN_REMOTE));
 
         doc.setCinId(node.getId());
@@ -270,6 +271,17 @@ public class MetadataIngester {
     private List<String> buildCinPaths(Node node) {
         String repositoryId = resolvePathRepositoryId();
         String parentPath = buildContentLakeParentPath(node, repositoryId);
-        return List.of(joinPath(parentPath, node.getId()));
+        return List.of(buildDocumentPath(parentPath, node));
+    }
+
+    private String buildDocumentPath(String parentPath, Node node) {
+        return joinPath(parentPath, resolveDocumentName(node));
+    }
+
+    private String resolveDocumentName(Node node) {
+        if (node.getName() != null && !node.getName().isBlank()) {
+            return node.getName();
+        }
+        return node.getId();
     }
 }

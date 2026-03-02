@@ -115,6 +115,7 @@ public class RagService {
                 .map(hit -> Source.builder()
                         .documentId(hit.getSourceDocument() != null ? hit.getSourceDocument().getDocumentId() : null)
                         .nodeId(hit.getSourceDocument() != null ? hit.getSourceDocument().getNodeId() : null)
+                        .sourceId(hit.getSourceDocument() != null ? hit.getSourceDocument().getSourceId() : null)
                         .name(hit.getSourceDocument() != null ? hit.getSourceDocument().getName() : null)
                         .path(hit.getSourceDocument() != null ? hit.getSourceDocument().getPath() : null)
                         .chunkText(hit.getChunkText())

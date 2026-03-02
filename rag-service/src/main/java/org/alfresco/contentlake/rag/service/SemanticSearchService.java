@@ -303,6 +303,7 @@ public class SemanticSearchService {
         return SourceDocument.builder()
                 .documentId(docId)
                 .nodeId(doc.getCinId() != null ? doc.getCinId() : doc.getSysName())
+                .sourceId(doc.getCinSourceId())
                 .name(name)
                 .path(path)
                 .mimeType(mimeType)

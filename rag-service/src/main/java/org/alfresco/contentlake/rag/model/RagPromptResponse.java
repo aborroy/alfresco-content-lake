@@ -61,6 +61,9 @@ public class RagPromptResponse {
         /** Alfresco node identifier. */
         private String nodeId;
 
+        /** Alfresco repository identifier. */
+        private String sourceId;
+
         /** Document name from Alfresco. */
         private String name;
 

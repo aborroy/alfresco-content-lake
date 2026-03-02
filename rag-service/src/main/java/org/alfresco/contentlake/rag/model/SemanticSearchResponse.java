@@ -75,8 +75,11 @@ public class SemanticSearchResponse {
         /** HXPR internal document identifier. */
         private String documentId;
 
-        /** Alfresco node identifier (stored in cin_id / sys_name). */
+        /** Alfresco node identifier (stored in cin_id). */
         private String nodeId;
+
+        /** Alfresco repository identifier (stored in cin_sourceId). */
+        private String sourceId;
 
         /** Document name from Alfresco. */
         private String name;
