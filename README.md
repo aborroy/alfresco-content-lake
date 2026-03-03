@@ -11,6 +11,11 @@
 
 [Features](#features) • [Quick Start](#quick-start) • [Architecture](#architecture) • [Authentication](#authentication) • [API Usage](#api-usage) • [Configuration](#configuration)
 
+## Related Projects
+
+- [alfresco-content-lake-ui](https://github.com/aborroy/alfresco-content-lake-ui) - ACA-based frontend for semantic search and RAG over Content Lake.
+- [alfresco-content-lake-deploy](https://github.com/aborroy/alfresco-content-lake-deploy) - Docker Compose deployment for Alfresco, hxpr, Content Lake services, and the UI.
+
 ## Overview
 
 Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) on Alfresco Content Services.
