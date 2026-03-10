@@ -362,7 +362,7 @@ Response:
 Search directly against the embedded chunks without LLM generation:
 
 ```bash
-curl -X POST http://localhost:9091/api/search/semantic -u admin:admin \
+curl -X POST http://localhost:9091/api/rag/search/semantic -u admin:admin \
   -H "Content-Type: application/json" \
   -d '{ "query": "a girl falls in a crater", "topK": 5, "minScore": 0.6 }'
 ```
@@ -372,6 +372,118 @@ Semantic search applies a minimum similarity score to suppress low-quality vecto
 * Default value: `0.5`
 * Applied server-side after vector retrieval
 * Can be overridden per request
+
+#### Hybrid Search
+
+Run vector + keyword retrieval and fuse results with `rrf` (default) or `weighted` scoring:
+
+```bash
+curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "budget approval process",
+    "strategy": "rrf",
+    "candidateCount": 20,
+    "maxResults": 5,
+    "metadata": {
+      "mimeType": "application/pdf",
+      "pathPrefix": "/Company Home/Sites/finance/documentLibrary",
+      "modifiedAfter": "2026-01-01T00:00:00Z",
+      "modifiedBefore": "2026-12-31T23:59:59Z",
+      "properties": {
+        "cm:title": "Budget"
+      }
+    }
+  }'
+```
+
+Structured metadata filters are optional. You can still pass a raw HXQL `filter` for advanced cases.
+
+Response example:
+
+```json
+{
+  "query": "budget approval process",
+  "strategy": "weighted",
+  "normalization": "max",
+  "model": "ai/mxbai-embed-large",
+  "resultCount": 2,
+  "vectorCandidates": 20,
+  "keywordCandidates": 18,
+  "searchTimeMs": 143,
+  "results": [
+    {
+      "rank": 1,
+      "score": 0.0325,
+      "chunkText": "The budget approval workflow starts with...",
+      "vectorScore": 0.87,
+      "keywordScore": 1.0,
+      "vectorRank": 2,
+      "keywordRank": 1
+    }
+  ]
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | String | *required* | Query for both vector and keyword legs |
+| `strategy` | String | `rrf` | Fusion strategy: `rrf` or `weighted` |
+| `normalization` | String | `max` | Weighted score normalization: `max` or `minmax` |
+| `candidateCount` | int | `20` | Candidates retrieved from each leg before fusion |
+| `maxResults` | int | `5` | Final fused result limit |
+| `vectorWeight` | double | `0.7` | Weight when `strategy=weighted` |
+| `textWeight` | double | `0.3` | Weight when `strategy=weighted` |
+| `filter` | String | — | Additional raw HXQL filter |
+| `metadata.mimeType` | String | — | MIME type filter (for example `application/pdf`) |
+| `metadata.pathPrefix` | String | — | Path prefix filter (starts-with match) |
+| `metadata.modifiedAfter` | String | — | Inclusive lower bound for `alfresco_modifiedAt` |
+| `metadata.modifiedBefore` | String | — | Inclusive upper bound for `alfresco_modifiedAt` |
+| `metadata.properties` | Map<String,String> | — | Exact-match filters on `cin_ingestProperties.<key>` |
+
+| Response Field | Type | Description |
+|---------------|------|-------------|
+| `query` | String | Original query |
+| `strategy` | String | Effective fusion strategy used |
+| `normalization` | String | Normalization mode used when `strategy=weighted` |
+| `model` | String | Embedding model used for vector search |
+| `resultCount` | int | Number of fused results returned |
+| `vectorCandidates` | int | Number of vector candidates retrieved |
+| `keywordCandidates` | int | Number of keyword candidates retrieved |
+| `searchTimeMs` | long | Total hybrid search execution time |
+| `results[].score` | double | Fused score (RRF or weighted) |
+| `results[].vectorScore` | Double | Raw vector score, if available |
+| `results[].keywordScore` | Double | Raw keyword score, if available |
+| `results[].sourceDocument` | object | Source document metadata |
+| `results[].chunkMetadata` | object | Chunk position/type metadata |
+
+##### Integration Smoke Test (local hxpr)
+
+Use this checklist to validate issue #14 end-to-end:
+
+1. Ensure at least one folder is ingested into hxpr via batch/live ingesters.
+2. Call hybrid search without metadata constraints and verify `resultCount > 0`.
+3. Call hybrid search with a restrictive metadata filter (for example `mimeType: application/pdf`) and confirm results narrow.
+4. Switch strategy to `weighted` and confirm response field `strategy` is `weighted`.
+
+Example smoke-test requests:
+
+```bash
+# Baseline
+curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"query":"budget approval process","strategy":"rrf","candidateCount":20,"maxResults":5}'
+
+# Restrictive metadata
+curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"query":"budget approval process","strategy":"rrf","metadata":{"mimeType":"application/pdf"}}'
+
+# Weighted strategy
+curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"query":"budget approval process","strategy":"weighted","normalization":"minmax","vectorWeight":0.7,"textWeight":0.3}'
+```
 
 ### Health Checks
 
@@ -497,6 +609,18 @@ rag:
 
 semantic-search:
   default-min-score: 0.5
+
+search:
+  hybrid:
+    enabled: true
+    strategy: rrf       # or weighted
+    normalization: max  # max or minmax (weighted strategy)
+    vector-weight: 0.7
+    text-weight: 0.3
+    initial-candidates: 20
+    final-results: 5
+    rrf-k: 60
+    default-min-score: 0.0
 ```
 
 ## Roadmap
