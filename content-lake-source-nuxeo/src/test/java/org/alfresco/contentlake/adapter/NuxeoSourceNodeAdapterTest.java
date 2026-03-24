@@ -5,6 +5,7 @@ import org.alfresco.contentlake.spi.SourceNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,7 +24,12 @@ class NuxeoSourceNodeAdapterTest {
                 "file:content", Map.of("mime-type", "application/pdf")
         ));
 
-        SourceNode node = NuxeoSourceNodeAdapter.toSourceNode(document, "nuxeo-dev", "file:content");
+        SourceNode node = NuxeoSourceNodeAdapter.toSourceNode(
+                document,
+                "nuxeo-dev",
+                "file:content",
+                Set.of("Administrator", "GROUP_members")
+        );
 
         assertThat(node.nodeId()).isEqualTo("doc-123");
         assertThat(node.sourceType()).isEqualTo("nuxeo");
@@ -32,7 +38,7 @@ class NuxeoSourceNodeAdapterTest {
         assertThat(node.path()).isEqualTo("/default-domain/workspaces/finance");
         assertThat(node.mimeType()).isEqualTo("application/pdf");
         assertThat(node.folder()).isFalse();
-        assertThat(node.readPrincipals()).isEmpty();
+        assertThat(node.readPrincipals()).containsExactlyInAnyOrder("Administrator", "GROUP_members");
         assertThat(node.sourceProperties())
                 .containsEntry("source_nodeId", "doc-123")
                 .containsEntry("source_type", "nuxeo")
@@ -52,7 +58,12 @@ class NuxeoSourceNodeAdapterTest {
         document.setPath("/default-domain/workspaces/finance");
         document.setState("project");
 
-        SourceNode node = NuxeoSourceNodeAdapter.toSourceNode(document, "nuxeo-dev", "file:content");
+        SourceNode node = NuxeoSourceNodeAdapter.toSourceNode(
+                document,
+                "nuxeo-dev",
+                "file:content",
+                Set.of("GROUP_members")
+        );
 
         assertThat(node.folder()).isTrue();
         assertThat(node.path()).isEqualTo("/default-domain/workspaces/finance");

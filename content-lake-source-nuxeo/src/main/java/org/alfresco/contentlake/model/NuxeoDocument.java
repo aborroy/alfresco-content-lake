@@ -118,6 +118,8 @@ public class NuxeoDocument {
         private String username;
         private String permission;
         private Boolean granted;
+        private String status;
+        private Boolean externalUser;
     }
 
     @Data

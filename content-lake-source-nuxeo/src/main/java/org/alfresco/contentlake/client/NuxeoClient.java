@@ -24,7 +24,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Nuxeo REST API client implementing the source SPI.
@@ -33,14 +37,21 @@ import java.util.List;
 public class NuxeoClient implements ContentSourceClient {
 
     private static final String SOURCE_TYPE = "nuxeo";
+    private static final String ACL_HEADER = "enrichers-document";
     private static final String ACL_ENRICHER = "acls";
     private static final String DOCUMENT_PROPERTIES_HEADER = "X-NXDocumentProperties";
     private static final String ALL_DOCUMENT_PROPERTIES = "*";
+    private static final String GROUP_PREFIX = "GROUP_";
+    private static final String EVERYONE_PRINCIPAL = "Everyone";
+    private static final String EVERYONE_GROUP = "GROUP_EVERYONE";
+    private static final Set<String> READ_PERMISSIONS = Set.of("Read", "ReadVersion", "ReadWrite", "Everything");
+    private static final Set<String> UNRECOGNIZED_ALLOWED_PERMISSION_NAMES = ConcurrentHashMap.newKeySet();
 
     private final RestClient restClient;
     private final String apiBaseUrl;
     private final String sourceId;
     private final String blobXpath;
+    private final Map<String, Boolean> groupPrincipalCache = new ConcurrentHashMap<>();
 
     public NuxeoClient(NuxeoProperties properties) {
         this(properties, new BasicNuxeoAuthentication(properties.getUsername(), properties.getPassword()));
@@ -78,7 +89,8 @@ public class NuxeoClient implements ContentSourceClient {
     @Override
     public @Nullable SourceNode getNode(String nodeId) {
         try {
-            return toSourceNode(fetchDocument("/id/{uid}", nodeId, true));
+            NuxeoDocument document = fetchDocument("/id/{uid}", nodeId, true);
+            return document != null ? toSourceNode(document) : null;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
                 return null;
@@ -90,7 +102,8 @@ public class NuxeoClient implements ContentSourceClient {
     public @Nullable SourceNode getNodeByPath(String repositoryPath) {
         try {
             String encodedPath = encodePathPreservingSlashes(trimLeadingSlash(repositoryPath));
-            return toSourceNode(fetchDocument("/path/" + encodedPath, null, true));
+            NuxeoDocument document = fetchDocument("/path/" + encodedPath, null, true);
+            return document != null ? toSourceNode(document) : null;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404 || e.getStatusCode().value() == 204) {
                 return null;
@@ -122,7 +135,7 @@ public class NuxeoClient implements ContentSourceClient {
             int remaining = maxItems - results.size();
             int endIndex = Math.min(entries.size(), startIndex + remaining);
             for (NuxeoDocument document : entries.subList(startIndex, endIndex)) {
-                results.add(NuxeoSourceNodeAdapter.toSourceNode(document, sourceId, blobXpath));
+                results.add(toSourceNode(document));
             }
 
             if (entries.size() < pageSize || !page.hasMore()) {
@@ -192,8 +205,9 @@ public class NuxeoClient implements ContentSourceClient {
                             .queryParam("query", nxql)
                             .queryParam("pageSize", pageSize)
                             .queryParam("currentPageIndex", pageIndex)
-                            .build())
+                    .build())
                     .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
+                    .header(ACL_HEADER, ACL_ENRICHER)
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
                     .body(NuxeoDocument.Page.class);
@@ -213,8 +227,9 @@ public class NuxeoClient implements ContentSourceClient {
                             .path("/id/{uid}/@children")
                             .queryParam("currentPageIndex", pageIndex)
                             .queryParam("pageSize", pageSize)
-                            .build(containerId))
+                    .build(containerId))
                     .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
+                    .header(ACL_HEADER, ACL_ENRICHER)
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
                     .body(NuxeoDocument.Page.class);
@@ -233,13 +248,103 @@ public class NuxeoClient implements ContentSourceClient {
                 .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
                 .accept(MediaType.APPLICATION_JSON);
         if (enrichAcl) {
-            request = request.header("enrichers-document", ACL_ENRICHER);
+            request = request.header(ACL_HEADER, ACL_ENRICHER);
         }
         return request.retrieve().body(NuxeoDocument.class);
     }
 
-    private @Nullable SourceNode toSourceNode(@Nullable NuxeoDocument document) {
-        return document != null ? NuxeoSourceNodeAdapter.toSourceNode(document, sourceId, blobXpath) : null;
+    public SourceNode toSourceNode(NuxeoDocument document) {
+        return NuxeoSourceNodeAdapter.toSourceNode(
+                document,
+                sourceId,
+                blobXpath,
+                extractReadPrincipals(document)
+        );
+    }
+
+    private Set<String> extractReadPrincipals(NuxeoDocument document) {
+        LinkedHashSet<String> readers = new LinkedHashSet<>();
+        NuxeoDocument.ContextParameters contextParameters = document.getContextParameters();
+        if (contextParameters == null || contextParameters.getAcls() == null) {
+            return readers;
+        }
+
+        for (NuxeoDocument.Acl acl : contextParameters.getAcls()) {
+            if (acl == null || acl.getAces() == null) {
+                continue;
+            }
+            for (NuxeoDocument.Ace ace : acl.getAces()) {
+                if (!hasEffectiveReadAccess(ace)) {
+                    continue;
+                }
+                String principal = normalizePrincipal(ace.getUsername());
+                if (principal != null) {
+                    readers.add(principal);
+                }
+            }
+        }
+        return readers;
+    }
+
+    private boolean hasEffectiveReadAccess(@Nullable NuxeoDocument.Ace ace) {
+        if (ace == null || !Boolean.TRUE.equals(ace.getGranted())) {
+            return false;
+        }
+        String status = ace.getStatus();
+        if (status != null && !status.isBlank() && !"effective".equalsIgnoreCase(status)) {
+            return false;
+        }
+
+        String permission = ace.getPermission();
+        if (READ_PERMISSIONS.contains(permission)) {
+            return ace.getUsername() != null && !ace.getUsername().isBlank();
+        }
+
+        if (permission != null
+                && log.isDebugEnabled()
+                && UNRECOGNIZED_ALLOWED_PERMISSION_NAMES.add(permission)) {
+            log.debug("Ignoring granted Nuxeo permission '{}' when computing read principals", permission);
+        }
+        return false;
+    }
+
+    private @Nullable String normalizePrincipal(@Nullable String principal) {
+        if (principal == null || principal.isBlank()) {
+            return null;
+        }
+        if (EVERYONE_PRINCIPAL.equalsIgnoreCase(principal)) {
+            return EVERYONE_GROUP;
+        }
+        if (principal.startsWith(GROUP_PREFIX)) {
+            return principal;
+        }
+        return isGroupPrincipal(principal) ? GROUP_PREFIX + principal : principal;
+    }
+
+    private boolean isGroupPrincipal(String principal) {
+        return groupPrincipalCache.computeIfAbsent(principal, this::lookupGroupPrincipal);
+    }
+
+    private boolean lookupGroupPrincipal(String principal) {
+        try {
+            restClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/group/{groupId}").build(principal))
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .body(String.class);
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.warn("Failed to resolve Nuxeo principal type for '{}' (defaulting to user): HTTP {}",
+                    principal, e.getStatusCode().value());
+            return false;
+        } catch (Exception e) {
+            log.warn("Failed to resolve Nuxeo principal type for '{}' (defaulting to user): {}",
+                    principal, e.getMessage());
+            return false;
+        }
     }
 
     private URI blobUri(String nodeId) {

@@ -2,7 +2,6 @@ package org.alfresco.contentlake.nuxeo.batch.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.alfresco.contentlake.adapter.NuxeoSourceNodeAdapter;
 import org.alfresco.contentlake.client.NuxeoClient;
 import org.alfresco.contentlake.config.NuxeoProperties;
 import org.alfresco.contentlake.model.NuxeoDocument;
@@ -52,8 +51,6 @@ public class NuxeoDiscoveryService {
     private List<SourceNode> discoverWithNxql(DiscoverySettings settings) {
         NuxeoScopeResolver scopeResolver = settings.scopeResolver();
         String query = buildNxqlQuery(settings);
-        String sourceId = props.getSourceId();
-        String blobXpath = props.getBlobXpath();
         int pageIndex = 0;
         List<SourceNode> discovered = new ArrayList<>();
 
@@ -63,7 +60,7 @@ public class NuxeoDiscoveryService {
                 break;
             }
             page.getEntries().stream()
-                    .map(doc -> NuxeoSourceNodeAdapter.toSourceNode(doc, sourceId, blobXpath))
+                    .map(nuxeoClient::toSourceNode)
                     .filter(scopeResolver::isInScope)
                     .forEach(discovered::add);
 

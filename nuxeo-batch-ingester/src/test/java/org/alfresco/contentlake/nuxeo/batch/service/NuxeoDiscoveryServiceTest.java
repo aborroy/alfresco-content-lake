@@ -44,15 +44,18 @@ class NuxeoDiscoveryServiceTest {
 
     @Test
     void discover_usesNxqlAndFiltersOutOfScopeNodes() {
-        NuxeoDocument.Page firstPage = pageOf(true,
-                nuxeoDoc("doc-1", "/default-domain/workspaces/finance/doc-1.pdf", "File", "project"),
-                nuxeoDoc("doc-2", "/default-domain/workspaces/finance/doc-2.pdf", "Picture", "project")
-        );
+        NuxeoDocument doc1 = nuxeoDoc("doc-1", "/default-domain/workspaces/finance/doc-1.pdf", "File", "project");
+        NuxeoDocument doc2 = nuxeoDoc("doc-2", "/default-domain/workspaces/finance/doc-2.pdf", "Picture", "project");
+        NuxeoDocument.Page firstPage = pageOf(true, doc1, doc2);
         NuxeoDocument.Page emptyPage = pageOf(false);
 
         when(nuxeoClient.searchPageByNxql(anyString(), anyInt(), anyInt()))
                 .thenReturn(firstPage)
                 .thenReturn(emptyPage);
+        when(nuxeoClient.toSourceNode(doc1))
+                .thenReturn(fileNode("doc-1", "/default-domain/workspaces/finance/doc-1.pdf", "File", "project"));
+        when(nuxeoClient.toSourceNode(doc2))
+                .thenReturn(fileNode("doc-2", "/default-domain/workspaces/finance/doc-2.pdf", "Picture", "project"));
 
         List<SourceNode> discovered = service.discoverFromConfig();
 

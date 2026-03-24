@@ -5,6 +5,7 @@ import org.alfresco.contentlake.model.NuxeoDocument;
 import org.alfresco.contentlake.spi.SourceNode;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -27,7 +28,10 @@ public final class NuxeoSourceNodeAdapter {
 
     private NuxeoSourceNodeAdapter() {}
 
-    public static SourceNode toSourceNode(NuxeoDocument document, String sourceId, String blobXpath) {
+    public static SourceNode toSourceNode(NuxeoDocument document,
+                                          String sourceId,
+                                          String blobXpath,
+                                          Set<String> readPrincipals) {
         boolean folder = isContainerType(document.getType());
         String fullPath = document.getPath();
         String nodePath = folder ? fullPath : document.getParentPath();
@@ -56,7 +60,7 @@ public final class NuxeoSourceNodeAdapter {
                 mimeType,
                 document.getModifiedAt(),
                 folder,
-                Set.of(),
+                new LinkedHashSet<>(readPrincipals),
                 props
         );
     }
