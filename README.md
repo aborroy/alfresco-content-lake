@@ -38,7 +38,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 - Repository Scope Model: `cl:indexed` and `cl:excludeFromLake` for Alfresco-native scope control
 - REST API: Generic connector using Alfresco REST APIs
 - Secured Endpoints: Alfresco authentication (username/password or tickets)
-- Shared Ingestion Core: Common metadata, transform, chunking, embedding, ACL, and delete/update logic in `content-lake-common`
+- Shared Ingestion Core: Common metadata, transform, chunking, embedding, ACL, and delete/update logic in `content-lake-core`
 - Idempotent Coexistence: `alfresco_modifiedAt` guard prevents stale batch/live writes from overwriting newer content
 
 ## Architecture
@@ -79,9 +79,11 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 | Module | Port | Description |
 |--------|------|-------------|
 | `content-lake-repo-model` | — | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
-| `content-lake-common` | — | Shared clients and ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
-| `batch-ingester` | 9090 | Folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
-| `live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |
+| `content-lake-core` | — | Shared clients and ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
+| `content-lake-source-nuxeo` | — | Nuxeo REST client, scope resolver, auth abstraction, and embedded Tika text extraction |
+| `alfresco-batch-ingester` | 9090 | Alfresco folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
+| `nuxeo-batch-ingester` | 9093 | Nuxeo full-batch discovery and one-shot sync, using NXQL by default with `@children` fallback |
+| `alfresco-live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |
 | `rag-service` | 9091 | Semantic search and RAG question answering |
 
 ## Quick Start
@@ -230,9 +232,64 @@ export EMBEDDING_CHUNK_SIZE=900
 export EMBEDDING_CHUNK_OVERLAP=120
 ```
 
+## Nuxeo Full Backfill
+
+For local Nuxeo-only ingestion development, start the dedicated stack:
+
+```bash
+docker compose -f compose.nuxeo.yaml up --build
+```
+
+This starts:
+
+- `nuxeo:latest` on `http://localhost:8081/nuxeo`
+- `nuxeo-batch-ingester` on `http://localhost:9093`
+
+Defaults:
+
+- Nuxeo credentials: `Administrator` / `Administrator`
+- Discovery mode: `NXQL`
+- Included roots: `/default-domain/workspaces`
+- Included types: `File`, `Note`
+
+Trigger a full configured backfill:
+
+```bash
+curl -X POST http://localhost:9093/api/sync/configured \
+  -u Administrator:Administrator
+```
+
+Trigger a custom backfill with request overrides:
+
+```bash
+curl -X POST http://localhost:9093/api/sync/batch \
+  -u Administrator:Administrator \
+  -H "Content-Type: application/json" \
+  -d '{
+    "includedRoots": ["/default-domain/workspaces"],
+    "includedDocumentTypes": ["File", "Note"],
+    "excludedLifecycleStates": ["deleted"],
+    "pageSize": 50,
+    "discoveryMode": "NXQL"
+  }'
+```
+
+Check status:
+
+```bash
+curl http://localhost:9093/api/sync/status -u Administrator:Administrator
+curl http://localhost:9093/api/sync/status/{jobId} -u Administrator:Administrator
+```
+
+When using the deployment repo's reverse proxy, the public sync API remains `/api/sync/*`.
+Route to Nuxeo by adding `?sourceType=nuxeo`; omit it or use `alfresco` for the existing Alfresco ingester.
+
 ## Authentication
 
-All REST API endpoints (`/api/**`) on both services require authentication validated against Alfresco.
+REST API authentication is source-specific:
+
+- Alfresco ingesters validate incoming credentials or tickets against Alfresco.
+- `nuxeo-batch-ingester` uses HTTP Basic auth with the configured Nuxeo service credentials.
 
 ### Supported Methods
 
@@ -764,7 +821,6 @@ Conversation memory storage:
 
 ### Future
 
-- [ ] Streaming responses (SSE) for progressive answer generation
 - [ ] Conversation history / multi-turn chat sessions
 - [ ] Re-ranking with cross-encoder models
 - [ ] Multiple embedding models per document

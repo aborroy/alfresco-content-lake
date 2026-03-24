@@ -24,6 +24,7 @@
         <module>content-lake-source-alfresco</module>
         <module>content-lake-source-nuxeo</module>
         <module>alfresco-batch-ingester</module>
+        <module>nuxeo-batch-ingester</module>
         <module>alfresco-live-ingester</module>
         <module>rag-service</module>
     </modules>

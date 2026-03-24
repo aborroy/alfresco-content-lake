@@ -1,0 +1,73 @@
+server:
+  port: 9093
+
+spring:
+  application:
+    name: nuxeo-batch-ingester
+
+  ai:
+    openai:
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      api-key: ${MODEL_RUNNER_API_KEY:not-needed}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+
+nuxeo:
+  base-url: ${NUXEO_URL:http://localhost:8081/nuxeo}
+  username: ${NUXEO_USERNAME:Administrator}
+  password: ${NUXEO_PASSWORD:Administrator}
+  source-id: ${NUXEO_SOURCE_ID:local}
+  blob-xpath: ${NUXEO_BLOB_XPATH:file:content}
+  scope:
+    included-roots:
+      - ${NUXEO_INCLUDED_ROOT_1:/default-domain/workspaces}
+    included-types:
+      - File
+      - Note
+    excluded-lifecycle-states:
+      - deleted
+  discovery:
+    page-size: ${NUXEO_DISCOVERY_PAGE_SIZE:50}
+    mode: ${NUXEO_DISCOVERY_MODE:NXQL}
+  batch:
+    executor:
+      core-size: ${NUXEO_BATCH_CORE_SIZE:1}
+      max-size: ${NUXEO_BATCH_MAX_SIZE:1}
+      queue-capacity: ${NUXEO_BATCH_QUEUE_CAPACITY:1000}
+      await-termination-seconds: ${NUXEO_BATCH_AWAIT_TERMINATION_SECONDS:30}
+    embedding:
+      min-chunk-size: ${EMBEDDING_MIN_CHUNK_SIZE:200}
+      chunk-size: ${EMBEDDING_CHUNK_SIZE:1000}
+      chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:120}
+      similarity-threshold: ${EMBEDDING_SIMILARITY_THRESHOLD:0.75}
+      model-name: ${EMBEDDING_MODEL_NAME:default}
+      noise-reduction:
+        enabled: ${NOISE_REDUCTION_ENABLED:true}
+        aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}
+
+hxpr:
+  url: ${HXPR_URL:http://localhost:8080}
+  repository-id: ${HXPR_REPOSITORY_ID:default}
+  target-path: ${HXPR_TARGET_PATH:/nuxeo-sync}
+  path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
+  idp:
+    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
+    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
+    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
+    username: ${HXPR_IDP_USERNAME:testuser}
+    password: ${HXPR_IDP_PASSWORD:password}
+  model:
+    bootstrap:
+      enabled: true
+    fragments: classpath:model-fragments.json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    org.alfresco.contentlake: ${LOG_LEVEL:INFO}

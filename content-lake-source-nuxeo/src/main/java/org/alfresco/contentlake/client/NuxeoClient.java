@@ -33,6 +33,8 @@ public class NuxeoClient implements ContentSourceClient {
 
     private static final String SOURCE_TYPE = "nuxeo";
     private static final String ACL_ENRICHER = "acls";
+    private static final String DOCUMENT_PROPERTIES_HEADER = "X-NXDocumentProperties";
+    private static final String ALL_DOCUMENT_PROPERTIES = "*";
 
     private final RestClient restClient;
     private final String apiBaseUrl;
@@ -75,18 +77,24 @@ public class NuxeoClient implements ContentSourceClient {
     @Override
     public @Nullable SourceNode getNode(String nodeId) {
         try {
-            NuxeoDocument document = restClient.get()
-                    .uri("/id/{uid}", nodeId)
-                    .accept(MediaType.APPLICATION_JSON)
-                    .header("enrichers-document", ACL_ENRICHER)
-                    .retrieve()
-                    .body(NuxeoDocument.class);
-            return document != null ? NuxeoSourceNodeAdapter.toSourceNode(document, sourceId, blobXpath) : null;
+            return toSourceNode(fetchDocument("/id/{uid}", nodeId, true));
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
                 return null;
             }
             throw new IllegalStateException("Failed to fetch Nuxeo document " + nodeId, e);
+        }
+    }
+
+    public @Nullable SourceNode getNodeByPath(String repositoryPath) {
+        try {
+            String encodedPath = encodePathPreservingSlashes(trimLeadingSlash(repositoryPath));
+            return toSourceNode(fetchDocument("/path/" + encodedPath, null, true));
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404 || e.getStatusCode().value() == 204) {
+                return null;
+            }
+            throw new IllegalStateException("Failed to fetch Nuxeo document at path " + repositoryPath, e);
         }
     }
 
@@ -150,6 +158,33 @@ public class NuxeoClient implements ContentSourceClient {
         }
     }
 
+    public List<SourceNode> searchByNxql(String nxql, int pageIndex, int pageSize) {
+        try {
+            NuxeoDocument.Page response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/search/lang/NXQL/execute")
+                            .queryParam("query", nxql)
+                            .queryParam("pageSize", pageSize)
+                            .queryParam("currentPageIndex", pageIndex)
+                            .build())
+                    .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .body(NuxeoDocument.Page.class);
+            if (response == null || response.getEntries() == null) {
+                return List.of();
+            }
+            return response.getEntries().stream()
+                    .map(this::toSourceNode)
+                    .toList();
+        } catch (RestClientResponseException e) {
+            if (isUnsupportedSearchStatus(e.getStatusCode().value())) {
+                throw new UnsupportedOperationException("Nuxeo NXQL search endpoint is not available", e);
+            }
+            throw new IllegalStateException("Failed to execute NXQL search", e);
+        }
+    }
+
     private List<NuxeoDocument> fetchChildrenPage(String containerId, int pageIndex, int pageSize) {
         try {
             NuxeoDocument.Page response = restClient.get()
@@ -158,6 +193,7 @@ public class NuxeoClient implements ContentSourceClient {
                             .queryParam("currentPageIndex", pageIndex)
                             .queryParam("pageSize", pageSize)
                             .build(containerId))
+                    .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
                     .accept(MediaType.APPLICATION_JSON)
                     .retrieve()
                     .body(NuxeoDocument.Page.class);
@@ -171,6 +207,21 @@ public class NuxeoClient implements ContentSourceClient {
             }
             throw new IllegalStateException("Failed to list Nuxeo children for " + containerId, e);
         }
+    }
+
+    private @Nullable NuxeoDocument fetchDocument(String pathTemplate, @Nullable String pathVariable, boolean enrichAcl) {
+        RestClient.RequestHeadersSpec<?> request = restClient.get()
+                .uri(pathVariable == null ? pathTemplate : pathTemplate, pathVariable)
+                .header(DOCUMENT_PROPERTIES_HEADER, ALL_DOCUMENT_PROPERTIES)
+                .accept(MediaType.APPLICATION_JSON);
+        if (enrichAcl) {
+            request = request.header("enrichers-document", ACL_ENRICHER);
+        }
+        return request.retrieve().body(NuxeoDocument.class);
+    }
+
+    private @Nullable SourceNode toSourceNode(@Nullable NuxeoDocument document) {
+        return document != null ? NuxeoSourceNodeAdapter.toSourceNode(document, sourceId, blobXpath) : null;
     }
 
     private URI blobUri(String nodeId) {
@@ -204,5 +255,16 @@ public class NuxeoClient implements ContentSourceClient {
         String cleaned = (fileName == null || fileName.isBlank()) ? "content.bin" : fileName;
         cleaned = cleaned.replaceAll("[^A-Za-z0-9._-]", "_");
         return cleaned.startsWith(".") ? cleaned : "-" + cleaned;
+    }
+
+    private static String trimLeadingSlash(String value) {
+        if (value == null || value.isBlank() || "/".equals(value)) {
+            return "";
+        }
+        return value.startsWith("/") ? value.substring(1) : value;
+    }
+
+    private static boolean isUnsupportedSearchStatus(int status) {
+        return status == 404 || status == 405 || status == 501;
     }
 }

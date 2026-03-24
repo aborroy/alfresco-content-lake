@@ -15,17 +15,22 @@ import java.util.Set;
  */
 public class NuxeoScopeResolver implements ScopeResolver {
 
-    private static final String DELETED_STATE = "deleted";
-
     private final List<String> includedRoots;
     private final Set<String> includedTypes;
+    private final Set<String> excludedLifecycleStates;
 
-    public NuxeoScopeResolver(Collection<String> includedRoots, Collection<String> includedTypes) {
+    public NuxeoScopeResolver(Collection<String> includedRoots,
+                              Collection<String> includedTypes,
+                              Collection<String> excludedLifecycleStates) {
         this.includedRoots = includedRoots.stream()
                 .filter(Objects::nonNull)
                 .map(this::normalizePath)
                 .toList();
         this.includedTypes = Set.copyOf(includedTypes);
+        this.excludedLifecycleStates = excludedLifecycleStates.stream()
+                .filter(Objects::nonNull)
+                .map(value -> value.toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     @Override
@@ -50,7 +55,8 @@ public class NuxeoScopeResolver implements ScopeResolver {
 
     private boolean isDeleted(SourceNode node) {
         String lifecycleState = getStringProperty(node, ContentLakeIngestProperties.NUXEO_LIFECYCLE_STATE);
-        return lifecycleState != null && DELETED_STATE.equalsIgnoreCase(lifecycleState);
+        return lifecycleState != null
+                && excludedLifecycleStates.contains(lifecycleState.toLowerCase(java.util.Locale.ROOT));
     }
 
     private boolean isIncludedPath(String path) {

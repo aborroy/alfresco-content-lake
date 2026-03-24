@@ -13,7 +13,8 @@ class NuxeoScopeResolverTest {
 
     private final NuxeoScopeResolver resolver = new NuxeoScopeResolver(
             Set.of("/default-domain/workspaces"),
-            Set.of("File", "Note")
+            Set.of("File", "Note"),
+            Set.of("deleted", "obsolete")
     );
 
     @Test
@@ -42,6 +43,17 @@ class NuxeoScopeResolverTest {
 
         assertThat(resolver.isInScope(deleted)).isFalse();
         assertThat(resolver.isInScope(wrongType)).isFalse();
+    }
+
+    @Test
+    void isInScope_rejectsConfiguredExcludedLifecycleStates() {
+        SourceNode obsolete = fileNode(
+                "/default-domain/workspaces/finance/report.pdf",
+                "File",
+                "obsolete"
+        );
+
+        assertThat(resolver.isInScope(obsolete)).isFalse();
     }
 
     @Test

@@ -40,6 +40,7 @@ class NuxeoClientTest {
         server.createContext("/nuxeo/api/v1/id/doc-123", exchange -> {
             capture.authorization = exchange.getRequestHeaders().getFirst("Authorization");
             capture.enricher = exchange.getRequestHeaders().getFirst("enrichers-document");
+            capture.propertiesHeader = exchange.getRequestHeaders().getFirst("X-NXDocumentProperties");
             writeJson(exchange, """
                     {
                       "entity-type": "document",
@@ -82,11 +83,14 @@ class NuxeoClientTest {
                 .containsEntry("nuxeo_path", "/default-domain/workspaces/finance/q1-report.pdf");
         assertThat(capture.authorization).startsWith("Basic ");
         assertThat(capture.enricher).isEqualTo("acls");
+        assertThat(capture.propertiesHeader).isEqualTo("*");
     }
 
     @Test
     void getChildren_honorsSkipAndMaxItemsAcrossPages() throws IOException {
+        List<String> propertyHeaders = new ArrayList<>();
         server.createContext("/nuxeo/api/v1/id/folder-1/@children", exchange -> {
+            propertyHeaders.add(exchange.getRequestHeaders().getFirst("X-NXDocumentProperties"));
             String query = exchange.getRequestURI().getQuery();
             if ("currentPageIndex=0&pageSize=2".equals(query)) {
                 writeJson(exchange, """
@@ -120,6 +124,80 @@ class NuxeoClientTest {
         List<SourceNode> children = client.getChildren("folder-1", 1, 2);
 
         assertThat(children).extracting(SourceNode::nodeId).containsExactly("doc-2", "doc-3");
+        assertThat(propertyHeaders).containsOnly("*");
+    }
+
+    @Test
+    void getNodeByPath_fetchesRepositoryPath() throws IOException {
+        RequestCapture capture = new RequestCapture();
+        server.createContext("/nuxeo/api/v1/path/default-domain/workspaces/finance", exchange -> {
+            capture.propertiesHeader = exchange.getRequestHeaders().getFirst("X-NXDocumentProperties");
+            writeJson(exchange, """
+                    {
+                      "entity-type": "document",
+                      "uid": "folder-1",
+                      "path": "/default-domain/workspaces/finance",
+                      "type": "Workspace",
+                      "title": "Finance",
+                      "state": "project",
+                      "properties": {
+                        "dc:modified": "2026-03-24T09:15:30Z"
+                      }
+                    }
+                    """);
+        });
+        server.start();
+
+        NuxeoClient client = client("file:content");
+
+        SourceNode node = client.getNodeByPath("/default-domain/workspaces/finance");
+
+        assertThat(node).isNotNull();
+        assertThat(node.nodeId()).isEqualTo("folder-1");
+        assertThat(node.folder()).isTrue();
+        assertThat(node.path()).isEqualTo("/default-domain/workspaces/finance");
+        assertThat(capture.propertiesHeader).isEqualTo("*");
+    }
+
+    @Test
+    void searchByNxql_mapsEntries() throws IOException {
+        RequestCapture capture = new RequestCapture();
+        server.createContext("/nuxeo/api/v1/search/lang/NXQL/execute", exchange -> {
+            capture.propertiesHeader = exchange.getRequestHeaders().getFirst("X-NXDocumentProperties");
+            assertThat(exchange.getRequestURI().getQuery())
+                    .contains("pageSize=2")
+                    .contains("currentPageIndex=1");
+            writeJson(exchange, """
+                    {
+                      "entries": [
+                        {
+                          "uid": "doc-9",
+                          "path": "/default-domain/workspaces/finance/report-9.pdf",
+                          "type": "File",
+                          "title": "Report 9",
+                          "state": "project",
+                          "properties": {
+                            "dc:modified": "2026-03-24T10:09:00Z",
+                            "file:content": {
+                              "mime-type": "application/pdf"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                    """);
+        });
+        server.start();
+
+        NuxeoClient client = client("file:content");
+
+        List<SourceNode> page = client.searchByNxql("SELECT * FROM Document", 1, 2);
+
+        assertThat(page).singleElement().satisfies(node -> {
+            assertThat(node.nodeId()).isEqualTo("doc-9");
+            assertThat(node.path()).isEqualTo("/default-domain/workspaces/finance");
+        });
+        assertThat(capture.propertiesHeader).isEqualTo("*");
     }
 
     @Test
@@ -173,5 +251,6 @@ class NuxeoClientTest {
     private static final class RequestCapture {
         private String authorization;
         private String enricher;
+        private String propertiesHeader;
     }
 }

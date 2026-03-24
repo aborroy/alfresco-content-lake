@@ -121,5 +121,6 @@ public class NuxeoDocument {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Page {
         private List<NuxeoDocument> entries = List.of();
+        private boolean isNextPageAvailable;
     }
 }

@@ -23,10 +23,23 @@ public class NuxeoProperties {
     private String sourceId = "local";
     private String blobXpath = "file:content";
     private Scope scope = new Scope();
+    private Discovery discovery = new Discovery();
 
     @Data
     public static class Scope {
         private List<String> includedRoots = new ArrayList<>(List.of("/default-domain/workspaces"));
         private List<String> includedTypes = new ArrayList<>(List.of("File", "Note"));
+        private List<String> excludedLifecycleStates = new ArrayList<>(List.of("deleted"));
+    }
+
+    @Data
+    public static class Discovery {
+        private int pageSize = 50;
+        private Mode mode = Mode.NXQL;
+    }
+
+    public enum Mode {
+        NXQL,
+        CHILDREN
     }
 }
