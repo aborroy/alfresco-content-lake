@@ -14,6 +14,13 @@
     <name>Content Lake Common</name>
 
     <dependencies>
+        <!-- SPI interfaces — zero external deps -->
+        <dependency>
+            <groupId>org.alfresco</groupId>
+            <artifactId>content-lake-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Spring Security (for Alfresco authentication infrastructure) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

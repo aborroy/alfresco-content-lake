@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.alfresco.contentlake.spi.TextExtractor;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpEntity;
@@ -30,7 +31,7 @@ import java.util.List;
  * Goal: extract plain text (text/plain) from any source mimetype, whenever Transform Core AIO supports it.
  */
 @Slf4j
-public class TransformClient {
+public class TransformClient implements TextExtractor {
 
     private static final String TARGET_MIMETYPE = "text/plain";
     private static final String TARGET_EXTENSION = "txt";
@@ -68,6 +69,47 @@ public class TransformClient {
         log.info("TransformClient initialized: baseUrl={}, timeout={}ms, configCacheTtl={}",
                 baseUrl, timeoutMs, configCacheTtl);
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // TextExtractor — SPI implementation
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** Returns {@code true} when Transform Core AIO supports extracting text from this MIME type. */
+    @Override
+    public boolean supports(String mimeType) {
+        return isTransformSupported(mimeType, TARGET_MIMETYPE);
+    }
+
+    /**
+     * Extracts plain text by submitting the content to Transform Core AIO.
+     *
+     * @return extracted text, or {@code null} when the transform is unsupported or yields no output
+     */
+    @Override
+    public String extractText(Resource content, String mimeType) {
+        if (!supports(mimeType)) {
+            return null;
+        }
+        try {
+            byte[] result = transformSync(content, mimeType, TARGET_MIMETYPE);
+            if (result == null) {
+                return null;
+            }
+            String text = new String(result, java.nio.charset.StandardCharsets.UTF_8);
+            log.debug("Text extraction successful for {}: {} characters", mimeType, text.length());
+            return text;
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            if (isUnsupportedTransformError(e)) {
+                log.info("Transform Core AIO does not support {} -> {}", mimeType, TARGET_MIMETYPE);
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Alfresco-specific transform helpers
+    // ──────────────────────────────────────────────────────────────────────
 
     public String transformToText(Resource content, String sourceMimeType) {
         if (sourceMimeType == null || sourceMimeType.isBlank()) {

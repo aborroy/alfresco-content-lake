@@ -138,7 +138,7 @@ class ContentLakeNodeStatusServiceTest {
         }
 
         @Override
-        public Node getNode(String nodeId) {
+        public Node getAlfrescoNode(String nodeId) {
             return nodesById.get(nodeId);
         }
 

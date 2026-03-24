@@ -1,5 +1,6 @@
 package org.alfresco.contentlake.batch.config;
 
+import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprQueryApi;
 import org.alfresco.contentlake.client.HxprService;
@@ -144,7 +145,7 @@ public class AppConfig {
 
     @Bean
     public NodeSyncService nodeSyncService(
-            org.alfresco.contentlake.client.AlfrescoClient alfrescoClient,
+            AlfrescoClient alfrescoClient,
             HxprDocumentApi documentApi,
             HxprService hxprService,
             TransformClient transformClient,
@@ -153,10 +154,10 @@ public class AppConfig {
             HxprProperties props
     ) {
         return new NodeSyncService(
-                alfrescoClient,
+                alfrescoClient,    // ContentSourceClient
                 documentApi,
                 hxprService,
-                transformClient,
+                transformClient,   // TextExtractor
                 embeddingService,
                 chunkingService,
                 props.getTargetPath(),

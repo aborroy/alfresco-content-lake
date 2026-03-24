@@ -2,13 +2,16 @@ package org.alfresco.contentlake.live.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.alfresco.contentlake.adapter.AlfrescoSourceNodeAdapter;
 import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.alfresco.contentlake.service.NodeSyncService;
+import org.alfresco.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.Set;
 
 /**
  * Reconciles all descendant files after a folder-level scope change such as
@@ -52,7 +55,10 @@ public class FolderSubtreeReconciler {
 
             try {
                 if (scopeResolver.isInScope(child)) {
-                    nodeSyncService.syncNode(child);
+                    Set<String> readers = alfrescoClient.extractReadAuthorities(child);
+                    SourceNode sourceNode = AlfrescoSourceNodeAdapter.toSourceNode(
+                            child, alfrescoClient.getSourceId(), readers);
+                    nodeSyncService.syncNode(sourceNode);
                     result.synced++;
                 } else {
                     nodeSyncService.deleteNode(child.getId(), resolveDeleteTimestamp(eventTimestamp, child));
@@ -78,20 +84,9 @@ public class FolderSubtreeReconciler {
         private int skipped;
         private int failed;
 
-        public int synced() {
-            return synced;
-        }
-
-        public int deleted() {
-            return deleted;
-        }
-
-        public int skipped() {
-            return skipped;
-        }
-
-        public int failed() {
-            return failed;
-        }
+        public int synced()   { return synced; }
+        public int deleted()  { return deleted; }
+        public int skipped()  { return skipped; }
+        public int failed()   { return failed; }
     }
 }

@@ -1,6 +1,8 @@
 package org.alfresco.contentlake.service;
 
 import org.alfresco.contentlake.client.AlfrescoClient;
+import org.alfresco.contentlake.spi.ScopeResolver;
+import org.alfresco.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
 import org.alfresco.core.model.PathElement;
 
@@ -26,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link #invalidateFolderScope(String)} whenever {@code cl:indexed} is added to or
  * removed from a folder so the cache stays consistent.
  */
-public class ContentLakeScopeResolver {
+public class ContentLakeScopeResolver implements ScopeResolver {
 
     public static final String INDEXED_ASPECT = "cl:indexed";
     public static final String EXCLUDE_FROM_LAKE_PROPERTY = "cl:excludeFromLake";
@@ -67,6 +69,40 @@ public class ContentLakeScopeResolver {
         String path = node.getPath() != null ? node.getPath().getName() : null;
         return !matchesExcludedPath(path);
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // ScopeResolver — SPI implementation
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Determines scope for a source-agnostic {@link SourceNode} by fetching the
+     * underlying Alfresco node and delegating to {@link #isInScope(Node)}.
+     */
+    @Override
+    public boolean isInScope(SourceNode node) {
+        if (node == null || node.folder()) {
+            return false;
+        }
+        Node alfrescoNode = alfrescoClient.getAlfrescoNode(node.nodeId());
+        return alfrescoNode != null && isInScope(alfrescoNode);
+    }
+
+    /**
+     * Determines traversal eligibility for a source-agnostic {@link SourceNode} by
+     * fetching the underlying Alfresco node and delegating to {@link #shouldTraverse(Node)}.
+     */
+    @Override
+    public boolean shouldTraverse(SourceNode node) {
+        if (node == null) {
+            return false;
+        }
+        Node alfrescoNode = alfrescoClient.getAlfrescoNode(node.nodeId());
+        return alfrescoNode != null && shouldTraverse(alfrescoNode);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Alfresco Node-based methods (used by live/batch ingesters directly)
+    // ──────────────────────────────────────────────────────────────────────
 
     /**
      * Returns {@code true} when the node is an in-scope file for Content Lake.
@@ -176,7 +212,7 @@ public class ContentLakeScopeResolver {
             return cached;
         }
 
-        Node folder = alfrescoClient.getNode(folderId);
+        Node folder = alfrescoClient.getAlfrescoNode(folderId);
         FolderScopeState state = new FolderScopeState(
                 folder != null && hasIndexedAspect(folder.getAspectNames()),
                 folder != null && isExcludedFromLake(folder)

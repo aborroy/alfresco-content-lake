@@ -2,26 +2,24 @@ package org.alfresco.contentlake.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprService;
-import org.alfresco.contentlake.client.TransformClient;
 import org.alfresco.contentlake.hxpr.api.model.ACE;
 import org.alfresco.contentlake.hxpr.api.model.Group;
-import org.alfresco.contentlake.model.ContentLakeIngestProperties;
-import org.alfresco.contentlake.model.ContentLakeNodeStatus;
 import org.alfresco.contentlake.hxpr.api.model.User;
 import org.alfresco.contentlake.model.Chunk;
+import org.alfresco.contentlake.model.ContentLakeIngestProperties;
+import org.alfresco.contentlake.model.ContentLakeNodeStatus;
 import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.contentlake.model.HxprEmbedding;
 import org.alfresco.contentlake.service.chunking.SimpleChunkingService;
-import org.alfresco.core.model.Node;
+import org.alfresco.contentlake.spi.ContentSourceClient;
+import org.alfresco.contentlake.spi.SourceNode;
+import org.alfresco.contentlake.spi.TextExtractor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.OffsetDateTime;
@@ -29,19 +27,23 @@ import java.util.*;
 
 /**
  * Shared synchronisation pipeline used by both the batch-ingester and the
- * live-ingester to process a single Alfresco node into the Content Lake.
+ * live-ingester to process a single content node into the Content Lake.
+ *
+ * <p>This service is source-agnostic: it operates on {@link SourceNode} and
+ * delegates to the {@link ContentSourceClient} and {@link TextExtractor} SPI
+ * interfaces. All Alfresco-specific logic has been moved to the adapter layer.</p>
  *
  * <h3>Processing steps</h3>
  * <ol>
- *   <li>Fetch (or receive) the Alfresco {@link Node} with metadata + permissions</li>
+ *   <li>Receive the source-agnostic {@link SourceNode} with metadata + permissions</li>
  *   <li>Create or update the corresponding hxpr document (metadata phase)</li>
- *   <li>Extract plain text via the Transform Service</li>
+ *   <li>Extract plain text via the {@link TextExtractor}</li>
  *   <li>Chunk the text and generate embeddings via Spring AI</li>
  *   <li>Store embeddings and fulltext in the hxpr document</li>
  * </ol>
  *
  * <h3>Idempotency</h3>
- * Every write is guarded by an {@code alfresco_modifiedAt} staleness check:
+ * Every write is guarded by a {@code modifiedAt} staleness check:
  * if the Content Lake already holds a version that is equal to or newer than
  * the incoming node, the write is skipped. This makes it safe to run both
  * ingesters concurrently against the same node.
@@ -55,11 +57,6 @@ public class NodeSyncService {
     private static final String MIXIN_CIN_REMOTE = "CinRemote";
 
     /* ---- cin_ingestProperties keys ---- */
-    private static final String P_ALF_NODE_ID     = ContentLakeIngestProperties.ALFRESCO_NODE_ID;
-    private static final String P_ALF_REPO_ID     = ContentLakeIngestProperties.ALFRESCO_REPOSITORY_ID;
-    private static final String P_ALF_PATH        = ContentLakeIngestProperties.ALFRESCO_PATH;
-    private static final String P_ALF_NAME        = ContentLakeIngestProperties.ALFRESCO_NAME;
-    private static final String P_ALF_MIME        = ContentLakeIngestProperties.ALFRESCO_MIME_TYPE;
     private static final String P_ALF_MODIFIED_AT = ContentLakeIngestProperties.ALFRESCO_MODIFIED_AT;
     private static final String P_CL_SYNC_STATUS  = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_STATUS;
     private static final String P_CL_SYNC_ERROR   = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_ERROR;
@@ -80,10 +77,10 @@ public class NodeSyncService {
     );
 
     /* ---- dependencies ---- */
-    private final AlfrescoClient alfrescoClient;
+    private final ContentSourceClient sourceClient;
     private final HxprDocumentApi documentApi;
     private final HxprService hxprService;
-    private final TransformClient transformClient;
+    private final TextExtractor textExtractor;
     private final EmbeddingService embeddingService;
     private final SimpleChunkingService chunkingService;
 
@@ -98,12 +95,12 @@ public class NodeSyncService {
     /**
      * Full sync: metadata ingestion + content transformation + embedding.
      *
-     * @param node Alfresco node (must include properties, path, and permissions)
+     * @param node source-agnostic node (must include metadata, path, and read principals)
      * @return the hxpr document id, or {@code null} if skipped due to staleness
      */
-    public String syncNode(Node node) {
-        String nodeId = node.getId();
-        String sourceId = alfrescoClient.getRepositoryId();
+    public String syncNode(SourceNode node) {
+        String nodeId = node.nodeId();
+        String sourceId = node.sourceId();
 
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing != null && isStale(existing, node)) {
@@ -115,11 +112,9 @@ public class NodeSyncService {
                 ? updateDocument(existing, node)
                 : createDocument(node);
 
-        String mimeType = node.getContent() != null ? node.getContent().getMimeType() : null;
-        String documentPath = node.getPath() != null ? node.getPath().getName() : null;
-
         try {
-            processContent(doc.getSysId(), doc.getCinIngestProperties(), nodeId, mimeType, node.getName(), documentPath);
+            processContent(doc.getSysId(), doc.getCinIngestProperties(),
+                    nodeId, node.mimeType(), node.name(), node.path());
         } catch (Exception e) {
             log.error("Content processing failed for node {}: {}", nodeId, e.getMessage(), e);
             // Metadata is already persisted; content will be retried on next event/batch.
@@ -135,22 +130,18 @@ public class NodeSyncService {
      * asynchronous content processing. This preserves backward compatibility
      * with {@code TransformationQueue} in the batch-ingester.</p>
      *
-     * @param node Alfresco node
+     * @param node source-agnostic node
      * @return sync result with hxpr document id and node metadata
      */
-    public SyncResult ingestMetadata(Node node) {
-        String nodeId = node.getId();
-        String sourceId = alfrescoClient.getRepositoryId();
+    public SyncResult ingestMetadata(SourceNode node) {
+        String nodeId = node.nodeId();
+        String sourceId = node.sourceId();
 
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing != null && isStale(existing, node)) {
             log.debug("Skipping metadata for node {} — already current", nodeId);
             return new SyncResult(existing.getSysId(), nodeId,
-                    node.getContent() != null ? node.getContent().getMimeType() : null,
-                    node.getName(),
-                    node.getPath() != null ? node.getPath().getName() : null,
-                    true,
-                    null);
+                    node.mimeType(), node.name(), node.path(), true, null);
         }
 
         HxprDocument doc = (existing != null)
@@ -158,11 +149,8 @@ public class NodeSyncService {
                 : createDocument(node);
 
         return new SyncResult(doc.getSysId(), nodeId,
-                node.getContent() != null ? node.getContent().getMimeType() : null,
-                node.getName(),
-                node.getPath() != null ? node.getPath().getName() : null,
-                false,
-                doc.getCinIngestProperties());
+                node.mimeType(), node.name(), node.path(),
+                false, doc.getCinIngestProperties());
     }
 
     /**
@@ -219,7 +207,7 @@ public class NodeSyncService {
     /**
      * Deletes the Content Lake document (and its embeddings) for a given node.
      *
-     * @param nodeId Alfresco node identifier
+     * @param nodeId source-system node identifier
      */
     public void deleteNode(String nodeId) {
         deleteNode(nodeId, null);
@@ -229,11 +217,11 @@ public class NodeSyncService {
      * Deletes the Content Lake document for a given node when the delete event is
      * not older than the version already stored in the lake.
      *
-     * @param nodeId Alfresco node identifier
+     * @param nodeId    source-system node identifier
      * @param deletedAt timestamp associated with the delete/update-to-out-of-scope event
      */
     public void deleteNode(String nodeId, OffsetDateTime deletedAt) {
-        String sourceId = alfrescoClient.getRepositoryId();
+        String sourceId = sourceClient.getSourceId();
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing == null) {
             log.debug("No Content Lake document found for deleted node {}", nodeId);
@@ -257,37 +245,32 @@ public class NodeSyncService {
     /**
      * Updates only the ACL on an existing Content Lake document.
      *
-     * @param nodeId Alfresco node identifier
-     * @param node   node with updated permissions
+     * @param node source node carrying the updated read principals
      */
-    public void updatePermissions(String nodeId, Node node) {
-        String sourceId = alfrescoClient.getRepositoryId();
-        HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
+    public void updatePermissions(SourceNode node) {
+        String sourceId = node.sourceId();
+        HxprDocument existing = hxprService.findByNodeId(node.nodeId(), sourceId);
         if (existing == null) {
-            log.debug("No Content Lake document found for permission update on node {}", nodeId);
+            log.debug("No Content Lake document found for permission update on node {}", node.nodeId());
             return;
         }
 
-        List<String> readerList = new ArrayList<>(alfrescoClient.extractReadAuthorities(node));
-        List<ACE> sysAcl = buildSysAcl(readerList);
+        List<String> readerList = new ArrayList<>(node.readPrincipals());
+        List<ACE> sysAcl = buildSysAcl(readerList, sourceId);
 
         HxprDocument update = new HxprDocument();
         update.setSysAcl(sysAcl);
         documentApi.updateById(existing.getSysId(), update);
 
-        log.info("Updated ACL for Content Lake document {} (node {})", existing.getSysId(), nodeId);
+        log.info("Updated ACL for Content Lake document {} (node {})", existing.getSysId(), node.nodeId());
     }
 
     // ──────────────────────────────────────────────────────────────────────
     // Staleness check
     // ──────────────────────────────────────────────────────────────────────
 
-    /**
-     * Returns {@code true} when the Content Lake version is already at or beyond
-     * the incoming node's {@code modifiedAt} timestamp.
-     */
-    private boolean isStale(HxprDocument existing, Node incoming) {
-        if (incoming.getModifiedAt() == null) {
+    private boolean isStale(HxprDocument existing, SourceNode incoming) {
+        if (incoming.modifiedAt() == null) {
             return false;
         }
 
@@ -296,16 +279,15 @@ public class NodeSyncService {
             return false;
         }
 
-        OffsetDateTime incomingDate = incoming.getModifiedAt();
-        return !incomingDate.isAfter(storedDate);
+        return !incoming.modifiedAt().isAfter(storedDate);
     }
 
     // ──────────────────────────────────────────────────────────────────────
     // Document CRUD helpers
     // ──────────────────────────────────────────────────────────────────────
 
-    private HxprDocument createDocument(Node node) {
-        String pathRepoId = resolvePathRepositoryId();
+    private HxprDocument createDocument(SourceNode node) {
+        String pathRepoId = resolvePathRepositoryId(node.sourceId());
         String parentPath = buildContentLakeParentPath(node, pathRepoId);
         hxprService.ensureFolder(parentPath);
 
@@ -316,55 +298,55 @@ public class NodeSyncService {
         HxprDocument existingAtPath = hxprService.findByPath(documentPath);
         if (existingAtPath != null) {
             log.info("Reusing existing hxpr document {} for node {} at {}",
-                    existingAtPath.getSysId(), node.getId(), documentPath);
+                    existingAtPath.getSysId(), node.nodeId(), documentPath);
             return updateDocument(existingAtPath, node);
         }
 
         try {
             HxprDocument created = hxprService.createDocument(parentPath, doc);
             log.info("Created hxpr document {} for node {} at {}",
-                    created.getSysId(), node.getId(), parentPath);
+                    created.getSysId(), node.nodeId(), parentPath);
             return created;
         } catch (HttpClientErrorException.Conflict e) {
             HxprDocument conflicted = hxprService.findByPath(documentPath);
             if (conflicted != null) {
                 log.warn("Recovered from create conflict by reusing hxpr document {} for node {} at {}",
-                        conflicted.getSysId(), node.getId(), documentPath);
+                        conflicted.getSysId(), node.nodeId(), documentPath);
                 return updateDocument(conflicted, node);
             }
             throw e;
         }
     }
 
-    private HxprDocument updateDocument(HxprDocument existing, Node node) {
+    private HxprDocument updateDocument(HxprDocument existing, SourceNode node) {
         HxprDocument doc = buildDocument(node);
         doc.setSysId(existing.getSysId());
         doc.setSysMixinTypes(mergeMixinTypes(existing.getSysMixinTypes(), doc.getSysMixinTypes()));
         HxprDocument updated = documentApi.updateById(existing.getSysId(), doc);
-        log.info("Updated hxpr document {} for node {}", updated.getSysId(), node.getId());
+        log.info("Updated hxpr document {} for node {}", updated.getSysId(), node.nodeId());
         return updated;
     }
 
-    private HxprDocument buildDocument(Node node) {
+    private HxprDocument buildDocument(SourceNode node) {
         HxprDocument doc = new HxprDocument();
         doc.setSysPrimaryType(SYS_FILE);
         doc.setSysName(resolveDocumentName(node));
         doc.setSysMixinTypes(List.of(MIXIN_CIN_REMOTE));
 
-        doc.setCinId(node.getId());
-        doc.setCinSourceId(alfrescoClient.getRepositoryId());
+        doc.setCinId(node.nodeId());
+        doc.setCinSourceId(node.sourceId());
         doc.setCinPaths(buildCinPaths(node));
 
-        List<String> readerList = new ArrayList<>(alfrescoClient.extractReadAuthorities(node));
-        doc.setSysAcl(buildSysAcl(readerList));
+        List<String> readerList = new ArrayList<>(node.readPrincipals());
+        doc.setSysAcl(buildSysAcl(readerList, node.sourceId()));
 
-        Map<String, Object> props = buildIngestProperties(node, doc.getCinSourceId());
+        Map<String, Object> props = buildIngestProperties(node);
         doc.setCinIngestProperties(props);
         doc.setCinIngestPropertyNames(new ArrayList<>(props.keySet()));
 
         applySyncState(doc, ContentLakeNodeStatus.Status.PENDING, null);
 
-        applyFlattenedAlfrescoFields(doc, node, doc.getCinSourceId(), readerList);
+        applyFlattenedSourceNodeFields(doc, node, readerList);
         return doc;
     }
 
@@ -372,9 +354,9 @@ public class NodeSyncService {
     // ACL mapping
     // ──────────────────────────────────────────────────────────────────────
 
-    private List<ACE> buildSysAcl(List<String> authorities) {
+    private List<ACE> buildSysAcl(List<String> authorities, String sourceId) {
         List<ACE> acl = new ArrayList<>();
-        String suffix = "_#_" + alfrescoClient.getRepositoryId();
+        String suffix = "_#_" + sourceId;
 
         for (String authority : authorities) {
             if ("GROUP_EVERYONE".equals(authority)) {
@@ -412,43 +394,30 @@ public class NodeSyncService {
     // Text extraction
     // ──────────────────────────────────────────────────────────────────────
 
-    private String extractText(String nodeId, String mimeType, String documentName) throws IOException {
+    private String extractText(String nodeId, String mimeType, String documentName) {
         if (mimeType == null || mimeType.isBlank()) {
             log.info("Skipping content extraction for node {}: missing MIME type", nodeId);
             return null;
         }
 
         if (isTextMimeType(mimeType)) {
-            byte[] content = alfrescoClient.getContent(nodeId);
+            byte[] content = sourceClient.getContent(nodeId);
             return new String(content, StandardCharsets.UTF_8);
         }
 
-        if (!transformClient.isTransformSupported(mimeType, TARGET_MIME_TYPE)) {
+        if (!textExtractor.supports(mimeType)) {
             log.info("Skipping content extraction for node {}: unsupported transform {} -> {}",
                     nodeId, mimeType, TARGET_MIME_TYPE);
             return null;
         }
 
         String tempFileName = resolveTempFileName(nodeId, documentName, mimeType);
-        Resource temp = alfrescoClient.downloadContentToTempFile(nodeId, tempFileName);
+        Resource temp = sourceClient.downloadContent(nodeId, tempFileName);
         try {
-            byte[] out = transformClient.transformSync(temp, mimeType, TARGET_MIME_TYPE);
-            return out == null ? null : new String(out, StandardCharsets.UTF_8);
-        } catch (HttpClientErrorException e) {
-            if (isUnsupportedTransformError(e)) {
-                log.info("Skipping content extraction for node {}: transform service does not support {} -> {}",
-                        nodeId, mimeType, TARGET_MIME_TYPE);
-                return null;
-            }
-            throw e;
+            return textExtractor.extractText(temp, mimeType);
         } finally {
             deleteTempFile(temp);
         }
-    }
-
-    private boolean isUnsupportedTransformError(HttpClientErrorException e) {
-        return e.getStatusCode() == HttpStatus.BAD_REQUEST
-                && e.getResponseBodyAsString().contains("No transforms for:");
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -485,10 +454,6 @@ public class NodeSyncService {
         }
     }
 
-    /**
-     * Writes fulltext and INDEXED status in a single PATCH, eliminating a separate
-     * round-trip compared to calling updateFulltext + a status update separately.
-     */
     private void updateFulltextWithStatus(String hxprDocId, String text, Map<String, Object> baseIngestProps) {
         Map<String, Object> props = buildStatusedProps(baseIngestProps, ContentLakeNodeStatus.Status.INDEXED, null);
         HxprDocument update = new HxprDocument();
@@ -500,10 +465,6 @@ public class NodeSyncService {
         documentApi.updateById(hxprDocId, update);
     }
 
-    /**
-     * Patches only the sync-status fields without fetching the document first.
-     * {@code baseIngestProps} carries all non-status properties from the metadata phase.
-     */
     private void patchSyncState(String hxprDocId, Map<String, Object> baseIngestProps,
                                 ContentLakeNodeStatus.Status status, String error) {
         try {
@@ -554,7 +515,7 @@ public class NodeSyncService {
         return switch (status) {
             case PENDING -> HxprDocument.SyncStatus.PENDING;
             case INDEXED -> HxprDocument.SyncStatus.INDEXED;
-            case FAILED -> HxprDocument.SyncStatus.FAILED;
+            case FAILED  -> HxprDocument.SyncStatus.FAILED;
         };
     }
 
@@ -574,14 +535,13 @@ public class NodeSyncService {
     // Path helpers
     // ──────────────────────────────────────────────────────────────────────
 
-    private String buildContentLakeParentPath(Node node, String repositoryId) {
+    private String buildContentLakeParentPath(SourceNode node, String repositoryId) {
         String base = buildRepositoryRootPath(repositoryId);
-        if (node.getPath() == null || node.getPath().getName() == null
-                || node.getPath().getName().isBlank()) {
+        if (node.path() == null || node.path().isBlank()) {
             return base;
         }
-        String alfrescoPath = normalizeAbsolutePath(node.getPath().getName());
-        return "/".equals(base) ? alfrescoPath : base + alfrescoPath;
+        String sourcePath = normalizeAbsolutePath(node.path());
+        return "/".equals(base) ? sourcePath : base + sourcePath;
     }
 
     private String buildRepositoryRootPath(String repositoryId) {
@@ -591,47 +551,41 @@ public class NodeSyncService {
         return joinPath(targetPath, clean);
     }
 
-    private String resolvePathRepositoryId() {
+    private String resolvePathRepositoryId(String sourceId) {
         if (hxprPathRepositoryId != null && !hxprPathRepositoryId.isBlank()) {
             return hxprPathRepositoryId.trim();
         }
-        return alfrescoClient.getRepositoryId();
+        return sourceId;
     }
 
-    private Map<String, Object> buildIngestProperties(Node node, String repositoryId) {
-        Map<String, Object> props = new LinkedHashMap<>();
-        props.put(P_ALF_NODE_ID, node.getId());
-        props.put(P_ALF_REPO_ID, repositoryId);
-        props.put(P_ALF_NAME, node.getName());
-        props.put(P_ALF_PATH, node.getPath() != null ? node.getPath().getName() : null);
-        props.put(P_ALF_MIME, node.getContent() != null ? node.getContent().getMimeType() : null);
-        props.put(P_ALF_MODIFIED_AT, node.getModifiedAt() != null ? node.getModifiedAt().toString() : null);
+    private Map<String, Object> buildIngestProperties(SourceNode node) {
+        Map<String, Object> props = new LinkedHashMap<>(node.sourceProperties());
         props.values().removeIf(Objects::isNull);
         return props;
     }
 
-    private void applyFlattenedAlfrescoFields(HxprDocument doc, Node node, String repositoryId, List<String> readerList) {
-        doc.setAlfrescoNodeId(node.getId());
-        doc.setAlfrescoRepositoryId(repositoryId);
-        doc.setAlfrescoName(node.getName());
-        doc.setAlfrescoPath(node.getPath() != null ? node.getPath().getName() : null);
-        doc.setAlfrescoMimeType(node.getContent() != null ? node.getContent().getMimeType() : null);
-        doc.setAlfrescoModifiedAt(node.getModifiedAt() != null ? node.getModifiedAt().toString() : null);
+    private void applyFlattenedSourceNodeFields(HxprDocument doc, SourceNode node, List<String> readerList) {
+        doc.setAlfrescoNodeId(node.nodeId());
+        doc.setAlfrescoRepositoryId(node.sourceId());
+        doc.setAlfrescoName(node.name());
+        doc.setAlfrescoPath(node.path());
+        doc.setAlfrescoMimeType(node.mimeType());
+        doc.setAlfrescoModifiedAt(node.modifiedAt() != null ? node.modifiedAt().toString() : null);
         doc.setAlfrescoReadAuthorities(readerList);
     }
 
-    private List<String> buildCinPaths(Node node) {
-        String repoId = resolvePathRepositoryId();
+    private List<String> buildCinPaths(SourceNode node) {
+        String repoId = resolvePathRepositoryId(node.sourceId());
         String parentPath = buildContentLakeParentPath(node, repoId);
         return List.of(buildDocumentPath(parentPath, node));
     }
 
-    private String buildDocumentPath(String parentPath, Node node) {
+    private String buildDocumentPath(String parentPath, SourceNode node) {
         return joinPath(parentPath, resolveDocumentName(node));
     }
 
-    private String resolveDocumentName(Node node) {
-        return (node.getName() != null && !node.getName().isBlank()) ? node.getName() : node.getId();
+    private String resolveDocumentName(SourceNode node) {
+        return (node.name() != null && !node.name().isBlank()) ? node.name() : node.nodeId();
     }
 
     private static String normalizeAbsolutePath(String path) {
@@ -646,20 +600,13 @@ public class NodeSyncService {
     }
 
     private String safeMimeType(String mimeType) {
-        if (mimeType == null || mimeType.isBlank()) {
-            return "unknown";
-        }
-        return mimeType;
+        return (mimeType == null || mimeType.isBlank()) ? "unknown" : mimeType;
     }
 
     private List<String> mergeMixinTypes(List<String> existingMixins, List<String> desiredMixins) {
         LinkedHashSet<String> merged = new LinkedHashSet<>();
-        if (existingMixins != null) {
-            merged.addAll(existingMixins);
-        }
-        if (desiredMixins != null) {
-            merged.addAll(desiredMixins);
-        }
+        if (existingMixins != null) merged.addAll(existingMixins);
+        if (desiredMixins  != null) merged.addAll(desiredMixins);
         return new ArrayList<>(merged);
     }
 
@@ -677,9 +624,9 @@ public class NodeSyncService {
         if (mimeType == null) return "";
         return switch (mimeType) {
             case "application/pdf" -> ".pdf";
-            case "text/plain" -> ".txt";
-            case "text/html" -> ".html";
-            default -> "";
+            case "text/plain"      -> ".txt";
+            case "text/html"       -> ".html";
+            default                -> "";
         };
     }
 
@@ -698,14 +645,10 @@ public class NodeSyncService {
 
     private OffsetDateTime getStoredModifiedAt(HxprDocument existing) {
         Map<String, Object> ingestProps = existing.getCinIngestProperties();
-        if (ingestProps == null) {
-            return null;
-        }
+        if (ingestProps == null) return null;
 
         Object stored = ingestProps.get(P_ALF_MODIFIED_AT);
-        if (stored == null) {
-            return null;
-        }
+        if (stored == null) return null;
 
         try {
             return OffsetDateTime.parse(stored.toString());
@@ -723,7 +666,7 @@ public class NodeSyncService {
      * Lightweight result from metadata ingestion.
      *
      * @param hxprDocId        Content Lake document identifier
-     * @param nodeId           Alfresco node identifier
+     * @param nodeId           source-system node identifier
      * @param mimeType         source MIME type
      * @param documentName     node name
      * @param documentPath     repository path

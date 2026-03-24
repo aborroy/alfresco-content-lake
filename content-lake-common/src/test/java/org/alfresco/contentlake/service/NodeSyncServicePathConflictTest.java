@@ -1,14 +1,12 @@
 package org.alfresco.contentlake.service;
 
-import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprService;
-import org.alfresco.contentlake.client.TransformClient;
 import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.contentlake.service.chunking.SimpleChunkingService;
-import org.alfresco.core.model.ContentInfo;
-import org.alfresco.core.model.Node;
-import org.alfresco.core.model.PathInfo;
+import org.alfresco.contentlake.spi.ContentSourceClient;
+import org.alfresco.contentlake.spi.SourceNode;
+import org.alfresco.contentlake.spi.TextExtractor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,7 +19,7 @@ import org.springframework.web.client.HttpClientErrorException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
-import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,11 +32,11 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class NodeSyncServicePathConflictTest {
 
-    private static final String REPOSITORY_ID = "default";
+    private static final String SOURCE_ID  = "default";
     private static final String TARGET_PATH = "/alfresco-sync";
 
     @Mock
-    private AlfrescoClient alfrescoClient;
+    private ContentSourceClient sourceClient;
 
     @Mock
     private HxprDocumentApi documentApi;
@@ -47,7 +45,7 @@ class NodeSyncServicePathConflictTest {
     private HxprService hxprService;
 
     @Mock
-    private TransformClient transformClient;
+    private TextExtractor textExtractor;
 
     @Mock
     private EmbeddingService embeddingService;
@@ -60,10 +58,10 @@ class NodeSyncServicePathConflictTest {
     @BeforeEach
     void setUp() {
         service = new NodeSyncService(
-                alfrescoClient,
+                sourceClient,
                 documentApi,
                 hxprService,
-                transformClient,
+                textExtractor,
                 embeddingService,
                 chunkingService,
                 TARGET_PATH,
@@ -73,14 +71,25 @@ class NodeSyncServicePathConflictTest {
 
     @Test
     void ingestMetadata_whenCreateConflicts_reusesExistingDocumentAtPath() {
-        Node node = new Node()
-                .id("node-123")
-                .name("Meeting Notes 2011-01-27.doc")
-                .isFile(true)
-                .isFolder(false)
-                .path(new PathInfo().name("/Company Home/Sites/swsdp/documentLibrary/Meeting Notes"))
-                .content(new ContentInfo().mimeType("application/msword"))
-                .modifiedAt(OffsetDateTime.parse("2026-03-13T12:00:00Z"));
+        SourceNode node = new SourceNode(
+                "node-123",
+                SOURCE_ID,
+                "alfresco",
+                "Meeting Notes 2011-01-27.doc",
+                "/Company Home/Sites/swsdp/documentLibrary/Meeting Notes",
+                "application/msword",
+                OffsetDateTime.parse("2026-03-13T12:00:00Z"),
+                false,
+                Set.of("GROUP_EVERYONE"),
+                Map.of(
+                        "alfresco_nodeId",       "node-123",
+                        "alfresco_repositoryId", SOURCE_ID,
+                        "alfresco_path",         "/Company Home/Sites/swsdp/documentLibrary/Meeting Notes",
+                        "alfresco_name",         "Meeting Notes 2011-01-27.doc",
+                        "alfresco_mimeType",     "application/msword",
+                        "alfresco_modifiedAt",   "2026-03-13T12:00:00Z"
+                )
+        );
 
         HxprDocument existingAtPath = new HxprDocument();
         existingAtPath.setSysId("hxpr-123");
@@ -88,14 +97,12 @@ class NodeSyncServicePathConflictTest {
         HxprDocument updated = new HxprDocument();
         updated.setSysId("hxpr-123");
         updated.setCinId("node-123");
-        updated.setCinSourceId(REPOSITORY_ID);
+        updated.setCinSourceId(SOURCE_ID);
 
         String parentPath = "/alfresco-sync/default/Company Home/Sites/swsdp/documentLibrary/Meeting Notes";
         String documentPath = parentPath + "/Meeting Notes 2011-01-27.doc";
 
-        when(alfrescoClient.getRepositoryId()).thenReturn(REPOSITORY_ID);
-        when(alfrescoClient.extractReadAuthorities(node)).thenReturn(Set.of("GROUP_EVERYONE"));
-        when(hxprService.findByNodeId("node-123", REPOSITORY_ID)).thenReturn(null);
+        when(hxprService.findByNodeId("node-123", SOURCE_ID)).thenReturn(null);
         when(hxprService.findByPath(documentPath)).thenReturn(null, existingAtPath);
         when(hxprService.createDocument(eq(parentPath), any(HxprDocument.class)))
                 .thenThrow(HttpClientErrorException.create(
@@ -122,11 +129,11 @@ class NodeSyncServicePathConflictTest {
         HxprDocument updatePayload = captor.getValue();
         assertThat(updatePayload.getSysId()).isEqualTo("hxpr-123");
         assertThat(updatePayload.getCinId()).isEqualTo("node-123");
-        assertThat(updatePayload.getCinSourceId()).isEqualTo(REPOSITORY_ID);
+        assertThat(updatePayload.getCinSourceId()).isEqualTo(SOURCE_ID);
         assertThat(updatePayload.getCinPaths()).containsExactly(documentPath);
         assertThat(updatePayload.getCinIngestProperties())
-                .containsEntry("alfresco_nodeId", "node-123")
-                .containsEntry("alfresco_repositoryId", REPOSITORY_ID)
-                .containsEntry("alfresco_path", "/Company Home/Sites/swsdp/documentLibrary/Meeting Notes");
+                .containsEntry("alfresco_nodeId",       "node-123")
+                .containsEntry("alfresco_repositoryId", SOURCE_ID)
+                .containsEntry("alfresco_path",         "/Company Home/Sites/swsdp/documentLibrary/Meeting Notes");
     }
 }

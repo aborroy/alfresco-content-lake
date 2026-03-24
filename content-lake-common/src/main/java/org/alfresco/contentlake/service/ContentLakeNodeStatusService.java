@@ -51,7 +51,7 @@ public class ContentLakeNodeStatusService {
         Map<String, Node> nodesById = new LinkedHashMap<>();
         List<String> fileNodeIds = sanitizedIds.stream()
                 .map(nodeId -> {
-                    Node node = alfrescoClient.getNode(nodeId);
+                    Node node = alfrescoClient.getAlfrescoNode(nodeId);
                     nodesById.put(nodeId, node);
                     return node;
                 })

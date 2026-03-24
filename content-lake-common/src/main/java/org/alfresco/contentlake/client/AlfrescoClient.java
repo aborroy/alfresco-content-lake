@@ -2,6 +2,9 @@ package org.alfresco.contentlake.client;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.alfresco.contentlake.adapter.AlfrescoSourceNodeAdapter;
+import org.alfresco.contentlake.spi.ContentSourceClient;
+import org.alfresco.contentlake.spi.SourceNode;
 import org.alfresco.core.handler.NodesApi;
 import org.alfresco.core.model.Node;
 import org.alfresco.core.model.NodeBodyUpdate;
@@ -30,11 +33,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Alfresco REST client wrapper used by the ingestion pipeline.
+ *
+ * <p>Implements {@link ContentSourceClient} so the shared sync pipeline can work
+ * through the source-agnostic SPI. Alfresco-specific callers (scope resolver,
+ * live/batch ingesters) use the {@link #getAlfrescoNode} and
+ * {@link #getAllChildren} methods directly.</p>
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AlfrescoClient {
+public class AlfrescoClient implements ContentSourceClient {
 
     private static final int DEFAULT_PAGE_SIZE = 100;
 
@@ -56,15 +64,89 @@ public class AlfrescoClient {
 
     private volatile @Nullable String cachedRepositoryId;
 
+    // ──────────────────────────────────────────────────────────────────────
+    // ContentSourceClient — SPI implementation
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Override
+    public String getSourceId() {
+        return getRepositoryId();
+    }
+
+    @Override
+    public String getSourceType() {
+        return "alfresco";
+    }
+
     /**
-     * Lists direct children of a folder using pagination.
+     * Fetches a node and converts it to a {@link SourceNode}.
      *
-     * @param folderId folder node identifier
-     * @param skipCount number of entries to skip
-     * @param maxItems maximum number of entries to return
-     * @return list of children nodes
+     * <p>Read principals are extracted from the node's permissions before
+     * conversion so the shared pipeline does not need Alfresco SDK types.</p>
      */
-    public List<Node> getChildren(String folderId, int skipCount, int maxItems) {
+    @Override
+    public @Nullable SourceNode getNode(String nodeId) {
+        Node node = getAlfrescoNode(nodeId);
+        if (node == null) {
+            return null;
+        }
+        Set<String> readers = extractReadAuthorities(node);
+        return AlfrescoSourceNodeAdapter.toSourceNode(node, getSourceId(), readers);
+    }
+
+    /** Lists direct children as {@link SourceNode} instances. */
+    @Override
+    public List<SourceNode> getChildren(String containerId, int skip, int maxItems) {
+        List<Node> nodes = listChildren(containerId, skip, maxItems);
+        List<SourceNode> result = new ArrayList<>(nodes.size());
+        String sourceId = getSourceId();
+        for (Node node : nodes) {
+            Set<String> readers = extractReadAuthorities(node);
+            result.add(AlfrescoSourceNodeAdapter.toSourceNode(node, sourceId, readers));
+        }
+        return result;
+    }
+
+    /** Downloads content to a temporary file resource. */
+    @Override
+    public Resource downloadContent(String nodeId, String fileName) {
+        return downloadContentToTempFile(nodeId, fileName);
+    }
+
+    /**
+     * Downloads content as bytes.
+     *
+     * <p>Any {@link IOException} from the underlying Alfresco SDK call is
+     * wrapped in an {@link IllegalStateException} so the SPI contract
+     * (no checked exceptions) is satisfied.</p>
+     */
+    @Override
+    public byte[] getContent(String nodeId) {
+        try {
+            return nodesApi.getNodeContent(nodeId, true, null, null)
+                    .getBody()
+                    .getContentAsByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to download content for nodeId=" + nodeId, e);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Alfresco-specific API (used by scope resolver, ingesters, reconciler)
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Lists direct children of a folder using pagination, returning Alfresco {@link Node} objects.
+     *
+     * <p>Used internally by {@link #getAllChildren} and by scope-aware traversal code
+     * that needs Alfresco-specific aspect information.</p>
+     *
+     * @param folderId  folder node identifier
+     * @param skipCount number of entries to skip
+     * @param maxItems  maximum number of entries to return
+     * @return list of children as Alfresco nodes
+     */
+    public List<Node> listChildren(String folderId, int skipCount, int maxItems) {
         NodeChildAssociationPaging response = nodesApi.listNodeChildren(
                 folderId,
                 skipCount,
@@ -99,7 +181,7 @@ public class AlfrescoClient {
         int skipCount = 0;
 
         while (true) {
-            List<Node> batch = getChildren(folderId, skipCount, DEFAULT_PAGE_SIZE);
+            List<Node> batch = listChildren(folderId, skipCount, DEFAULT_PAGE_SIZE);
             allNodes.addAll(batch);
 
             if (batch.size() < DEFAULT_PAGE_SIZE) {
@@ -112,12 +194,15 @@ public class AlfrescoClient {
     }
 
     /**
-     * Retrieves a single node with properties, path, and permissions.
+     * Retrieves a single Alfresco node with properties, path, and permissions.
+     *
+     * <p>Use this when Alfresco-specific fields (aspects, permissions) are needed.
+     * For source-agnostic access use {@link #getNode(String)} instead.</p>
      *
      * @param nodeId node identifier
      * @return the node, or {@code null} when it cannot be fetched
      */
-    public @Nullable Node getNode(String nodeId) {
+    public @Nullable Node getAlfrescoNode(String nodeId) {
         try {
             var response = nodesApi.getNode(nodeId, INCLUDE, null, null);
             return response != null && response.getBody() != null
@@ -135,9 +220,9 @@ public class AlfrescoClient {
     /**
      * Updates node aspects and optional properties.
      *
-     * @param nodeId node identifier
+     * @param nodeId      node identifier
      * @param aspectNames complete aspect list to persist
-     * @param properties optional property map to persist
+     * @param properties  optional property map to persist
      * @return updated node entry
      */
     public Node updateNode(String nodeId, List<String> aspectNames, @Nullable Map<String, Object> properties) {
@@ -165,24 +250,11 @@ public class AlfrescoClient {
     }
 
     /**
-     * Downloads node content into memory.
-     *
-     * @param nodeId node identifier
-     * @return full content as bytes
-     * @throws IOException if the content cannot be retrieved
-     */
-    public byte[] getContent(String nodeId) throws IOException {
-        return nodesApi.getNodeContent(nodeId, true, null, null)
-                .getBody()
-                .getContentAsByteArray();
-    }
-
-    /**
      * Downloads node content to a temporary file.
      *
      * <p>Useful for large files and for clients that require content-length determination.</p>
      *
-     * @param nodeId node identifier
+     * @param nodeId   node identifier
      * @param fileName preferred file name used as a suffix for the temp file
      * @return file system resource pointing to the temp file
      */
@@ -237,8 +309,6 @@ public class AlfrescoClient {
             if (hasReadAccess(permissionName)) {
                 readers.add(perm.getAuthorityId());
             } else {
-                // Useful when Alfresco returns site-scoped roles (SiteConsumer, SiteManager, etc.)
-                // or custom permission names. Log each unknown ALLOWED permission name only once.
                 if (permissionName != null
                         && log.isDebugEnabled()
                         && UNRECOGNIZED_ALLOWED_PERMISSION_NAMES.add(permissionName)) {
@@ -253,12 +323,10 @@ public class AlfrescoClient {
             return false;
         }
 
-        // Direct match (Consumer, Contributor, ...)
         if (READ_ROLES.contains(role)) {
             return true;
         }
 
-        // Alfresco site roles (SiteConsumer, SiteManager, ...)
         if (role.startsWith("Site") && role.length() > 4) {
             String stripped = role.substring(4);
             if (READ_ROLES.contains(stripped)) {
@@ -266,7 +334,6 @@ public class AlfrescoClient {
             }
         }
 
-        // Alfresco built-in read marker (seen in some permission payloads)
         return "ReadPermissions".equals(role) || "Read".equals(role);
     }
 

@@ -65,7 +65,7 @@ public class NodeDiscoveryService {
      * This is idempotent — calling it on an already-indexed folder is a no-op.
      */
     private void ensureIndexed(String folderId) {
-        Node folder = alfrescoClient.getNode(folderId);
+        Node folder = alfrescoClient.getAlfrescoNode(folderId);
         if (folder == null) {
             log.warn("Folder not found, skipping scope check: {}", folderId);
             return;

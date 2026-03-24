@@ -2,9 +2,11 @@ package org.alfresco.contentlake.live.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.alfresco.contentlake.adapter.AlfrescoSourceNodeAdapter;
 import org.alfresco.contentlake.client.AlfrescoClient;
 import org.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.alfresco.contentlake.service.NodeSyncService;
+import org.alfresco.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
 import org.alfresco.repo.event.v1.model.ChildAssociationResource;
 import org.alfresco.repo.event.v1.model.DataAttributes;
@@ -50,7 +52,7 @@ public class LiveEventProcessor {
         }
 
         try {
-            Node node = alfrescoClient.getNode(nodeId);
+            Node node = alfrescoClient.getAlfrescoNode(nodeId);
             if (node == null) {
                 if (deleteIfMissing) {
                     nodeSyncService.deleteNode(nodeId, resolveEventTimestamp(event, null));
@@ -60,7 +62,8 @@ public class LiveEventProcessor {
                     return;
                 }
             } else if (scopeResolver.isInScope(node)) {
-                nodeSyncService.syncNode(node);
+                SourceNode sourceNode = toSourceNode(node);
+                nodeSyncService.syncNode(sourceNode);
             } else {
                 nodeSyncService.deleteNode(nodeId, resolveEventTimestamp(event, node));
                 metrics.recordFiltered();
@@ -130,7 +133,7 @@ public class LiveEventProcessor {
                 return;
             }
 
-            nodeSyncService.updatePermissions(node.getId(), node);
+            nodeSyncService.updatePermissions(toSourceNode(node));
             metrics.recordProcessed();
         } catch (Exception e) {
             metrics.recordError();
@@ -154,7 +157,7 @@ public class LiveEventProcessor {
         }
 
         try {
-            Node folder = alfrescoClient.getNode(nodeId);
+            Node folder = alfrescoClient.getAlfrescoNode(nodeId);
             if (folder == null) {
                 metrics.recordFiltered();
                 log.warn("Folder {} not found for scope change event {}", nodeId, event.getId());
@@ -171,8 +174,6 @@ public class LiveEventProcessor {
                 return;
             }
 
-            // Invalidate the folder's cached aspect state so that hasIndexedAncestor()
-            // reflects the aspect change that triggered this event.
             scopeResolver.invalidateFolderScope(nodeId);
 
             FolderSubtreeReconciler.ReconciliationResult result =
@@ -208,9 +209,18 @@ public class LiveEventProcessor {
         return List.copyOf(ids);
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Alfresco boundary: Node → SourceNode conversion
+    // ──────────────────────────────────────────────────────────────────────
+
+    private SourceNode toSourceNode(Node node) {
+        Set<String> readers = alfrescoClient.extractReadAuthorities(node);
+        return AlfrescoSourceNodeAdapter.toSourceNode(node, alfrescoClient.getSourceId(), readers);
+    }
+
     private Node fetchFirstAvailableNode(List<String> candidateNodeIds) {
         for (String candidateNodeId : candidateNodeIds) {
-            Node node = alfrescoClient.getNode(candidateNodeId);
+            Node node = alfrescoClient.getAlfrescoNode(candidateNodeId);
             if (node != null) {
                 return node;
             }

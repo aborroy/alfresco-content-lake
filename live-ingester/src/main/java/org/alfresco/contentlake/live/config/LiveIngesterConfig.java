@@ -143,8 +143,12 @@ public class LiveIngesterConfig {
             HxprProperties hxprProps
     ) {
         return new NodeSyncService(
-                alfrescoClient, documentApi, hxprService,
-                transformClient, embeddingService, chunkingService,
+                alfrescoClient,    // ContentSourceClient
+                documentApi,
+                hxprService,
+                transformClient,   // TextExtractor
+                embeddingService,
+                chunkingService,
                 hxprProps.getTargetPath(),
                 hxprProps.getPathRepositoryId()
         );
