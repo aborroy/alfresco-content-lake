@@ -43,6 +43,8 @@ class HybridSearchServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "repositoryId", "test-repo");
+        ReflectionTestUtils.setField(service, "permissionSourceIds", "");
+        ReflectionTestUtils.setField(service, "nuxeoSourceId", "");
         ReflectionTestUtils.setField(service, "alfrescoUrl", "http://localhost:1");
         ReflectionTestUtils.setField(service, "serviceAccountUsername", "admin");
         ReflectionTestUtils.setField(service, "serviceAccountPassword", "admin");
@@ -360,6 +362,17 @@ class HybridSearchServiceTest {
 
             assertThat(filter).contains(" AND ");
             assertThat(filter).contains("cin_sourceId = 'my-repo'");
+        }
+
+        @Test
+        void buildPermissionFilter_withSourceFilter_usesFilteredSourceId() {
+            HybridSearchService svc = spy(service);
+            doReturn(List.of("user")).when(svc).getUserAuthorities("user");
+
+            String filter = svc.buildPermissionFilter("user", "cin_sourceId = 'nuxeo:nuxeo-demo'");
+
+            assertThat(filter).contains("sys_racl = 'user_#_nuxeo-demo'");
+            assertThat(filter).doesNotContain("user_#_test-repo");
         }
     }
 

@@ -111,6 +111,48 @@ class NuxeoClientTest {
     }
 
     @Test
+    void getNode_everyonePrincipalMapsToGroupEveryone() throws IOException {
+        server.createContext("/nuxeo/api/v1/id/public-doc", exchange ->
+            writeJson(exchange, """
+                    {
+                      "entity-type": "document",
+                      "uid": "public-doc",
+                      "path": "/default-domain/workspaces/public/policy.pdf",
+                      "type": "File",
+                      "title": "Public Policy",
+                      "state": "project",
+                      "properties": {
+                        "dc:modified": "2026-03-25T08:00:00Z",
+                        "file:content": {
+                          "name": "policy.pdf",
+                          "mime-type": "application/pdf"
+                        }
+                      },
+                      "contextParameters": {
+                        "acls": [
+                          {
+                            "name": "inherited",
+                            "aces": [
+                              { "username": "Everyone", "permission": "Read", "granted": true }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                    """));
+        server.start();
+
+        NuxeoClient client = client("file:content");
+
+        SourceNode node = client.getNode("public-doc");
+
+        assertThat(node).isNotNull();
+        // "Everyone" is Nuxeo's virtual group for unauthenticated/public access — must map to GROUP_EVERYONE
+        // so NodeSyncService can translate it to the __Everyone__ sys_acl principal
+        assertThat(node.readPrincipals()).containsExactly("GROUP_EVERYONE");
+    }
+
+    @Test
     void getChildren_honorsSkipAndMaxItemsAcrossPages() throws IOException {
         List<String> propertyHeaders = new ArrayList<>();
         List<String> enricherHeaders = new ArrayList<>();

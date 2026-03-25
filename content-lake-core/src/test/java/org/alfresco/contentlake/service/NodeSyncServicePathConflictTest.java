@@ -2,6 +2,7 @@ package org.alfresco.contentlake.service;
 
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprService;
+import org.alfresco.contentlake.hxpr.api.model.ACE;
 import org.alfresco.contentlake.model.HxprDocument;
 import org.alfresco.contentlake.service.chunking.SimpleChunkingService;
 import org.alfresco.contentlake.spi.ContentSourceClient;
@@ -19,6 +20,7 @@ import org.springframework.web.client.HttpClientErrorException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -145,5 +147,57 @@ class NodeSyncServicePathConflictTest {
                 .containsEntry("alfresco_nodeId",       "node-123")
                 .containsEntry("alfresco_repositoryId", SOURCE_ID)
                 .containsEntry("alfresco_path",         "/Company Home/Sites/swsdp/documentLibrary/Meeting Notes");
+    }
+
+    @Test
+    void buildDocument_mapsPrincipalsToSysAclWithCorrectFormat() {
+        // GROUP_EVERYONE  → user ACE "__Everyone__" (no suffix — universal public principal)
+        // GROUP_sales     → group ACE "GROUP_sales_#_<sourceId>"
+        // bob             → user ACE  "bob_#_<sourceId>"
+        SourceNode node = new SourceNode(
+                "node-acl",
+                SOURCE_ID,
+                "alfresco",
+                "report.pdf",
+                "/docs",
+                "application/pdf",
+                OffsetDateTime.parse("2026-03-25T08:00:00Z"),
+                false,
+                Set.of("GROUP_EVERYONE", "GROUP_sales", "bob"),
+                Map.of("source_nodeId", "node-acl")
+        );
+
+        HxprDocument created = new HxprDocument();
+        created.setSysId("hxpr-acl");
+
+        when(hxprService.findByNodeId("node-acl", FORMATTED_SOURCE_ID)).thenReturn(null);
+        when(hxprService.findByPath(any())).thenReturn(null);
+        when(hxprService.createDocument(any(), any(HxprDocument.class))).thenReturn(created);
+
+        service.ingestMetadata(node);
+
+        ArgumentCaptor<HxprDocument> captor = ArgumentCaptor.forClass(HxprDocument.class);
+        verify(hxprService).createDocument(any(), captor.capture());
+
+        List<ACE> sysAcl = captor.getValue().getSysAcl();
+        assertThat(sysAcl).hasSize(3);
+
+        assertThat(sysAcl).anyMatch(ace ->
+                ace.getUser() != null
+                && "__Everyone__".equals(ace.getUser().getId())
+                && Boolean.TRUE.equals(ace.getGranted())
+                && "Read".equals(ace.getPermission()));
+
+        assertThat(sysAcl).anyMatch(ace ->
+                ace.getGroup() != null
+                && ("GROUP_sales_#_" + SOURCE_ID).equals(ace.getGroup().getId())
+                && Boolean.TRUE.equals(ace.getGranted())
+                && "Read".equals(ace.getPermission()));
+
+        assertThat(sysAcl).anyMatch(ace ->
+                ace.getUser() != null
+                && ("bob_#_" + SOURCE_ID).equals(ace.getUser().getId())
+                && Boolean.TRUE.equals(ace.getGranted())
+                && "Read".equals(ace.getPermission()));
     }
 }

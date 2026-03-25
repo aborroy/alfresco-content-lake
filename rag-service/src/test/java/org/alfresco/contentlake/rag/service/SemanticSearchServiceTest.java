@@ -34,6 +34,8 @@ class SemanticSearchServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "repositoryId", "test-repo");
+        ReflectionTestUtils.setField(service, "permissionSourceIds", "");
+        ReflectionTestUtils.setField(service, "nuxeoSourceId", "");
         ReflectionTestUtils.setField(service, "alfrescoUrl", "http://localhost:1");
         ReflectionTestUtils.setField(service, "serviceAccountUsername", "admin");
         ReflectionTestUtils.setField(service, "serviceAccountPassword", "admin");
@@ -53,7 +55,6 @@ class SemanticSearchServiceTest {
 
         // __Everyone__ is always included
         assertThat(filter).contains("sys_racl = '__Everyone__'");
-        // username is included with source-system suffix
         assertThat(filter).contains("sys_racl = 'admin_#_test-repo'");
         // GROUP_EVERYONE itself is skipped (not added as a clause)
         assertThat(filter).doesNotContain("GROUP_EVERYONE");
@@ -82,6 +83,29 @@ class SemanticSearchServiceTest {
 
         assertThat(filter).contains(" AND ");
         assertThat(filter).contains("cin_sourceId = 'my-repo'");
+    }
+
+    @Test
+    void buildPermissionFilter_withSourceFilter_usesFilteredSourceId() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of("alice")).when(svc).getUserAuthorities("alice");
+
+        String filter = svc.buildPermissionFilter("alice", "cin_sourceId = 'nuxeo:nuxeo-demo'");
+
+        assertThat(filter).contains("sys_racl = 'alice_#_nuxeo-demo'");
+        assertThat(filter).doesNotContain("alice_#_test-repo");
+    }
+
+    @Test
+    void buildPermissionFilter_withConfiguredExtraSourceIds_includesAllNamespaces() {
+        SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
+        doReturn(List.of("alice", "GROUP_ENGINEERING")).when(svc).getUserAuthorities("alice");
+
+        String filter = svc.buildPermissionFilter("alice", null);
+
+        assertThat(filter).contains("sys_racl = 'alice_#_nuxeo-demo'");
+        assertThat(filter).contains("sys_racl = 'g:GROUP_ENGINEERING_#_nuxeo-demo'");
     }
 
     // -----------------------------------------------------------------------

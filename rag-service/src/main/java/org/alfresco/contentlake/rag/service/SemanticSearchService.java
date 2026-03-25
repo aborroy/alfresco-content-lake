@@ -20,6 +20,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -46,6 +47,8 @@ public class SemanticSearchService {
     private static final String EVERYONE_PRINCIPAL = "__Everyone__";
     private static final String GROUP_PREFIX = "GROUP_";
     private static final String GROUP_RACL_PREFIX = "g:";
+    private static final String SOURCE_ID_SEPARATOR = "_#_";
+    private static final Pattern SOURCE_ID_EQUALS_PATTERN = Pattern.compile("cin_sourceId\\s*=\\s*'([^']+)'");
 
     private static final double FALLBACK_MIN_SCORE = 0.5d;
 
@@ -55,6 +58,12 @@ public class SemanticSearchService {
 
     @Value("${hxpr.repositoryId:default}")
     private String repositoryId;
+
+    @Value("${rag.permission.source-ids:}")
+    private String permissionSourceIds;
+
+    @Value("${nuxeo.source-id:}")
+    private String nuxeoSourceId;
 
     @Value("${content.service.url}")
     private String alfrescoUrl;
@@ -164,7 +173,7 @@ public class SemanticSearchService {
                 .distinct()
                 .toList();
 
-        String suffix = buildSourceSystemSuffix();
+        List<String> sourceIds = resolvePermissionSourceIds(additionalFilter);
 
         List<String> raclClauses = new ArrayList<>();
         raclClauses.add(RACL_FIELD + " = '" + escapeHxql(EVERYONE_PRINCIPAL) + "'");
@@ -173,16 +182,13 @@ public class SemanticSearchService {
             for (String authority : authorities) {
                 if ("GROUP_EVERYONE".equals(authority)) {
                     continue;
-                } else if (authority.startsWith(GROUP_PREFIX)) {
-                    raclClauses.add(RACL_FIELD + " = '" + escapeHxql(GROUP_RACL_PREFIX + authority + suffix) + "'");
-                } else {
-                    raclClauses.add(RACL_FIELD + " = '" + escapeHxql(authority + suffix) + "'");
                 }
+                raclClauses.addAll(buildAuthorityClauses(authority, sourceIds));
             }
-            log.debug("Permission filter with {} authorities for user: {} (suffix='{}')",
-                    authorities.size(), username, suffix);
+            log.debug("Permission filter with {} authorities for user: {} (sourceIds={})",
+                    authorities.size(), username, sourceIds);
         } else {
-            raclClauses.add(RACL_FIELD + " = '" + escapeHxql(username + suffix) + "'");
+            raclClauses.addAll(buildAuthorityClauses(username, sourceIds));
             log.debug("No authorities resolved, falling back to username only for user: {}", username);
         }
 
@@ -384,7 +390,62 @@ public class SemanticSearchService {
         return value == null ? "" : value.replace("'", "''");
     }
 
-    private String buildSourceSystemSuffix() {
-        return "_#_" + repositoryId;
+    private List<String> buildAuthorityClauses(String authority, List<String> sourceIds) {
+        LinkedHashSet<String> principals = new LinkedHashSet<>();
+        if (authority.startsWith(GROUP_PREFIX)) {
+            for (String sourceId : sourceIds) {
+                String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
+                principals.add(GROUP_RACL_PREFIX + namespaced);
+            }
+        } else {
+            for (String sourceId : sourceIds) {
+                String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
+                principals.add(namespaced);
+            }
+        }
+
+        return principals.stream()
+                .map(principal -> RACL_FIELD + " = '" + escapeHxql(principal) + "'")
+                .toList();
+    }
+
+    private List<String> resolvePermissionSourceIds(String additionalFilter) {
+        LinkedHashSet<String> sourceIds = new LinkedHashSet<>();
+
+        if (additionalFilter != null && !additionalFilter.isBlank()) {
+            var matcher = SOURCE_ID_EQUALS_PATTERN.matcher(additionalFilter);
+            while (matcher.find()) {
+                addSourceId(sourceIds, matcher.group(1));
+            }
+        }
+
+        if (!sourceIds.isEmpty()) {
+            return List.copyOf(sourceIds);
+        }
+
+        if (permissionSourceIds != null && !permissionSourceIds.isBlank()) {
+            for (String candidate : permissionSourceIds.split(",")) {
+                addSourceId(sourceIds, candidate);
+            }
+        } else {
+            addSourceId(sourceIds, repositoryId);
+            addSourceId(sourceIds, nuxeoSourceId);
+        }
+
+        return List.copyOf(sourceIds);
+    }
+
+    private static void addSourceId(Set<String> sourceIds, String candidate) {
+        if (candidate == null) {
+            return;
+        }
+        String trimmed = candidate.trim();
+        if (trimmed.isBlank()) {
+            return;
+        }
+        int separator = trimmed.indexOf(':');
+        sourceIds.add(separator >= 0 && separator < trimmed.length() - 1
+                ? trimmed.substring(separator + 1)
+                : trimmed);
     }
 }
