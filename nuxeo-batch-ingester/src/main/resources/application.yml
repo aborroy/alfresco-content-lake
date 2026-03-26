@@ -19,6 +19,9 @@ nuxeo:
   password: ${NUXEO_PASSWORD:Administrator}
   source-id: ${NUXEO_SOURCE_ID:local}
   blob-xpath: ${NUXEO_BLOB_XPATH:file:content}
+  conversion:
+    timeout-ms: ${NUXEO_CONVERSION_TIMEOUT_MS:300000}
+    enabled: ${NUXEO_CONVERSION_ENABLED:true}
   scope:
     included-roots:
       - ${NUXEO_INCLUDED_ROOT_1:/default-domain/workspaces}

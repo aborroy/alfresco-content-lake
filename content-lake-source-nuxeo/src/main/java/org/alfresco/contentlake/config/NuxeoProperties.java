@@ -7,11 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Nuxeo connection and scope properties.
- *
- * <p>This module is adapter-only for now, so these properties are not yet
- * enabled by an application module. They are still defined here so the
- * upcoming Nuxeo ingester can bind them directly.</p>
+ * Nuxeo connection and scope properties shared by the Nuxeo adapter and ingester.
  */
 @Data
 @ConfigurationProperties(prefix = "nuxeo")
@@ -22,8 +18,15 @@ public class NuxeoProperties {
     private String password = "Administrator";
     private String sourceId = "local";
     private String blobXpath = "file:content";
+    private Conversion conversion = new Conversion();
     private Scope scope = new Scope();
     private Discovery discovery = new Discovery();
+
+    @Data
+    public static class Conversion {
+        private long timeoutMs = 300000;
+        private boolean enabled = true;
+    }
 
     @Data
     public static class Scope {

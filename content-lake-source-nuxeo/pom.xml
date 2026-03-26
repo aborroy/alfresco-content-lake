@@ -12,23 +12,13 @@
 
     <artifactId>content-lake-source-nuxeo</artifactId>
     <name>Content Lake Source Nuxeo</name>
-    <description>Nuxeo-specific source adapter: REST client, auth, scope resolver, and Apache Tika text extraction</description>
+    <description>Nuxeo-specific source adapter: REST clients, auth, scope resolver, and text extraction</description>
 
     <dependencies>
         <dependency>
             <groupId>org.alfresco</groupId>
             <artifactId>content-lake-core</artifactId>
             <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-core</artifactId>
-            <version>3.2.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-parsers-standard-package</artifactId>
-            <version>3.2.3</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

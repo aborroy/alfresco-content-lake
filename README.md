@@ -81,7 +81,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 |--------|------|-------------|
 | `content-lake-repo-model` | — | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
 | `content-lake-core` | — | Shared clients and ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
-| `content-lake-source-nuxeo` | — | Nuxeo REST client, scope resolver, auth abstraction, and embedded Tika text extraction |
+| `content-lake-source-nuxeo` | — | Nuxeo REST clients, scope resolver, auth abstraction, and server-side conversion-backed text extraction |
 | `alfresco-batch-ingester` | 9090 | Alfresco folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
 | `nuxeo-batch-ingester` | 9093 | Nuxeo full-batch discovery and one-shot sync, using NXQL by default with `@children` fallback |
 | `alfresco-live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |

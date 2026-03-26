@@ -5,12 +5,12 @@ import org.alfresco.contentlake.client.HxprQueryApi;
 import org.alfresco.contentlake.client.HxprService;
 import org.alfresco.contentlake.client.HxprTokenProvider;
 import org.alfresco.contentlake.client.NuxeoClient;
+import org.alfresco.contentlake.client.NuxeoConversionClient;
 import org.alfresco.contentlake.config.HxprProperties;
 import org.alfresco.contentlake.config.NuxeoProperties;
 import org.alfresco.contentlake.nuxeo.batch.service.NuxeoDiscoveryService;
 import org.alfresco.contentlake.service.EmbeddingService;
 import org.alfresco.contentlake.service.NodeSyncService;
-import org.alfresco.contentlake.service.NuxeoTextExtractor;
 import org.alfresco.contentlake.service.chunking.NoiseReductionService;
 import org.alfresco.contentlake.service.chunking.SimpleChunkingService;
 import org.alfresco.contentlake.service.chunking.strategy.ChunkingStrategy.ChunkingConfig;
@@ -79,8 +79,8 @@ public class AppConfig {
     }
 
     @Bean
-    public NuxeoTextExtractor nuxeoTextExtractor() {
-        return new NuxeoTextExtractor();
+    public NuxeoConversionClient nuxeoConversionClient(NuxeoProperties props) {
+        return new NuxeoConversionClient(props);
     }
 
     @Bean
@@ -115,7 +115,7 @@ public class AppConfig {
     public NodeSyncService nodeSyncService(NuxeoClient nuxeoClient,
                                            HxprDocumentApi documentApi,
                                            HxprService hxprService,
-                                           NuxeoTextExtractor nuxeoTextExtractor,
+                                           NuxeoConversionClient nuxeoConversionClient,
                                            EmbeddingService embeddingService,
                                            SimpleChunkingService chunkingService,
                                            HxprProperties props) {
@@ -123,7 +123,7 @@ public class AppConfig {
                 nuxeoClient,
                 documentApi,
                 hxprService,
-                nuxeoTextExtractor,
+                nuxeoConversionClient,
                 embeddingService,
                 chunkingService,
                 props.getTargetPath(),

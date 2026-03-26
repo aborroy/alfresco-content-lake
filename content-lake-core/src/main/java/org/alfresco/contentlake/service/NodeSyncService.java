@@ -406,8 +406,12 @@ public class NodeSyncService {
             return new String(content, StandardCharsets.UTF_8);
         }
 
+        if (textExtractor.supportsSourceReference(mimeType)) {
+            return textExtractor.extractText(nodeId, mimeType);
+        }
+
         if (!textExtractor.supports(mimeType)) {
-            log.info("Skipping content extraction for node {}: unsupported transform {} -> {}",
+            log.info("Skipping content extraction for node {}: unsupported extraction {} -> {}",
                     nodeId, mimeType, TARGET_MIME_TYPE);
             return null;
         }
