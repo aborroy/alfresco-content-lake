@@ -26,6 +26,7 @@
         <module>alfresco-batch-ingester</module>
         <module>nuxeo-batch-ingester</module>
         <module>alfresco-live-ingester</module>
+        <module>nuxeo-live-ingester</module>
         <module>rag-service</module>
     </modules>
 

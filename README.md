@@ -85,6 +85,7 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 | `alfresco-batch-ingester` | 9090 | Alfresco folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
 | `nuxeo-batch-ingester` | 9093 | Nuxeo full-batch discovery and one-shot sync, using NXQL by default with `@children` fallback |
 | `alfresco-live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |
+| `nuxeo-live-ingester` | 9094 | Nuxeo audit-stream listener using a persisted watermark and no full repository scans |
 | `rag-service` | 9091 | Semantic search and RAG question answering |
 
 ## Quick Start
@@ -233,10 +234,10 @@ export EMBEDDING_CHUNK_SIZE=900
 export EMBEDDING_CHUNK_OVERLAP=120
 ```
 
-## Nuxeo Full Backfill
+## Nuxeo Backfill And Live Sync
 
-`compose.nuxeo.yaml` starts only the `nuxeo-batch-ingester`.  The Nuxeo
-server itself is provided by the
+`compose.nuxeo.yaml` starts both the `nuxeo-batch-ingester` and the
+`nuxeo-live-ingester`. The Nuxeo server itself is provided by the
 [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) companion
 project, which must be running before you start this stack.
 
@@ -251,7 +252,7 @@ docker compose up --build
 
 Nuxeo will be available at `http://localhost:8081/nuxeo` once healthy.
 
-**Step 2 — start the batch ingester** (from this directory):
+**Step 2 — start the Nuxeo ingesters** (from this directory):
 
 ```bash
 docker compose -f compose.nuxeo.yaml up --build
@@ -259,8 +260,8 @@ docker compose -f compose.nuxeo.yaml up --build
 
 This starts:
 
-- `nuxeo-batch-ingester` on `http://localhost:9093`, pointing at the
-  `nuxeo-deployment` instance on `http://host.docker.internal:8081/nuxeo`
+- `nuxeo-batch-ingester` on `http://localhost:9093` for one-shot backfills
+- `nuxeo-live-ingester` on `http://localhost:9094` for audit-driven incremental sync
 
 Defaults:
 
@@ -298,6 +299,14 @@ curl http://localhost:9093/api/sync/status -u Administrator:Administrator
 curl http://localhost:9093/api/sync/status/{jobId} -u Administrator:Administrator
 ```
 
+The live listener has no manual sync API. Use the actuator endpoints for
+health and metrics:
+
+```bash
+curl http://localhost:9094/actuator/health
+curl http://localhost:9094/actuator/metrics
+```
+
 When using the deployment repo's reverse proxy, the public sync API remains `/api/sync/*`.
 Route to Nuxeo by adding `?sourceType=nuxeo`; omit it or use `alfresco` for the existing Alfresco ingester.
 
@@ -307,6 +316,7 @@ REST API authentication is source-specific:
 
 - Alfresco ingesters validate incoming credentials or tickets against Alfresco.
 - `nuxeo-batch-ingester` uses HTTP Basic auth with the configured Nuxeo service credentials.
+- `nuxeo-live-ingester` does not expose sync APIs; health and metrics come from Spring Actuator.
 
 ### Supported Methods
 

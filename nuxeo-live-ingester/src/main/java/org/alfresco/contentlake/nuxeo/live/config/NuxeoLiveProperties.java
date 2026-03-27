@@ -1,24 +1,25 @@
-package org.alfresco.contentlake.nuxeo.batch.config;
+package org.alfresco.contentlake.nuxeo.live.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/**
- * Batch runtime and embedding settings for the Nuxeo full ingester.
- */
-@Data
-@ConfigurationProperties(prefix = "nuxeo.batch")
-public class NuxeoBatchProperties {
+import java.time.Duration;
 
-    private Executor executor = new Executor();
+@Data
+@ConfigurationProperties(prefix = "nuxeo.live")
+public class NuxeoLiveProperties {
+
+    private Audit audit = new Audit();
     private Embedding embedding = new Embedding();
 
     @Data
-    public static class Executor {
-        private int coreSize = 1;
-        private int maxSize = 1;
-        private int queueCapacity = 1000;
-        private int awaitTerminationSeconds = 30;
+    public static class Audit {
+        private boolean enabled = true;
+        private Duration fixedDelay = Duration.ofSeconds(30);
+        private Duration initialDelay = Duration.ofSeconds(10);
+        private Duration initialLookback = Duration.ofMinutes(5);
+        private int pageSize = 100;
+        private String cursorFile = "/data/audit-cursor.json";
     }
 
     @Data
@@ -36,5 +37,4 @@ public class NuxeoBatchProperties {
         private boolean enabled = true;
         private boolean aggressive = false;
     }
-
 }

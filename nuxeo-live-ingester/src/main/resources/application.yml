@@ -1,0 +1,75 @@
+server:
+  port: 9094
+
+spring:
+  application:
+    name: nuxeo-live-ingester
+
+  ai:
+    openai:
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      api-key: ${MODEL_RUNNER_API_KEY:not-needed}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+
+nuxeo:
+  base-url: ${NUXEO_URL:http://localhost:8081/nuxeo}
+  username: ${NUXEO_USERNAME:Administrator}
+  password: ${NUXEO_PASSWORD:Administrator}
+  source-id: ${NUXEO_SOURCE_ID:local}
+  blob-xpath: ${NUXEO_BLOB_XPATH:file:content}
+  conversion:
+    timeout-ms: ${NUXEO_CONVERSION_TIMEOUT_MS:300000}
+    enabled: ${NUXEO_CONVERSION_ENABLED:true}
+  scope:
+    included-roots:
+      - ${NUXEO_INCLUDED_ROOT_1:/default-domain/workspaces}
+    included-types:
+      - File
+      - Note
+    excluded-lifecycle-states:
+      - deleted
+  live:
+    audit:
+      enabled: ${NUXEO_LIVE_AUDIT_ENABLED:true}
+      fixed-delay: ${NUXEO_LIVE_AUDIT_FIXED_DELAY:30s}
+      initial-delay: ${NUXEO_LIVE_AUDIT_INITIAL_DELAY:10s}
+      initial-lookback: ${NUXEO_LIVE_AUDIT_INITIAL_LOOKBACK:5m}
+      page-size: ${NUXEO_LIVE_AUDIT_PAGE_SIZE:100}
+      cursor-file: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:/data/audit-cursor.json}
+    embedding:
+      min-chunk-size: ${EMBEDDING_MIN_CHUNK_SIZE:200}
+      chunk-size: ${EMBEDDING_CHUNK_SIZE:1000}
+      chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:120}
+      similarity-threshold: ${EMBEDDING_SIMILARITY_THRESHOLD:0.75}
+      model-name: ${EMBEDDING_MODEL_NAME:default}
+      noise-reduction:
+        enabled: ${NOISE_REDUCTION_ENABLED:true}
+        aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}
+
+hxpr:
+  url: ${HXPR_URL:http://localhost:8080}
+  repository-id: ${HXPR_REPOSITORY_ID:default}
+  target-path: ${HXPR_TARGET_PATH:/nuxeo-sync}
+  path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
+  idp:
+    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
+    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
+    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
+    username: ${HXPR_IDP_USERNAME:testuser}
+    password: ${HXPR_IDP_PASSWORD:password}
+  model:
+    bootstrap:
+      enabled: true
+    fragments: classpath:model-fragments.json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    org.alfresco.contentlake: ${LOG_LEVEL:INFO}

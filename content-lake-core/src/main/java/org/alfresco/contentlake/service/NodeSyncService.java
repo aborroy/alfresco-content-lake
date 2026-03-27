@@ -209,9 +209,10 @@ public class NodeSyncService {
      * Deletes the Content Lake document (and its embeddings) for a given node.
      *
      * @param nodeId source-system node identifier
+     * @return {@code true} if a record existed and was successfully deleted, {@code false} otherwise
      */
-    public void deleteNode(String nodeId) {
-        deleteNode(nodeId, null);
+    public boolean deleteNode(String nodeId) {
+        return deleteNode(nodeId, null);
     }
 
     /**
@@ -220,26 +221,29 @@ public class NodeSyncService {
      *
      * @param nodeId    source-system node identifier
      * @param deletedAt timestamp associated with the delete/update-to-out-of-scope event
+     * @return {@code true} if a record existed and was successfully deleted, {@code false} otherwise
      */
-    public void deleteNode(String nodeId, OffsetDateTime deletedAt) {
+    public boolean deleteNode(String nodeId, OffsetDateTime deletedAt) {
         String sourceId = formatSourceId(sourceClient.getSourceType(), sourceClient.getSourceId());
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing == null) {
             log.debug("No Content Lake document found for deleted node {}", nodeId);
-            return;
+            return false;
         }
 
         OffsetDateTime storedModifiedAt = getStoredModifiedAt(existing);
         if (deletedAt != null && storedModifiedAt != null && storedModifiedAt.isAfter(deletedAt)) {
             log.info("Skipping delete for node {} — Content Lake document is newer than delete event", nodeId);
-            return;
+            return false;
         }
 
         try {
             documentApi.deleteById(existing.getSysId());
             log.info("Deleted Content Lake document {} for node {}", existing.getSysId(), nodeId);
+            return true;
         } catch (Exception e) {
             log.error("Failed to delete Content Lake document for node {}: {}", nodeId, e.getMessage());
+            return false;
         }
     }
 

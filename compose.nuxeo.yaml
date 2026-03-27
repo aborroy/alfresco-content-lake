@@ -33,3 +33,28 @@ services:
       MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}
 
+  nuxeo-live-ingester:
+    build:
+      context: .
+      dockerfile: nuxeo-live-ingester/Dockerfile
+    ports:
+      - "9094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NUXEO_URL: http://host.docker.internal:8081/nuxeo
+      NUXEO_USERNAME: ${NUXEO_USERNAME:-Administrator}
+      NUXEO_PASSWORD: ${NUXEO_PASSWORD:-Administrator}
+      NUXEO_SOURCE_ID: ${NUXEO_SOURCE_ID:-local}
+      NUXEO_LIVE_AUDIT_ENABLED: ${NUXEO_LIVE_AUDIT_ENABLED:-true}
+      NUXEO_LIVE_AUDIT_CURSOR_FILE: ${NUXEO_LIVE_AUDIT_CURSOR_FILE:-/tmp/nuxeo-live-audit-cursor.json}
+      HXPR_URL: ${HXPR_URL:-http://host.docker.internal:8080}
+      HXPR_REPOSITORY_ID: ${HXPR_REPOSITORY_ID:-default}
+      HXPR_TARGET_PATH: ${HXPR_TARGET_PATH:-/nuxeo-sync}
+      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
+      HXPR_IDP_CLIENT_ID: ${HXPR_IDP_CLIENT_ID:-nuxeo-client}
+      HXPR_IDP_CLIENT_SECRET: ${HXPR_IDP_CLIENT_SECRET:-secret}
+      HXPR_IDP_USERNAME: ${HXPR_IDP_USERNAME:-testuser}
+      HXPR_IDP_PASSWORD: ${HXPR_IDP_PASSWORD:-password}
+      MODEL_RUNNER_URL: ${MODEL_RUNNER_URL:-http://host.docker.internal:12434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ai/mxbai-embed-large}

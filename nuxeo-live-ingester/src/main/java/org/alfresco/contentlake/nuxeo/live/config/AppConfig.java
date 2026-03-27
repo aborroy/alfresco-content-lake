@@ -1,5 +1,6 @@
-package org.alfresco.contentlake.nuxeo.batch.config;
+package org.alfresco.contentlake.nuxeo.live.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.alfresco.contentlake.client.HxprDocumentApi;
 import org.alfresco.contentlake.client.HxprQueryApi;
 import org.alfresco.contentlake.client.HxprService;
@@ -8,7 +9,9 @@ import org.alfresco.contentlake.client.NuxeoClient;
 import org.alfresco.contentlake.client.NuxeoConversionClient;
 import org.alfresco.contentlake.config.HxprProperties;
 import org.alfresco.contentlake.config.NuxeoProperties;
-import org.alfresco.contentlake.nuxeo.batch.service.NuxeoDiscoveryService;
+import org.alfresco.contentlake.nuxeo.live.client.NuxeoAuditClient;
+import org.alfresco.contentlake.nuxeo.live.service.AuditCursorStore;
+import org.alfresco.contentlake.nuxeo.live.service.FileAuditCursorStore;
 import org.alfresco.contentlake.service.EmbeddingService;
 import org.alfresco.contentlake.service.NuxeoScopeResolver;
 import org.alfresco.contentlake.service.NodeSyncService;
@@ -20,18 +23,18 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
-import java.util.concurrent.Executor;
+import java.nio.file.Path;
+import java.time.Clock;
 
 @Configuration
 @EnableConfigurationProperties({
         HxprProperties.class,
         NuxeoProperties.class,
-        NuxeoBatchProperties.class
+        NuxeoLiveProperties.class
 })
 public class AppConfig {
 
@@ -85,6 +88,11 @@ public class AppConfig {
     }
 
     @Bean
+    public NuxeoAuditClient nuxeoAuditClient(NuxeoProperties props) {
+        return new NuxeoAuditClient(props);
+    }
+
+    @Bean
     public NuxeoScopeResolver nuxeoScopeResolver(NuxeoProperties props) {
         return new NuxeoScopeResolver(
                 props.getScope().getIncludedRoots(),
@@ -94,19 +102,38 @@ public class AppConfig {
     }
 
     @Bean
-    public EmbeddingService embeddingService(EmbeddingModel embeddingModel, NuxeoBatchProperties props) {
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
+
+    @Bean
+    public AuditCursorStore auditCursorStore(NuxeoLiveProperties props,
+                                             ObjectMapper objectMapper) {
+        return new FileAuditCursorStore(
+                Path.of(props.getAudit().getCursorFile()),
+                objectMapper
+        );
+    }
+
+    @Bean(name = "nuxeoLiveRuntime")
+    public NuxeoLiveProperties nuxeoLiveRuntime(NuxeoLiveProperties props) {
+        return props;
+    }
+
+    @Bean
+    public EmbeddingService embeddingService(EmbeddingModel embeddingModel, NuxeoLiveProperties props) {
         return new EmbeddingService(embeddingModel, props.getEmbedding().getModelName());
     }
 
     @Bean
-    public NoiseReductionService noiseReductionService(NuxeoBatchProperties props) {
-        NuxeoBatchProperties.NoiseReduction cfg = props.getEmbedding().getNoiseReduction();
+    public NoiseReductionService noiseReductionService(NuxeoLiveProperties props) {
+        NuxeoLiveProperties.NoiseReduction cfg = props.getEmbedding().getNoiseReduction();
         return new NoiseReductionService(cfg.isEnabled(), cfg.isAggressive());
     }
 
     @Bean
-    public ChunkingConfig chunkingConfig(NuxeoBatchProperties props) {
-        NuxeoBatchProperties.Embedding embedding = props.getEmbedding();
+    public ChunkingConfig chunkingConfig(NuxeoLiveProperties props) {
+        NuxeoLiveProperties.Embedding embedding = props.getEmbedding();
         return new ChunkingConfig(
                 embedding.getMinChunkSize(),
                 embedding.getChunkSize(),
@@ -139,19 +166,6 @@ public class AppConfig {
                 props.getTargetPath(),
                 props.getPathRepositoryId()
         );
-    }
-
-    @Bean(name = "nuxeoBatchIngestionExecutor")
-    public Executor nuxeoBatchIngestionExecutor(NuxeoBatchProperties props) {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(props.getExecutor().getCoreSize());
-        executor.setMaxPoolSize(props.getExecutor().getMaxSize());
-        executor.setQueueCapacity(props.getExecutor().getQueueCapacity());
-        executor.setThreadNamePrefix("nuxeo-batch-");
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(props.getExecutor().getAwaitTerminationSeconds());
-        executor.initialize();
-        return executor;
     }
 
     private static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props,
