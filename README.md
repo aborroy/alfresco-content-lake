@@ -1,4 +1,4 @@
-# Alfresco Content Lake
+# Content Lake App
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
@@ -7,23 +7,23 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://docs.docker.com/compose/)
 [![Status](https://img.shields.io/badge/Status-PoC-yellow.svg)]()
 
-**AI-powered semantic search and RAG for Alfresco using hxpr Content Lake**
+**AI-powered semantic search and RAG over Alfresco and Nuxeo content using hxpr**
 
 [Features](#features) • [Quick Start](#quick-start) • [Architecture](#architecture) • [Authentication](#authentication) • [API Usage](#api-usage) • [Configuration](#configuration)
 
 ## Related Projects
 
 - [alfresco-content-lake-ui](https://github.com/aborroy/alfresco-content-lake-ui) - ACA-based frontend for semantic search and RAG over Content Lake.
-- [alfresco-content-lake-deploy](https://github.com/aborroy/alfresco-content-lake-deploy) - Docker Compose deployment for Alfresco, hxpr, Content Lake services, and the UI.
+- [content-lake-app-deployment](https://github.com/aborroy/content-lake-app-deployment) - Docker Compose deployment for Alfresco, Nuxeo, hxpr, Content Lake services, and the UI.
 - [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) - Companion project that builds and runs the local Nuxeo server. Required when using `compose.nuxeo.yaml` in this repo.
 
 ## Overview
 
-Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) on Alfresco Content Services.
+Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) over Alfresco and Nuxeo content.
 
 Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 
-* Keeping Alfresco as the source of truth
+* Keeping Alfresco and Nuxeo as the sources of truth
 * Enforcing server-side permissions via ACLs
 * Supporting on-premises AI execution
 * Minimizing data duplication
@@ -45,48 +45,50 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 ## Architecture
 
 ```text
-                 ┌──────────────────────────────────────┐
-                 │ Alfresco Repository + Event2         │
-                 │ REST API + ActiveMQ topic            │
-                 └──────────────────────────────────────┘
-                          │                     │
-                          │                     │
-                          ▼                     ▼
-┌──────────────────────────────────────┐   ┌──────────────────────────────────────┐
-│ batch-ingester                       │   │ live-ingester                        │
-│ Discovery → Metadata → Queue         │   │ SDK Handlers → Filter → Sync         │
-└──────────────────────────────────────┘   └──────────────────────────────────────┘
-                          │                     │
-                          └──────────┬──────────┘
-                                     ▼
-               ┌──────────────────────────────────────────┐
-               │ content-lake-common                      │
-               │ Node sync, Transform, Chunk, Embed, ACL  │
-               │ `alfresco_modifiedAt` idempotency guard  │
-               └──────────────────────────────────────────┘
-                                     ▼
-               ┌──────────────────────────────────────────┐
-               │ hxpr Content Lake                        │
-               └──────────────────────────────────────────┘
-                                     ▼
-               ┌──────────────────────────────────────────┐
-               │ rag-service                              │
-               │ Query → Embed → Search → Augment → LLM   │
-               └──────────────────────────────────────────┘
+  ┌────────────────────────────────────┐   ┌────────────────────────────────────┐
+  │ Alfresco Repository + Event2       │   │ Nuxeo + Audit Stream               │
+  │ REST API + ActiveMQ topic          │   │ REST API + audit log watermark      │
+  └────────────────────────────────────┘   └────────────────────────────────────┘
+         │                   │                    │                   │
+         ▼                   ▼                    ▼                   ▼
+  ┌────────────┐    ┌──────────────┐    ┌──────────────────┐  ┌──────────────────┐
+  │ alfresco-  │    │ alfresco-    │    │ nuxeo-batch-     │  │ nuxeo-live-      │
+  │ batch-     │    │ live-        │    │ ingester         │  │ ingester         │
+  │ ingester   │    │ ingester     │    │ NXQL Discovery   │  │ Audit Watermark  │
+  └────────────┘    └──────────────┘    └──────────────────┘  └──────────────────┘
+         │                   │                    │                   │
+         └───────────────────┴────────────────────┴───────────────────┘
+                                          ▼
+                    ┌──────────────────────────────────────────┐
+                    │ content-lake-core                        │
+                    │ Node sync, Transform, Chunk, Embed, ACL  │
+                    │ source_modifiedAt idempotency guard      │
+                    └──────────────────────────────────────────┘
+                                          ▼
+                    ┌──────────────────────────────────────────┐
+                    │ hxpr Content Lake                        │
+                    └──────────────────────────────────────────┘
+                                          ▼
+                    ┌──────────────────────────────────────────┐
+                    │ rag-service                              │
+                    │ Query → Embed → Search → Augment → LLM  │
+                    └──────────────────────────────────────────┘
 ```
 
 ### Modules
 
-| Module | Port | Description |
-|--------|------|-------------|
-| `content-lake-repo-model` | — | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
-| `content-lake-core` | — | Shared clients and ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
-| `content-lake-source-nuxeo` | — | Nuxeo REST clients, scope resolver, auth abstraction, and server-side conversion-backed text extraction |
-| `alfresco-batch-ingester` | 9090 | Alfresco folder discovery, batch scheduling, metadata enqueueing, and `/api/sync/*` controllers |
-| `nuxeo-batch-ingester` | 9093 | Nuxeo full-batch discovery and one-shot sync, using NXQL by default with `@children` fallback |
-| `alfresco-live-ingester` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers and filters |
-| `nuxeo-live-ingester` | 9094 | Nuxeo audit-stream listener using a persisted watermark and no full repository scans |
-| `rag-service` | 9091 | Semantic search and RAG question answering |
+| Module | Group | Port | Description |
+|--------|-------|------|-------------|
+| `content-lake-repo-model` | `common/` | — | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
+| `content-lake-spi` | `common/` | — | Source Provider Interface: `SourceNode`, `ContentSourceClient`, `TextExtractor`, `ScopeResolver` |
+| `content-lake-core` | `common/` | — | Shared ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
+| `rag-service` | `common/` | 9091 | Semantic search, hybrid search, and RAG question answering |
+| `content-lake-source-alfresco` | `alfresco/` | — | Alfresco REST clients, scope resolver, and ACL expansion |
+| `alfresco-batch-ingester` | `alfresco/` | 9090 | Alfresco folder discovery, batch scheduling, and `/api/sync/*` controllers |
+| `alfresco-live-ingester` | `alfresco/` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers |
+| `content-lake-source-nuxeo` | `nuxeo/` | — | Nuxeo REST clients, scope resolver, auth abstraction, and text extraction |
+| `nuxeo-batch-ingester` | `nuxeo/` | 9093 | Nuxeo full-batch discovery and one-shot sync using NXQL |
+| `nuxeo-live-ingester` | `nuxeo/` | 9094 | Nuxeo audit-stream listener using a persisted watermark |
 
 ## Quick Start
 
@@ -103,15 +105,15 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 
 ```bash
 # Clone repository
-git clone https://github.com/aborroy/alfresco-content-lake.git
-cd alfresco-content-lake
+git clone https://github.com/aborroy/content-lake-app.git
+cd content-lake-app
 
 # Build all modules
 mvn clean package
 
 # Deploy the repository content model to ACS before starting the ingesters
 # Artifact:
-#   content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
+#   common/content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
 # Deploy it to the Alfresco Repository classpath.
 
 # Configure (see Environment Variables below)
@@ -121,16 +123,16 @@ export ALFRESCO_INTERNAL_PASSWORD=admin
 # ... (see full configuration below)
 
 # Run batch ingestion
-java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
+java -jar alfresco/alfresco-batch-ingester/target/alfresco-batch-ingester-1.0.0-SNAPSHOT.jar
 
 # Run live ingestion
-java -jar live-ingester/target/live-ingester-1.0.0-SNAPSHOT.jar
+java -jar alfresco/alfresco-live-ingester/target/alfresco-live-ingester-1.0.0-SNAPSHOT.jar
 
 # Run RAG service
-java -jar rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
+java -jar common/rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
 
-# Or with Docker Compose (both services)
-docker-compose up
+# Or with Docker Compose (full stack)
+cd ../content-lake-app-deployment && docker compose up --build
 ```
 
 ### Alfresco Repo Model
@@ -143,7 +145,7 @@ The batch and live ingesters now rely on an Alfresco content model for scope con
 Build artifact:
 
 ```bash
-content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
+common/content-lake-repo-model/target/content-lake-repo-model-1.0.0-SNAPSHOT.jar
 ```
 
 Deploy that JAR to the Alfresco Repository classpath before enabling ingestion. Typical options are:
@@ -808,7 +810,7 @@ curl http://localhost:9092/api/live/status
 
 ### Ingestion
 
-Edit `batch-ingester/src/main/resources/application.yml`:
+Edit `alfresco/alfresco-batch-ingester/src/main/resources/application.yml`:
 
 ```yaml
 ingestion:
@@ -823,7 +825,7 @@ ingestion:
 
 ### Live Ingestion
 
-Edit `live-ingester/src/main/resources/application.yml`:
+Edit `alfresco/alfresco-live-ingester/src/main/resources/application.yml`:
 
 ```yaml
 spring:
@@ -861,7 +863,7 @@ Notes:
 
 ### RAG
 
-Edit `rag-service/src/main/resources/application.yml`:
+Edit `common/rag-service/src/main/resources/application.yml`:
 
 ```yaml
 spring:
@@ -951,20 +953,30 @@ mvn test
 ### Run Locally
 
 ```bash
-# Batch Ingester
-mvn spring-boot:run -pl batch-ingester
+# Alfresco Batch Ingester
+mvn spring-boot:run -pl alfresco/alfresco-batch-ingester -am
 # or
-java -jar batch-ingester/target/batch-ingester-1.0.0-SNAPSHOT.jar
+java -jar alfresco/alfresco-batch-ingester/target/alfresco-batch-ingester-1.0.0-SNAPSHOT.jar
 
-# Live Ingester
-mvn spring-boot:run -pl live-ingester
+# Alfresco Live Ingester
+mvn spring-boot:run -pl alfresco/alfresco-live-ingester -am
 # or
-java -jar live-ingester/target/live-ingester-1.0.0-SNAPSHOT.jar
+java -jar alfresco/alfresco-live-ingester/target/alfresco-live-ingester-1.0.0-SNAPSHOT.jar
+
+# Nuxeo Batch Ingester
+mvn spring-boot:run -pl nuxeo/nuxeo-batch-ingester -am
+# or
+java -jar nuxeo/nuxeo-batch-ingester/target/nuxeo-batch-ingester-1.0.0-SNAPSHOT.jar
+
+# Nuxeo Live Ingester
+mvn spring-boot:run -pl nuxeo/nuxeo-live-ingester -am
+# or
+java -jar nuxeo/nuxeo-live-ingester/target/nuxeo-live-ingester-1.0.0-SNAPSHOT.jar
 
 # RAG Service
-mvn spring-boot:run -pl rag-service
+mvn spring-boot:run -pl common/rag-service -am
 # or
-java -jar rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
+java -jar common/rag-service/target/rag-service-1.0.0-SNAPSHOT.jar
 ```
 
 ## Contributing
