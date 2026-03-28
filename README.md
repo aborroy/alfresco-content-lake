@@ -17,6 +17,13 @@
 - [content-lake-app-deployment](https://github.com/aborroy/content-lake-app-deployment) - Docker Compose deployment for Alfresco, Nuxeo, hxpr, Content Lake services, and the UI.
 - [nuxeo-deployment](https://github.com/aborroy/nuxeo-deployment) - Companion project that builds and runs the local Nuxeo server. Required when using `compose.nuxeo.yaml` in this repo.
 
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Module layout, SPI interfaces, dependency graph, data model, design decisions |
+| [docs/sync-pipeline.md](docs/sync-pipeline.md) | Full/live sync flows, metadata-only path, path structure, idempotency, scope resolution |
+
 ## Overview
 
 Proof of Concept for AI-powered semantic search and Retrieval-Augmented Generation (RAG) over Alfresco and Nuxeo content.

@@ -1,0 +1,163 @@
+# Sync Pipeline
+
+## Overview
+
+Documents flow from a content source (Alfresco or Nuxeo) through `ContentSyncService` in
+`content-lake-core`, which calls SPI interfaces to stay source-agnostic. Two ingestion paths exist:
+full batch sync and live/event-driven sync.
+
+---
+
+## Full Sync Flow (`ContentSyncService.syncNode`)
+
+```
+SourceNode (from ContentSourceClient)
+  │
+  ├─ findByNodeId(nodeId, sourceId) ──► staleness check (modifiedAt comparison)
+  │                                     skip if already current
+  │
+  ├─ createDocument() or updateDocument()
+  │    builds HxprDocument with metadata + ACL + ingestProperties
+  │    hxprService.createDocument(parentPath, doc)
+  │
+  └─ processContent()
+       if textExtractor.supports(mimeType): sourceClient.getContent(nodeId)
+       │ otherwise: sourceClient.downloadContent() + textExtractor.extractText()
+       │
+       chunkingService.chunk(text)
+       embeddingService.embedChunks(chunks)
+       hxprService.updateEmbeddings(hxprDocId, embeddings)
+       documentApi.updateById(hxprDocId, fulltext + INDEXED status)
+```
+
+---
+
+## Metadata-Only Flow (`ContentSyncService.ingestMetadata`)
+
+Used by the batch ingester's two-phase pipeline:
+
+1. `ingestMetadata()` — writes hxpr document with metadata, returns a `SyncResult`
+2. `TransformationQueue` enqueues the `SyncResult`
+3. `TransformationWorker` picks it up and calls `processContent()`
+
+This decouples metadata indexing (fast) from text extraction and embedding (slow), allowing
+incremental progress even if the transformation pipeline is slow or interrupted.
+
+---
+
+## Path Structure in hxpr
+
+Documents land at: `/{hxprTargetPath}/{sourceId}/{sourcePath}/{nodeName}`
+
+- `hxprTargetPath` — Spring config value (e.g. `/alfresco` or `/nuxeo`)
+- `sourceId` — identifies the source system instance
+- `HxprService.ensureFolder()` creates the parent path on demand
+
+---
+
+## Idempotency
+
+Every write is guarded by a `modifiedAt` staleness check. If the hxpr version is already at or
+newer than the incoming node, the write is skipped. This makes it safe to run batch and live
+ingesters concurrently against the same node without producing duplicate writes.
+
+---
+
+## Scope Resolution
+
+Before a node is synced, `ScopeResolver.isInScope(node)` determines whether it belongs in the lake:
+
+- **Alfresco** — `ContentLakeScopeResolver`: file is in scope when it (or an ancestor folder) has
+  the `cl:indexed` aspect AND neither the file nor any ancestor has `cl:excludeFromLake = true`.
+  `shouldTraverse(node)` checks for excluded aspects and path patterns.
+  Ancestor lookups hit `AlfrescoClient.getNode()` with an in-memory cache (max 2 000 entries).
+  Call `invalidateFolderScope(folderId)` after `cl:indexed` changes.
+
+- **Nuxeo** — `NuxeoScopeResolver`: config-only scope for MVP. Driven by
+  `nuxeo.scope.includedRoots` and `nuxeo.scope.includedTypes` in `application.yml`.
+
+---
+
+## `cin_sourceId` Migration
+
+**Current (Alfresco-only):** `cin_sourceId` stores the raw Alfresco repository UUID.
+
+**Multi-source target:** `"<sourceType>:<sourceId>"` — e.g. `"alfresco:abc-uuid"`, `"nuxeo:prod"`.
+
+### Migration risk
+
+The live ingester writes continuously. Deploying new code that writes `"alfresco:<uuid>"` before
+existing documents are migrated causes `findByNodeId()` to miss them and produce duplicates.
+
+**Recommended transition options:**
+
+| Strategy | When to use |
+|---|---|
+| **Migration-first lockout** — run migration, then deploy new code | Safest; requires brief ingester pause |
+| **OR-query compatibility** — query both old `<uuid>` and new `"alfresco:<uuid>"` temporarily | Rolling deploy, no pause |
+| **Dual-write** — write both formats for a window, clean up after | Simplest for rolling deploy; doubles storage temporarily |
+
+### `HxprService.repositoryId` removal
+
+After migration, `HxprService.repositoryId` and the single-arg `findByNodeId(String nodeId)` overload
+must be removed. All callers must use `findByNodeId(String nodeId, String sourceId)`.
+
+---
+
+## Live Ingestion — Alfresco
+
+`alfresco-live-ingester` connects to Alfresco ActiveMQ and consumes `alfresco.repo.event2` topics.
+Each `RepoEvent` is dispatched to a typed handler:
+
+| Handler | Trigger |
+|---|---|
+| `NodeCreatedHandler` | new file or folder |
+| `NodeUpdatedHandler` | content or metadata change |
+| `NodeDeletedHandler` | deletion |
+| `FolderMovedHandler` | folder move (triggers subtree reconciliation) |
+| `ChildAssociationCreatedHandler` / `DeletedHandler` | child assoc changes |
+| `PeerAssociationCreatedHandler` / `DeletedHandler` | peer assoc changes |
+| `PermissionUpdatedHandler` | ACL change |
+| `FolderIndexedScopeChangedHandler` | `cl:indexed` aspect toggled on a folder |
+
+`RecentEventDeduplicator` prevents redundant processing when multiple events arrive for the same
+node within a short window.
+
+---
+
+## Live Ingestion — Nuxeo
+
+`nuxeo-live-ingester` uses audit polling via `NuxeoAuditClient`. It queries the Nuxeo audit log
+periodically, tracking the last-seen cursor in `AuditCursorStore` (default implementation:
+`FileAuditCursorStore`). `NuxeoAuditMetrics` exposes polling and processing counters via Micrometer.
+
+---
+
+## Batch Ingestion — Alfresco
+
+`alfresco-batch-ingester` triggers a full sync:
+
+1. `NodeDiscoveryService` walks the Alfresco folder tree, filtered by `ContentLakeScopeResolver`
+2. Each in-scope node is passed to `BatchIngestionService`
+3. `MetadataIngester` handles two-phase: metadata first, then transformation queue
+4. `TransformationWorker` picks up tasks from `TransformationQueue` and calls `processContent()`
+
+`HxprModelBootstrapRunner` runs on startup to ensure the hxpr content model is provisioned.
+
+---
+
+## Batch Ingestion — Nuxeo
+
+`nuxeo-batch-ingester` uses NXQL discovery:
+
+```sql
+SELECT * FROM Document
+WHERE ecm:path STARTSWITH '/default-domain/workspaces'
+  AND ecm:primaryType IN ('File','Note')
+  AND ecm:currentLifeCycleState != 'deleted'
+  AND ecm:isProxy = 0
+  AND ecm:isCheckedInVersion = 0
+```
+
+`NuxeoDiscoveryService` pages through results using `currentPageIndex` and `pageSize`.
+`NuxeoBatchIngestionService` calls `ContentSyncService` for each discovered document.
