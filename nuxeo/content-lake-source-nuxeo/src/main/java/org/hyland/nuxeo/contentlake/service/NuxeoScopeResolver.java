@@ -226,25 +226,25 @@ public class NuxeoScopeResolver implements ScopeResolver {
     // ──────────────────────────────────────────────────────────────────────
 
     private Set<String> queryPathsWithFacet(List<String> paths, String facetName) {
-        String inClause = paths.stream()
-                .map(p -> "'" + p.replace("'", "\\'") + "'")
-                .collect(Collectors.joining(", "));
+        String pathClause = paths.stream()
+                .map(p -> "ecm:path = '" + p.replace("'", "''") + "'")
+                .collect(Collectors.joining(" OR ", "(", ")"));
         String nxql = "SELECT * FROM Document"
                 + " WHERE ecm:mixinType = '" + facetName + "'"
-                + " AND ecm:path IN (" + inClause + ")"
+                + " AND " + pathClause
                 + " AND ecm:isProxy = 0 AND ecm:isCheckedInVersion = 0";
 
         return executeNxqlForPaths(nxql);
     }
 
     private Set<String> queryExcludedPaths(List<String> paths) {
-        String inClause = paths.stream()
-                .map(p -> "'" + p.replace("'", "\\'") + "'")
-                .collect(Collectors.joining(", "));
+        String pathClause = paths.stream()
+                .map(p -> "ecm:path = '" + p.replace("'", "''") + "'")
+                .collect(Collectors.joining(" OR ", "(", ")"));
         String nxql = "SELECT * FROM Document"
                 + " WHERE ecm:mixinType = '" + FACET_SCOPE + "'"
                 + " AND cls:excludeFromScope = 1"
-                + " AND ecm:path IN (" + inClause + ")"
+                + " AND " + pathClause
                 + " AND ecm:isProxy = 0 AND ecm:isCheckedInVersion = 0";
 
         return executeNxqlForPaths(nxql);

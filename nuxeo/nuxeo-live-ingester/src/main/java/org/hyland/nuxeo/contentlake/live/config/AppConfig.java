@@ -116,11 +116,6 @@ public class AppConfig {
         );
     }
 
-    @Bean(name = "nuxeoLiveRuntime")
-    public NuxeoLiveProperties nuxeoLiveRuntime(NuxeoLiveProperties props) {
-        return props;
-    }
-
     @Bean
     public EmbeddingService embeddingService(EmbeddingModel embeddingModel, NuxeoLiveProperties props) {
         return new EmbeddingService(embeddingModel, props.getEmbedding().getModelName());

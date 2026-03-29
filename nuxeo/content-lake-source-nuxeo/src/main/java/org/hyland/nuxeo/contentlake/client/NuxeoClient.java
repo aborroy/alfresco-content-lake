@@ -214,7 +214,9 @@ public class NuxeoClient implements ContentSourceClient {
             return response != null ? response : new NuxeoDocument.Page();
         } catch (RestClientResponseException e) {
             if (isUnsupportedSearchStatus(e.getStatusCode().value())) {
-                throw new UnsupportedOperationException("Nuxeo NXQL search endpoint is not available", e);
+                throw new UnsupportedOperationException(
+                        "Nuxeo NXQL search not available (HTTP " + e.getStatusCode().value()
+                                + "): " + e.getResponseBodyAsString(), e);
             }
             throw new IllegalStateException("Failed to execute NXQL search", e);
         }
@@ -446,6 +448,6 @@ public class NuxeoClient implements ContentSourceClient {
     }
 
     private static boolean isUnsupportedSearchStatus(int status) {
-        return status == 404 || status == 405 || status == 501;
+        return status == 400 || status == 404 || status == 405 || status == 501;
     }
 }
