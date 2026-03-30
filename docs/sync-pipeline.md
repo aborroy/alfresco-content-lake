@@ -117,11 +117,18 @@ Each `RepoEvent` is dispatched to a typed handler:
 | `FolderMovedHandler` | folder move (triggers subtree reconciliation) |
 | `ChildAssociationCreatedHandler` / `DeletedHandler` | child assoc changes |
 | `PeerAssociationCreatedHandler` / `DeletedHandler` | peer assoc changes |
-| `PermissionUpdatedHandler` | ACL change |
+| `PermissionUpdatedHandler` | ACL change when emitted by the repository |
 | `FolderIndexedScopeChangedHandler` | `cl:indexed` aspect toggled on a folder |
 
 `RecentEventDeduplicator` prevents redundant processing when multiple events arrive for the same
 node within a short window.
+
+Alfresco Repository does not reliably emit permission update events for the ACL changes needed by
+Content Lake. Because of that, Alfresco ACL reconciliation should not rely on the live ingester as
+the primary mechanism. The primary production path is the repository-side `content-lake-repo-model`
+addon, which detects ACL changes after commit and publishes a persistent ActiveMQ queue message.
+`alfresco-batch-ingester` consumes that queue in a transacted listener and executes ACL
+reconciliation, so failed reconciliation attempts are redelivered by the broker.
 
 ---
 
@@ -143,6 +150,15 @@ periodically, tracking the last-seen cursor in `AuditCursorStore` (default imple
 4. `TransformationWorker` picks up tasks from `TransformationQueue` and calls `processContent()`
 
 `HxprModelBootstrapRunner` runs on startup to ensure the hxpr content model is provisioned.
+
+The same service also exposes `POST /api/sync/permissions` for Alfresco ACL reconciliation:
+
+- File requests update only the stored hxpr ACL for that file.
+- Folder requests traverse descendants recursively and update or delete affected file documents
+  without re-running text extraction or embeddings.
+- In production, the Alfresco repository addon should publish a queue message after ACL changes
+  commit, and `alfresco-batch-ingester` should consume that message and run this reconciliation.
+- It also remains available as an explicit fallback when you need to reconcile a node manually.
 
 ---
 

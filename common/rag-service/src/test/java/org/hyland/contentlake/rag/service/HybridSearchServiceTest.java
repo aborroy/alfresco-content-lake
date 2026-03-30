@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -45,7 +46,7 @@ class HybridSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "repositoryId", "test-repo");
+        ReflectionTestUtils.setField(service, "alfrescoSourceId", "test-repo");
         ReflectionTestUtils.setField(service, "permissionSourceIds", "");
         ReflectionTestUtils.setField(service, "nuxeoSourceId", "");
         ReflectionTestUtils.setField(service, "nuxeoUrl", "http://localhost:8081/nuxeo");
@@ -345,7 +346,7 @@ class HybridSearchServiceTest {
             String filter = svc.buildPermissionFilter("alice", null);
 
             assertThat(filter).contains("sys_racl = '__Everyone__'");
-            assertThat(filter).contains("sys_racl = 'alice_#_test-repo'");
+            assertThat(filter).contains("sys_racl = 'u:alice_#_test-repo'");
         }
 
         @Test
@@ -377,8 +378,8 @@ class HybridSearchServiceTest {
 
             String filter = svc.buildPermissionFilter("user", "cin_sourceId = 'nuxeo:nuxeo-demo'");
 
-            assertThat(filter).contains("sys_racl = 'user_#_nuxeo-demo'");
-            assertThat(filter).doesNotContain("user_#_test-repo");
+            assertThat(filter).contains("sys_racl = 'u:user_#_nuxeo-demo'");
+            assertThat(filter).doesNotContain("u:user_#_test-repo");
         }
 
         @Test
@@ -403,8 +404,8 @@ class HybridSearchServiceTest {
 
             String filter = svc.buildPermissionFilter("user", "nuxeo", null);
 
-            assertThat(filter).contains("sys_racl = 'user_#_nuxeo-demo'");
-            assertThat(filter).doesNotContain("user_#_test-repo");
+            assertThat(filter).contains("sys_racl = 'u:user_#_nuxeo-demo'");
+            assertThat(filter).doesNotContain("u:user_#_test-repo");
         }
 
         @Test
@@ -416,8 +417,28 @@ class HybridSearchServiceTest {
             String filter = svc.buildPermissionFilter("admin", "alfresco", null);
 
             assertThat(filter).contains("cin_sourceId = 'alfresco:test-repo'");
-            assertThat(filter).doesNotContain("sys_racl = 'admin_#_test-repo'");
+            assertThat(filter).doesNotContain("sys_racl = 'u:admin_#_test-repo'");
             assertThat(filter).doesNotContain("g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo");
+        }
+
+        @Test
+        void buildPermissionFilter_discoversAlfrescoSourceIdFromHxprDocuments() {
+            HybridSearchService svc = spy(service);
+            ReflectionTestUtils.setField(svc, "alfrescoSourceId", "");
+
+            HxprDocument doc = new HxprDocument();
+            doc.setCinSourceId("alfresco:discovered-repo");
+            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
+            result.setDocuments(List.of(doc));
+
+            when(hxprService.query(contains("source_type = 'alfresco'"), eq(25), eq(0))).thenReturn(result);
+            doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                    .when(svc).getUserAuthorities("admin", "discovered-repo");
+
+            String filter = svc.buildPermissionFilter("admin", "alfresco", null);
+
+            assertThat(filter).contains("cin_sourceId = 'alfresco:discovered-repo'");
+            assertThat(filter).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
         }
 
         @Test
@@ -434,7 +455,7 @@ class HybridSearchServiceTest {
 
             assertThat(filter).contains("cin_sourceId = 'alfresco:test-repo'");
             assertThat(filter).contains("sys_racl = 'g:GROUP_MEMBERS_#_nuxeo-demo'");
-            assertThat(filter).doesNotContain("sys_racl = 'admin_#_test-repo'");
+            assertThat(filter).doesNotContain("sys_racl = 'u:admin_#_test-repo'");
             assertThat(filter).doesNotContain("g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo");
         }
     }
@@ -499,8 +520,8 @@ class HybridSearchServiceTest {
 
             verify(hxprService).vectorSearch(any(), any(), argThat(filter ->
                     filter.contains("cin_ingestProperties.source_type = 'nuxeo'")
-                            && filter.contains("sys_racl = 'user_#_nuxeo-demo'")
-                            && !filter.contains("user_#_test-repo")
+                            && filter.contains("sys_racl = 'u:user_#_nuxeo-demo'")
+                            && !filter.contains("u:user_#_test-repo")
             ), anyInt());
             verify(svc, never()).getUserAuthorities(eq("user"), eq("test-repo"));
         }

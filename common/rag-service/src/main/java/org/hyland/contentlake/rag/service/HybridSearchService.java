@@ -53,6 +53,7 @@ public class HybridSearchService {
     private static final String EVERYONE_PRINCIPAL = "__Everyone__";
     private static final String GROUP_PREFIX = "GROUP_";
     private static final String ALFRESCO_ADMINISTRATORS = "GROUP_ALFRESCO_ADMINISTRATORS";
+    private static final String USER_RACL_PREFIX = "u:";
     private static final String GROUP_RACL_PREFIX = "g:";
     private static final String SOURCE_ID_SEPARATOR = "_#_";
     private static final String INGEST_PROP_PREFIX = "cin_ingestProperties.";
@@ -61,6 +62,8 @@ public class HybridSearchService {
     private static final String SOURCE_MODIFIED_PROP = INGEST_PROP_PREFIX + ContentLakeIngestProperties.SOURCE_MODIFIED_AT;
     private static final Pattern CUSTOM_PROP_KEY_PATTERN = Pattern.compile("[A-Za-z0-9_:-]+");
     private static final Pattern SOURCE_ID_EQUALS_PATTERN = Pattern.compile("cin_sourceId\\s*=\\s*'([^']+)'");
+    private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
+    private static final int SOURCE_DISCOVERY_LIMIT = 25;
 
     private final HxprService hxprService;
     private final EmbeddingService embeddingService;
@@ -68,8 +71,8 @@ public class HybridSearchService {
     private final HybridSearchProperties properties;
     private final SourceMetadataResolver sourceMetadataResolver;
 
-    @Value("${hxpr.repositoryId:default}")
-    private String repositoryId;
+    @Value("${alfresco.source-id:}")
+    private String alfrescoSourceId;
 
     @Value("${rag.permission.source-ids:}")
     private String permissionSourceIds;
@@ -94,6 +97,8 @@ public class HybridSearchService {
 
     @Value("${content.service.security.basicAuth.password}")
     private String serviceAccountPassword;
+
+    private volatile List<String> cachedAlfrescoSourceIds;
 
     /**
      * Executes a hybrid search: runs vector and keyword legs in sequence,
@@ -531,7 +536,13 @@ public class HybridSearchService {
             sourceClauses.add(buildSourcePermissionClause(sourceId, authorities));
         }
 
-        conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
+        if (sourceClauses.isEmpty()) {
+            log.warn("No permission source ids resolved for user {} (sourceType={}, additionalFilter={})",
+                    username, sourceType, additionalFilter);
+            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
+        } else {
+            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
+        }
 
         if (additionalFilter != null && !additionalFilter.isBlank()) {
             conditions.add("(" + additionalFilter.trim() + ")");
@@ -629,7 +640,7 @@ public class HybridSearchService {
         String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
         String principal = authority.startsWith(GROUP_PREFIX)
                 ? GROUP_RACL_PREFIX + namespaced
-                : namespaced;
+                : USER_RACL_PREFIX + namespaced;
         return RACL_FIELD + " = '" + escapeHxql(principal) + "'";
     }
 
@@ -693,7 +704,7 @@ public class HybridSearchService {
                 addSourceId(sourceIds, candidate);
             }
         } else {
-            addSourceId(sourceIds, repositoryId);
+            addAlfrescoSourceIds(sourceIds);
             addSourceId(sourceIds, nuxeoSourceId);
         }
 
@@ -703,9 +714,57 @@ public class HybridSearchService {
     private void addSourceIdsForType(Set<String> sourceIds, String sourceType) {
         String normalized = normalizeSourceType(sourceType);
         if ("alfresco".equals(normalized)) {
-            addSourceId(sourceIds, repositoryId);
+            addAlfrescoSourceIds(sourceIds);
         } else if ("nuxeo".equals(normalized)) {
             addSourceId(sourceIds, nuxeoSourceId);
+        }
+    }
+
+    private void addAlfrescoSourceIds(Set<String> sourceIds) {
+        resolveAlfrescoSourceIds().forEach(sourceId -> addSourceId(sourceIds, sourceId));
+    }
+
+    private List<String> resolveAlfrescoSourceIds() {
+        LinkedHashSet<String> sourceIds = new LinkedHashSet<>();
+        addSourceId(sourceIds, alfrescoSourceId);
+        if (!sourceIds.isEmpty()) {
+            return List.copyOf(sourceIds);
+        }
+
+        List<String> cached = cachedAlfrescoSourceIds;
+        if (cached != null && !cached.isEmpty()) {
+            return cached;
+        }
+
+        List<String> discovered = discoverSourceIdsByType("alfresco");
+        if (!discovered.isEmpty()) {
+            cachedAlfrescoSourceIds = discovered;
+        }
+        return discovered;
+    }
+
+    private List<String> discoverSourceIdsByType(String sourceType) {
+        try {
+            String hxql = "SELECT * FROM SysContent WHERE cin_ingestProperties."
+                    + ContentLakeIngestProperties.SOURCE_TYPE
+                    + " = '" + escapeHxql(sourceType) + "'";
+            HxprDocument.QueryResult result = hxprService.query(hxql, SOURCE_DISCOVERY_LIMIT, 0);
+            if (result == null || result.getDocuments() == null) {
+                return List.of();
+            }
+
+            LinkedHashSet<String> sourceIds = new LinkedHashSet<>();
+            for (HxprDocument doc : result.getDocuments()) {
+                addSourceId(sourceIds, doc.getCinSourceId());
+            }
+
+            if (!sourceIds.isEmpty()) {
+                log.debug("Discovered permission source ids for {}: {}", sourceType, sourceIds);
+            }
+            return List.copyOf(sourceIds);
+        } catch (Exception e) {
+            log.warn("Failed to discover permission source ids for {}: {}", sourceType, e.getMessage());
+            return List.of();
         }
     }
 
@@ -815,7 +874,7 @@ public class HybridSearchService {
     }
 
     private boolean isAlfrescoSource(String sourceId) {
-        return sourceId != null && sourceId.equals(repositoryId);
+        return sourceId != null && resolveAlfrescoSourceIds().contains(sourceId);
     }
 
     private boolean isNuxeoSource(String sourceId) {

@@ -48,6 +48,7 @@ public class SemanticSearchService {
     private static final String EVERYONE_PRINCIPAL = "__Everyone__";
     private static final String GROUP_PREFIX = "GROUP_";
     private static final String ALFRESCO_ADMINISTRATORS = "GROUP_ALFRESCO_ADMINISTRATORS";
+    private static final String USER_RACL_PREFIX = "u:";
     private static final String GROUP_RACL_PREFIX = "g:";
     private static final String SOURCE_ID_SEPARATOR = "_#_";
     private static final Pattern SOURCE_ID_EQUALS_PATTERN = Pattern.compile("cin_sourceId\\s*=\\s*'([^']+)'");
@@ -59,8 +60,11 @@ public class SemanticSearchService {
     private final SecurityContextService securityContextService;
     private final SourceMetadataResolver sourceMetadataResolver;
 
-    @Value("${hxpr.repositoryId:default}")
-    private String repositoryId;
+    private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
+    private static final int SOURCE_DISCOVERY_LIMIT = 25;
+
+    @Value("${alfresco.source-id:}")
+    private String alfrescoSourceId;
 
     @Value("${rag.permission.source-ids:}")
     private String permissionSourceIds;
@@ -88,6 +92,8 @@ public class SemanticSearchService {
 
     @Value("${semantic-search.default-min-score:" + FALLBACK_MIN_SCORE + "}")
     private double defaultMinScore;
+
+    private volatile List<String> cachedAlfrescoSourceIds;
 
     public SemanticSearchResponse search(SemanticSearchRequest request) {
         long startTime = System.currentTimeMillis();
@@ -193,7 +199,13 @@ public class SemanticSearchService {
 
         log.debug("Permission filter with source-scoped authorities for user {} (sourceIds={})", username, sourceIds);
 
-        conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
+        if (sourceClauses.isEmpty()) {
+            log.warn("No permission source ids resolved for user {} (sourceType={}, additionalFilter={})",
+                    username, sourceType, additionalFilter);
+            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
+        } else {
+            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
+        }
 
         if (additionalFilter != null && !additionalFilter.isBlank()) {
             conditions.add("(" + additionalFilter.trim() + ")");
@@ -452,7 +464,7 @@ public class SemanticSearchService {
         String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
         String principal = authority.startsWith(GROUP_PREFIX)
                 ? GROUP_RACL_PREFIX + namespaced
-                : namespaced;
+                : USER_RACL_PREFIX + namespaced;
         return RACL_FIELD + " = '" + escapeHxql(principal) + "'";
     }
 
@@ -516,7 +528,7 @@ public class SemanticSearchService {
                 addSourceId(sourceIds, candidate);
             }
         } else {
-            addSourceId(sourceIds, repositoryId);
+            addAlfrescoSourceIds(sourceIds);
             addSourceId(sourceIds, nuxeoSourceId);
         }
 
@@ -526,9 +538,57 @@ public class SemanticSearchService {
     private void addSourceIdsForType(Set<String> sourceIds, String sourceType) {
         String normalized = normalizeSourceType(sourceType);
         if ("alfresco".equals(normalized)) {
-            addSourceId(sourceIds, repositoryId);
+            addAlfrescoSourceIds(sourceIds);
         } else if ("nuxeo".equals(normalized)) {
             addSourceId(sourceIds, nuxeoSourceId);
+        }
+    }
+
+    private void addAlfrescoSourceIds(Set<String> sourceIds) {
+        resolveAlfrescoSourceIds().forEach(sourceId -> addSourceId(sourceIds, sourceId));
+    }
+
+    private List<String> resolveAlfrescoSourceIds() {
+        LinkedHashSet<String> sourceIds = new LinkedHashSet<>();
+        addSourceId(sourceIds, alfrescoSourceId);
+        if (!sourceIds.isEmpty()) {
+            return List.copyOf(sourceIds);
+        }
+
+        List<String> cached = cachedAlfrescoSourceIds;
+        if (cached != null && !cached.isEmpty()) {
+            return cached;
+        }
+
+        List<String> discovered = discoverSourceIdsByType("alfresco");
+        if (!discovered.isEmpty()) {
+            cachedAlfrescoSourceIds = discovered;
+        }
+        return discovered;
+    }
+
+    private List<String> discoverSourceIdsByType(String sourceType) {
+        try {
+            String hxql = "SELECT * FROM SysContent WHERE cin_ingestProperties."
+                    + ContentLakeIngestProperties.SOURCE_TYPE
+                    + " = '" + escapeHxql(sourceType) + "'";
+            HxprDocument.QueryResult result = hxprService.query(hxql, SOURCE_DISCOVERY_LIMIT, 0);
+            if (result == null || result.getDocuments() == null) {
+                return List.of();
+            }
+
+            LinkedHashSet<String> sourceIds = new LinkedHashSet<>();
+            for (HxprDocument doc : result.getDocuments()) {
+                addSourceId(sourceIds, doc.getCinSourceId());
+            }
+
+            if (!sourceIds.isEmpty()) {
+                log.debug("Discovered permission source ids for {}: {}", sourceType, sourceIds);
+            }
+            return List.copyOf(sourceIds);
+        } catch (Exception e) {
+            log.warn("Failed to discover permission source ids for {}: {}", sourceType, e.getMessage());
+            return List.of();
         }
     }
 
@@ -559,7 +619,7 @@ public class SemanticSearchService {
     }
 
     private boolean isAlfrescoSource(String sourceId) {
-        return sourceId != null && sourceId.equals(repositoryId);
+        return sourceId != null && resolveAlfrescoSourceIds().contains(sourceId);
     }
 
     private boolean isNuxeoSource(String sourceId) {

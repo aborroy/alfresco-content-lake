@@ -5,6 +5,15 @@ spring:
   application:
     name: batch-ingester
 
+  activemq:
+    broker-url: ${ACTIVEMQ_URL:tcp://localhost:61616}
+    user: ${ACTIVEMQ_USER:admin}
+    password: ${ACTIVEMQ_PASSWORD:admin}
+  jms:
+    pub-sub-domain: false
+    cache:
+      enabled: false
+
   ai:
     openai:
       base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
@@ -25,6 +34,10 @@ content:
         # NOT used for API endpoint authentication
         username: ${ALFRESCO_INTERNAL_USERNAME:admin}
         password: ${ALFRESCO_INTERNAL_PASSWORD:admin}
+  lake:
+    permission:
+      sync:
+        queue-name: ${CONTENT_LAKE_PERMISSION_SYNC_QUEUE_NAME:contentlake.acl.changed}
 
 # hxpr Content Lake connection
 hxpr:

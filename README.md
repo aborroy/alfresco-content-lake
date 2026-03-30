@@ -396,6 +396,25 @@ curl http://localhost:9090/api/sync/status -u admin:admin
 curl http://localhost:9090/api/sync/status/{jobId} -u admin:admin
 ```
 
+#### Reconcile Alfresco Permissions
+
+Use this after an Alfresco permission change when you want to force reconciliation manually. It
+updates hxpr ACLs without re-running text extraction or embeddings.
+
+```bash
+# Reconcile a single file ACL
+curl -X POST http://localhost:9090/api/sync/permissions \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"nodeIds":["file-node-id"],"recursive":true}'
+
+# Reconcile a folder ACL across its descendant files
+curl -X POST http://localhost:9090/api/sync/permissions \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{"nodeIds":["folder-node-id"],"recursive":true}'
+```
+
 #### Query Node Status
 
 ```bash
@@ -806,10 +825,24 @@ It reuses the same shared ingestion pipeline as the batch ingester:
 - Chunk and embed with Spring AI
 - Update permissions or delete when nodes move out of scope
 
-Permission-only events are handled separately from content updates:
+Permission reconciliation is separate from content updates:
 
-- Direct file permission changes update only the stored hxpr ACL for that file.
-- Folder permission changes reconcile descendant file ACLs across the subtree without re-transforming or re-embedding content.
+- Content and scope changes are handled through Event2 live ingestion.
+- Alfresco permission changes should be reconciled through `POST /api/sync/permissions` in `alfresco-batch-ingester` because the repository does not reliably emit permission update events.
+- In production, the `content-lake-repo-model` addon inside Alfresco Repository should detect ACL changes after commit and publish a persistent ActiveMQ queue message. `alfresco-batch-ingester` consumes that queue and runs the same ACL reconciliation path.
+- If a permission event is emitted, the live ingester can still process it, but that path is best-effort rather than the primary contract.
+
+When the live ingester does receive a permission-related event, it distinguishes between file and folder targets:
+
+- **File-level event**: the ACL is updated only for that file (`updatePermissions`) — no content re-extraction or embedding regeneration.
+- **Folder-level event**: the live ingester walks the full descendant subtree and applies an ACL-only update to every indexed file beneath the folder. This covers three event types that can signal a folder ACL change: `PERMISSION_UPDATED`, `PEER_ASSOC_CREATED`, and `PEER_ASSOC_DELETED`. A fourth handler (`FolderPermissionFallbackHandler`) catches `NODE_UPDATED` events on folders where only the ACL changed (no structural diff), providing a safety net for sources that do not emit a dedicated permission event.
+
+Folder-level propagation behaviour:
+
+- Descendant files with `isInheritanceEnabled: false` keep their locally-set ACL unchanged — the folder's new permissions are not pushed down to them.
+- Descendant files with inheritance enabled receive a recomputed ACL derived from the folder's current Alfresco permissions snapshot.
+- Files that fall outside scope after the change are deleted from hxpr rather than updated.
+- The propagation never re-ingests content; it is strictly an ACL patch.
 
 The live path is guarded by the same `alfresco_modifiedAt` staleness check used by batch ingestion, so batch and live runs can coexist safely.
 

@@ -3,6 +3,7 @@ package org.hyland.contentlake.rag.service;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
+import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.security.SecurityContextService;
@@ -21,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -36,7 +38,7 @@ class SemanticSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "repositoryId", "test-repo");
+        ReflectionTestUtils.setField(service, "alfrescoSourceId", "test-repo");
         ReflectionTestUtils.setField(service, "permissionSourceIds", "");
         ReflectionTestUtils.setField(service, "nuxeoSourceId", "");
         ReflectionTestUtils.setField(service, "nuxeoUrl", "http://localhost:8081/nuxeo");
@@ -61,7 +63,7 @@ class SemanticSearchServiceTest {
 
         // __Everyone__ is always included
         assertThat(filter).contains("sys_racl = '__Everyone__'");
-        assertThat(filter).contains("sys_racl = 'admin_#_test-repo'");
+        assertThat(filter).contains("sys_racl = 'u:admin_#_test-repo'");
         // GROUP_EVERYONE itself is skipped (not added as a clause)
         assertThat(filter).doesNotContain("GROUP_EVERYONE");
     }
@@ -77,7 +79,7 @@ class SemanticSearchServiceTest {
         // Groups are prefixed with "g:" in sys_racl
         assertThat(filter).contains("sys_racl = 'g:GROUP_DEVELOPERS_#_test-repo'");
         // Username also included
-        assertThat(filter).contains("sys_racl = 'alice_#_test-repo'");
+        assertThat(filter).contains("sys_racl = 'u:alice_#_test-repo'");
     }
 
     @Test
@@ -98,8 +100,8 @@ class SemanticSearchServiceTest {
 
         String filter = svc.buildPermissionFilter("alice", "cin_sourceId = 'nuxeo:nuxeo-demo'");
 
-        assertThat(filter).contains("sys_racl = 'alice_#_nuxeo-demo'");
-        assertThat(filter).doesNotContain("alice_#_test-repo");
+        assertThat(filter).contains("sys_racl = 'u:alice_#_nuxeo-demo'");
+        assertThat(filter).doesNotContain("u:alice_#_test-repo");
     }
 
     @Test
@@ -112,7 +114,7 @@ class SemanticSearchServiceTest {
         String filter = svc.buildPermissionFilter("alice", null);
 
         assertThat(filter).contains("sys_racl = 'g:GROUP_DEVELOPERS_#_test-repo'");
-        assertThat(filter).contains("sys_racl = 'alice_#_nuxeo-demo'");
+        assertThat(filter).contains("sys_racl = 'u:alice_#_nuxeo-demo'");
         assertThat(filter).contains("sys_racl = 'g:GROUP_ENGINEERING_#_nuxeo-demo'");
         assertThat(filter).doesNotContain("g:GROUP_ENGINEERING_#_test-repo'");
     }
@@ -125,8 +127,8 @@ class SemanticSearchServiceTest {
 
         String filter = svc.buildPermissionFilter("alice", "nuxeo", null);
 
-        assertThat(filter).contains("sys_racl = 'alice_#_nuxeo-demo'");
-        assertThat(filter).doesNotContain("alice_#_test-repo");
+        assertThat(filter).contains("sys_racl = 'u:alice_#_nuxeo-demo'");
+        assertThat(filter).doesNotContain("u:alice_#_test-repo");
     }
 
     @Test
@@ -138,8 +140,28 @@ class SemanticSearchServiceTest {
         String filter = svc.buildPermissionFilter("admin", "alfresco", null);
 
         assertThat(filter).contains("cin_sourceId = 'alfresco:test-repo'");
-        assertThat(filter).doesNotContain("sys_racl = 'admin_#_test-repo'");
+        assertThat(filter).doesNotContain("sys_racl = 'u:admin_#_test-repo'");
         assertThat(filter).doesNotContain("g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo");
+    }
+
+    @Test
+    void buildPermissionFilter_discoversAlfrescoSourceIdFromHxprDocuments() {
+        SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "alfrescoSourceId", "");
+
+        HxprDocument doc = new HxprDocument();
+        doc.setCinSourceId("alfresco:discovered-repo");
+        HxprDocument.QueryResult result = new HxprDocument.QueryResult();
+        result.setDocuments(List.of(doc));
+
+        when(hxprService.query(contains("source_type = 'alfresco'"), eq(25), eq(0))).thenReturn(result);
+        doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                .when(svc).getUserAuthorities("admin", "discovered-repo");
+
+        String filter = svc.buildPermissionFilter("admin", "alfresco", null);
+
+        assertThat(filter).contains("cin_sourceId = 'alfresco:discovered-repo'");
+        assertThat(filter).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
     }
 
     @Test
@@ -156,7 +178,7 @@ class SemanticSearchServiceTest {
 
         assertThat(filter).contains("cin_sourceId = 'alfresco:test-repo'");
         assertThat(filter).contains("sys_racl = 'g:GROUP_MEMBERS_#_nuxeo-demo'");
-        assertThat(filter).doesNotContain("sys_racl = 'admin_#_test-repo'");
+        assertThat(filter).doesNotContain("sys_racl = 'u:admin_#_test-repo'");
         assertThat(filter).doesNotContain("g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo");
     }
 
@@ -277,8 +299,8 @@ class SemanticSearchServiceTest {
 
         verify(hxprService).vectorSearch(any(), any(), argThat(filter ->
                 filter.contains("cin_ingestProperties.source_type = 'nuxeo'")
-                        && filter.contains("sys_racl = 'user_#_nuxeo-demo'")
-                        && !filter.contains("user_#_test-repo")
+                        && filter.contains("sys_racl = 'u:user_#_nuxeo-demo'")
+                        && !filter.contains("u:user_#_test-repo")
         ), anyInt());
         verify(svc, never()).getUserAuthorities(eq("user"), eq("test-repo"));
     }

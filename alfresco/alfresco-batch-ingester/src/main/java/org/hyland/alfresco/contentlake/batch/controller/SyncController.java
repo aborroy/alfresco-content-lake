@@ -3,7 +3,10 @@ package org.hyland.alfresco.contentlake.batch.controller;
 import lombok.RequiredArgsConstructor;
 import org.hyland.alfresco.contentlake.batch.model.BatchSyncRequest;
 import org.hyland.alfresco.contentlake.batch.model.IngestionJob;
+import org.hyland.alfresco.contentlake.batch.model.PermissionSyncRequest;
+import org.hyland.alfresco.contentlake.batch.model.PermissionSyncResult;
 import org.hyland.alfresco.contentlake.batch.service.BatchIngestionService;
+import org.hyland.alfresco.contentlake.batch.service.PermissionSyncService;
 import org.hyland.alfresco.contentlake.batch.service.TransformationQueue;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +24,7 @@ import java.util.Map;
 public class SyncController {
 
     private final BatchIngestionService batchIngestionService;
+    private final PermissionSyncService permissionSyncService;
     private final TransformationQueue transformationQueue;
 
     /**
@@ -42,6 +46,15 @@ public class SyncController {
     @PostMapping("/configured")
     public IngestionJob startConfiguredSync() {
         return batchIngestionService.startConfiguredSync();
+    }
+
+    /**
+     * Reconciles ACLs for the provided nodes without running full text extraction
+     * or embedding work. Folder requests traverse descendants recursively by default.
+     */
+    @PostMapping("/permissions")
+    public PermissionSyncResult syncPermissions(@RequestBody PermissionSyncRequest request) {
+        return permissionSyncService.syncPermissions(request);
     }
 
     /**

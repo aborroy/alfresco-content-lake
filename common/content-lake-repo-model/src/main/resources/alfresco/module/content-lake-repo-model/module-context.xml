@@ -5,4 +5,5 @@
        xsi:schemaLocation="http://www.springframework.org/schema/beans
           http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
     <import resource="classpath:alfresco/module/content-lake-repo-model/context/bootstrap-context.xml" />
+    <import resource="classpath:alfresco/module/content-lake-repo-model/context/acl-sync-context.xml" />
 </beans>

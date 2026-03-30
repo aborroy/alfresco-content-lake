@@ -20,6 +20,14 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class FolderIndexedScopeChangedHandler implements OnNodeUpdatedEventHandler {
 
+    static EventFilter indexedScopeChangeFilter() {
+        return AspectAddedFilter.of(ContentLakeScopeResolver.INDEXED_ASPECT)
+                .or(AspectRemovedFilter.of(ContentLakeScopeResolver.INDEXED_ASPECT))
+                .or(PropertyAddedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY))
+                .or(PropertyChangedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY))
+                .or(PropertyRemovedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY));
+    }
+
     private final LiveEventProcessor processor;
 
     @Override
@@ -29,12 +37,6 @@ public class FolderIndexedScopeChangedHandler implements OnNodeUpdatedEventHandl
 
     @Override
     public EventFilter getEventFilter() {
-        return IsFolderFilter.get().and(
-                AspectAddedFilter.of(ContentLakeScopeResolver.INDEXED_ASPECT)
-                        .or(AspectRemovedFilter.of(ContentLakeScopeResolver.INDEXED_ASPECT))
-                        .or(PropertyAddedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY))
-                        .or(PropertyChangedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY))
-                        .or(PropertyRemovedFilter.of(ContentLakeScopeResolver.EXCLUDE_FROM_LAKE_PROPERTY))
-        );
+        return IsFolderFilter.get().and(indexedScopeChangeFilter());
     }
 }
