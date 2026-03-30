@@ -1,8 +1,12 @@
 package org.hyland.contentlake.rag.config;
 
 import jakarta.servlet.DispatcherType;
+import org.hyland.contentlake.rag.security.MultiSourceAuthenticationProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -11,24 +15,34 @@ import org.springframework.security.web.SecurityFilterChain;
 /**
  * Security configuration for the RAG service.
  *
- * <p>Permits all requests — the RAG service is protected at the network level
- * (reverse proxy / Kubernetes NetworkPolicy). Replace with OAuth2/OIDC if
- * per-request authentication is required in your deployment.</p>
+ * <p>Requires HTTP Basic Auth for all endpoints except the health check.
+ * Credentials are validated against the configured content sources (Alfresco and/or Nuxeo)
+ * via {@link MultiSourceAuthenticationProvider}.</p>
  */
 @Configuration
 @EnableWebSecurity
 public class RagSecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                             MultiSourceAuthenticationProvider provider) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authenticationProvider(provider)
+                .httpBasic(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                        .anyRequest().permitAll()
+                        .requestMatchers("/api/rag/health").permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
+                        .anyRequest().authenticated()
                 )
                 .build();
+    }
+
+    @Bean
+    AuthenticationManager authenticationManager(MultiSourceAuthenticationProvider provider) {
+        return new ProviderManager(provider);
     }
 }
