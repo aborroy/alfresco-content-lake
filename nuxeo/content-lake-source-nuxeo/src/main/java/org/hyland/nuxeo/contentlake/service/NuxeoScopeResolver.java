@@ -105,7 +105,10 @@ public class NuxeoScopeResolver implements ScopeResolver {
 
         // Phase 1 — indexed ancestor check (cache + NXQL batch)
         if (!hasIndexedAncestor(ancestorPaths)) {
-            return isIncludedPath(fullPath);
+            if (!isIncludedPath(fullPath)) {
+                return false;
+            }
+            // In config-scoped path: still apply explicit exclusion (Phase 2 below).
         }
 
         // Phase 2 — exclusion ancestor check (cache + NXQL batch)
@@ -132,7 +135,10 @@ public class NuxeoScopeResolver implements ScopeResolver {
         }
 
         if (!hasIndexedAncestor(paths)) {
-            return isIncludedPath(fullPath);
+            if (!isIncludedPath(fullPath)) {
+                return false;
+            }
+            // In config-scoped path: still apply explicit exclusion (below).
         }
 
         return !hasExcludedAncestor(paths);
