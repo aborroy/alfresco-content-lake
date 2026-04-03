@@ -96,7 +96,9 @@ public class MultiSourceAuthenticationProvider implements AuthenticationProvider
             String validateUrl = alfrescoUrl
                     + "/alfresco/api/-default-/public/authentication/versions/1/tickets/-me-";
             HttpHeaders headers = new HttpHeaders();
-            String encoded = Base64.getEncoder().encodeToString((ticket + ":").getBytes());
+            // Alfresco validates UI tickets on /tickets/-me- using Basic base64(ticket)
+            // rather than the usual user:password form.
+            String encoded = Base64.getEncoder().encodeToString(ticket.getBytes());
             headers.set(HttpHeaders.AUTHORIZATION, "Basic " + encoded);
             headers.setAccept(List.of(MediaType.APPLICATION_JSON));
             ResponseEntity<Map> response = restTemplate.exchange(

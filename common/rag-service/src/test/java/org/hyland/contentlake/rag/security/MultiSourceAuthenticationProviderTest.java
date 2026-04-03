@@ -37,7 +37,7 @@ class MultiSourceAuthenticationProviderTest {
             }
 
             String expectedHeader = "Basic " + Base64.getEncoder()
-                    .encodeToString((ticket + ":").getBytes(StandardCharsets.UTF_8));
+                    .encodeToString(ticket.getBytes(StandardCharsets.UTF_8));
             if (!expectedHeader.equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
                 sendResponse(exchange, 401, "");
                 return;

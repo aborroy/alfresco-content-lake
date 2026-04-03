@@ -4,6 +4,7 @@ import jakarta.servlet.DispatcherType;
 import org.hyland.contentlake.rag.security.AlfrescoTicketAuthenticationFilter;
 import org.hyland.contentlake.rag.security.MultiSourceAuthenticationProvider;
 import org.hyland.contentlake.rag.security.NuxeoTokenAuthenticationFilter;
+import org.hyland.contentlake.rag.security.RagAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -39,7 +40,7 @@ public class RagSecurityConfig {
                         BasicAuthenticationFilter.class)
                 .addFilterBefore(new NuxeoTokenAuthenticationFilter(authenticationManager),
                         BasicAuthenticationFilter.class)
-                .httpBasic(Customizer.withDefaults())
+                .httpBasic(httpBasic -> httpBasic.authenticationEntryPoint(new RagAuthenticationEntryPoint()))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/rag/health").permitAll()
