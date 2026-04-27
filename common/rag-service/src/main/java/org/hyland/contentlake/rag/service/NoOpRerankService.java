@@ -1,14 +1,14 @@
 package org.hyland.contentlake.rag.service;
 
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 /**
  * Default reranker that keeps current ordering unchanged.
+ * Registered by {@link org.hyland.contentlake.rag.config.RerankServiceConfig} when no
+ * reranker URL is configured.
  */
-@Service
 public class NoOpRerankService implements RerankService {
 
     @Override

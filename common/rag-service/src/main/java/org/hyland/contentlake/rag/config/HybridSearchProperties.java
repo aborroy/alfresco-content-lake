@@ -36,7 +36,7 @@ public class HybridSearchProperties {
     private double textWeight = 0.3;
 
     /** Number of candidates to retrieve from each source before fusion. */
-    private int initialCandidates = 20;
+    private int initialCandidates = 30;
 
     /** Maximum number of results to return after fusion. */
     private int finalResults = 5;

@@ -34,7 +34,9 @@ public interface ChunkingStrategy {
             double similarityThreshold
     ) {
         public static ChunkingConfig defaults() {
-            return new ChunkingConfig(200, 1000, 120, 0.75);
+            // 512-char max keeps CJK chunks within the embedding model's 512-token limit
+            // (1 CJK char ≈ 1 token). Overlap raised to 150 to compensate for shorter windows.
+            return new ChunkingConfig(200, 512, 150, 0.75);
         }
     }
 }

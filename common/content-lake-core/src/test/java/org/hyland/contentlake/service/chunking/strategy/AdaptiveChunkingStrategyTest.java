@@ -12,7 +12,7 @@ class AdaptiveChunkingStrategyTest {
 
     private static final String NODE_ID = "node-1";
     private final AdaptiveChunkingStrategy strategy = new AdaptiveChunkingStrategy();
-    private final ChunkingConfig config = ChunkingConfig.defaults(); // min=200, max=1000, overlap=120
+    private final ChunkingConfig config = ChunkingConfig.defaults(); // min=200, max=512, overlap=150
 
     @Test
     void emptyInput_returnsEmptyList() {

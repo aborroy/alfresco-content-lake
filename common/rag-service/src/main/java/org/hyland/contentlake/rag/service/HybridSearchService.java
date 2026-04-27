@@ -251,33 +251,40 @@ public class HybridSearchService {
         List<ScoredChunk> chunks = new ArrayList<>();
         String[] queryTerms = queryText.toLowerCase().split("\\s+");
 
-        for (HxprDocument doc : documents) {
+        // hxpr returns documents in BM25 relevance order. Use position as a
+        // document-level score (rank 1 → 1.0, rank 2 → 0.5, …) and multiply by
+        // the per-chunk BM25 TF score, so both signals contribute to final ranking.
+        for (int docIndex = 0; docIndex < documents.size(); docIndex++) {
+            HxprDocument doc = documents.get(docIndex);
             if (doc.getSysembedEmbeddings() == null || doc.getSysembedEmbeddings().isEmpty()) {
                 continue;
             }
+
+            double docPositionScore = 1.0 / (1.0 + docIndex);
 
             for (HxprEmbedding emb : doc.getSysembedEmbeddings()) {
                 if (emb.getText() == null || emb.getText().isBlank()) {
                     continue;
                 }
 
-                double score = computeKeywordScore(emb.getText(), queryTerms);
-                if (score > 0) {
-                    chunks.add(new ScoredChunk(
-                            chunkKey(doc.getSysId(), emb.getChunkId()),
-                            doc.getSysId(),
-                            emb.getChunkId(),
-                            emb.getText(),
-                            emb.getType(),
-                            score,
-                            0,  // rank assigned later
-                            null
-                    ));
+                double chunkTf = computeBm25TfScore(emb.getText(), queryTerms);
+                if (chunkTf == 0) {
+                    continue;
                 }
+
+                chunks.add(new ScoredChunk(
+                        chunkKey(doc.getSysId(), emb.getChunkId()),
+                        doc.getSysId(),
+                        emb.getChunkId(),
+                        emb.getText(),
+                        emb.getType(),
+                        docPositionScore * chunkTf,
+                        0,  // rank assigned after sort
+                        null
+                ));
             }
         }
 
-        // Sort by score descending and assign ranks
         chunks.sort(Comparator.comparingDouble(ScoredChunk::score).reversed());
         List<ScoredChunk> ranked = new ArrayList<>();
         int rank = 1;
@@ -287,17 +294,53 @@ public class HybridSearchService {
         return ranked;
     }
 
-    static double computeKeywordScore(String chunkText, String[] queryTerms) {
-        if (queryTerms.length == 0) return 0.0;
+    /**
+     * BM25 TF component (no IDF — corpus statistics are not available through the hxpr API).
+     *
+     * <p>Substantially better than the previous binary term-presence ratio because it:
+     * <ul>
+     *   <li>uses term frequency (mentioning a term 5× scores higher than mentioning it once)</li>
+     *   <li>applies document-length normalisation (short chunks are not penalised)</li>
+     *   <li>models TF saturation via the k1 parameter (score increases sub-linearly with TF)</li>
+     * </ul>
+     * hxpr's BM25 document ordering is used as a complementary signal in
+     * {@link #extractAndScoreChunks}.</p>
+     *
+     * @param chunkText  text of the chunk to score
+     * @param queryTerms lower-cased query tokens
+     * @return non-negative score; 0 when no query term appears in the chunk
+     */
+    static double computeBm25TfScore(String chunkText, String[] queryTerms) {
+        if (queryTerms.length == 0 || chunkText == null || chunkText.isBlank()) return 0.0;
 
-        String lowerText = chunkText.toLowerCase();
-        int matchCount = 0;
+        final double k1 = 1.2;
+        final double b  = 0.75;
+        // avgDocLength ≈ 100 words — matches a typical 512-char chunk (~5 chars/word)
+        final double avgDocLength = 100.0;
+
+        String lower = chunkText.toLowerCase();
+        int docLength = lower.split("\\s+").length;
+        double lengthNorm = 1.0 - b + b * docLength / avgDocLength;
+
+        double score = 0.0;
         for (String term : queryTerms) {
-            if (!term.isBlank() && lowerText.contains(term)) {
-                matchCount++;
-            }
+            if (term.isBlank()) continue;
+            int tf = countTermFrequency(lower, term);
+            if (tf == 0) continue;
+            score += tf * (k1 + 1.0) / (tf + k1 * lengthNorm);
         }
-        return (double) matchCount / queryTerms.length;
+
+        return queryTerms.length > 0 ? score / queryTerms.length : 0.0;
+    }
+
+    private static int countTermFrequency(String text, String term) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(term, idx)) >= 0) {
+            count++;
+            idx += term.length();
+        }
+        return count;
     }
 
     // ---------------------------------------------------------------

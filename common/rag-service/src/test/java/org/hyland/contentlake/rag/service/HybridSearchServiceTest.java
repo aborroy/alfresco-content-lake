@@ -217,37 +217,67 @@ class HybridSearchServiceTest {
     class KeywordScoring {
 
         @Test
-        void computeKeywordScore_allTermsMatch_returnsOne() {
-            double score = HybridSearchService.computeKeywordScore(
+        void computeBm25TfScore_allTermsMatch_returnsPositiveScore() {
+            double score = HybridSearchService.computeBm25TfScore(
                     "This document discusses Alfresco content management", new String[]{"alfresco", "content"});
-            assertThat(score).isEqualTo(1.0);
+            assertThat(score).isGreaterThan(0.0);
         }
 
         @Test
-        void computeKeywordScore_partialMatch_returnsFraction() {
-            double score = HybridSearchService.computeKeywordScore(
+        void computeBm25TfScore_partialMatch_scoresLowerThanFullMatch() {
+            double fullMatch = HybridSearchService.computeBm25TfScore(
+                    "Alfresco content lake", new String[]{"alfresco", "content", "lake"});
+            double partialMatch = HybridSearchService.computeBm25TfScore(
                     "Alfresco is a CMS", new String[]{"alfresco", "content", "lake"});
-            assertThat(score).isCloseTo(1.0 / 3, within(0.0001));
+            assertThat(partialMatch).isLessThan(fullMatch);
+            assertThat(partialMatch).isGreaterThan(0.0);
         }
 
         @Test
-        void computeKeywordScore_noMatch_returnsZero() {
-            double score = HybridSearchService.computeKeywordScore(
+        void computeBm25TfScore_noMatch_returnsZero() {
+            double score = HybridSearchService.computeBm25TfScore(
                     "unrelated text", new String[]{"alfresco", "content"});
             assertThat(score).isEqualTo(0.0);
         }
 
         @Test
-        void computeKeywordScore_emptyTerms_returnsZero() {
-            double score = HybridSearchService.computeKeywordScore("some text", new String[]{});
+        void computeBm25TfScore_emptyTerms_returnsZero() {
+            double score = HybridSearchService.computeBm25TfScore("some text", new String[]{});
             assertThat(score).isEqualTo(0.0);
         }
 
         @Test
-        void computeKeywordScore_caseInsensitive() {
-            double score = HybridSearchService.computeKeywordScore(
+        void computeBm25TfScore_caseInsensitive() {
+            double score = HybridSearchService.computeBm25TfScore(
                     "ALFRESCO Content Management", new String[]{"alfresco", "content"});
-            assertThat(score).isEqualTo(1.0);
+            assertThat(score).isGreaterThan(0.0);
+        }
+
+        @Test
+        void computeBm25TfScore_higherTermFrequencyScoresHigher() {
+            // "revenue" appears once vs three times — higher TF should score higher (sub-linearly)
+            double once = HybridSearchService.computeBm25TfScore(
+                    "revenue was reported last quarter", new String[]{"revenue"});
+            double thrice = HybridSearchService.computeBm25TfScore(
+                    "revenue revenue revenue reported last quarter", new String[]{"revenue"});
+            assertThat(thrice).isGreaterThan(once);
+        }
+
+        @Test
+        void computeBm25TfScore_tfSaturation_sublinear() {
+            // Score increase from 1→3 occurrences should be less than 3× (BM25 saturation)
+            double once = HybridSearchService.computeBm25TfScore(
+                    "revenue reported", new String[]{"revenue"});
+            double thrice = HybridSearchService.computeBm25TfScore(
+                    "revenue revenue revenue reported", new String[]{"revenue"});
+            assertThat(thrice).isLessThan(once * 3);
+        }
+
+        @Test
+        void computeBm25TfScore_nullOrBlankChunk_returnsZero() {
+            assertThat(HybridSearchService.computeBm25TfScore(null, new String[]{"term"})).isEqualTo(0.0);
+            assertThat(HybridSearchService.computeBm25TfScore("", new String[]{"term"})).isEqualTo(0.0);
+            assertThat(HybridSearchService.computeBm25TfScore("   ", new String[]{"term"})).isEqualTo(0.0);
         }
     }
 
@@ -735,9 +765,10 @@ class HybridSearchServiceTest {
             List<ScoredChunk> chunks = service.executeKeywordSearch(
                     "alfresco content", "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')", 20);
 
-            // First chunk matches both terms -> score 1.0
+            // Only emb1 matches any query terms; emb2 scores 0 and is excluded.
+            // Score = docPositionScore(rank-1 doc) × BM25-TF(chunk) — always > 0.
             assertThat(chunks).hasSize(1);
-            assertThat(chunks.get(0).score()).isEqualTo(1.0);
+            assertThat(chunks.get(0).score()).isGreaterThan(0.0);
             assertThat(chunks.getFirst().text()).isEqualTo("This chunk contains alfresco content management");
         }
 
@@ -758,6 +789,38 @@ class HybridSearchServiceTest {
 
             List<ScoredChunk> chunks = service.executeKeywordSearch("test", "filter", 20);
             assertThat(chunks).isEmpty();
+        }
+
+        @Test
+        void executeKeywordSearch_respectsHxprDocumentOrder() {
+            // doc1 is rank-1 (best BM25 from hxpr), doc2 is rank-2.
+            // Both have identical chunk text, so the doc-position signal must decide.
+            HxprDocument doc1 = new HxprDocument();
+            doc1.setSysId("doc-1");
+            HxprEmbedding emb1 = new HxprEmbedding();
+            emb1.setText("alfresco content management system");
+            emb1.setType("mxbai");
+            doc1.setSysembedEmbeddings(List.of(emb1));
+
+            HxprDocument doc2 = new HxprDocument();
+            doc2.setSysId("doc-2");
+            HxprEmbedding emb2 = new HxprEmbedding();
+            emb2.setText("alfresco content management system");
+            emb2.setType("mxbai");
+            doc2.setSysembedEmbeddings(List.of(emb2));
+
+            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
+            result.setDocuments(List.of(doc1, doc2));
+
+            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+
+            List<ScoredChunk> chunks = service.executeKeywordSearch(
+                    "alfresco content", "SELECT * FROM SysContent", 20);
+
+            assertThat(chunks).hasSize(2);
+            // doc-1 (rank 1 from hxpr) must outrank doc-2 (rank 2)
+            assertThat(chunks.get(0).docId()).isEqualTo("doc-1");
+            assertThat(chunks.get(0).score()).isGreaterThan(chunks.get(1).score());
         }
 
         @Test

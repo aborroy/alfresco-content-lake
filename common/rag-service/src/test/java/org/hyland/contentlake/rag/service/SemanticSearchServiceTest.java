@@ -210,7 +210,6 @@ class SemanticSearchServiceTest {
 
     @Test
     void search_emptyEmbedding_returnsEmptyResponse() {
-        when(securityContextService.getCurrentUsername()).thenReturn("user");
         when(embeddingService.embedQuery(any())).thenReturn(List.of());
         when(embeddingService.getModelName()).thenReturn("test-model");
 

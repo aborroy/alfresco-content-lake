@@ -71,8 +71,8 @@ live-ingester:
       - cm:workingcopy
   chunking:
     min-chunk-size: ${EMBEDDING_MIN_CHUNK_SIZE:200}
-    max-chunk-size: ${EMBEDDING_CHUNK_SIZE:1000}
-    overlap-size: ${EMBEDDING_CHUNK_OVERLAP:120}
+    max-chunk-size: ${EMBEDDING_CHUNK_SIZE:512}
+    overlap-size: ${EMBEDDING_CHUNK_OVERLAP:150}
     similarity-threshold: ${EMBEDDING_SIMILARITY_THRESHOLD:0.75}
   dedup:
     window: ${LIVE_INGESTER_DEDUP_WINDOW:PT2M}

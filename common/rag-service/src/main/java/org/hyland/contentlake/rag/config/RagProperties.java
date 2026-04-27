@@ -17,8 +17,8 @@ public class RagProperties {
     /** Default number of chunks to retrieve for context. */
     private int defaultTopK = 5;
 
-    /** Default minimum similarity score threshold. */
-    private double defaultMinScore = 0.5;
+    /** Default minimum similarity score threshold. 0.0 = no filtering (lets SemanticSearchService apply its own threshold). */
+    private double defaultMinScore = 0.0;
 
     /**
      * Maximum character length of the assembled context sent to the LLM.
@@ -42,17 +42,34 @@ public class RagProperties {
 
             RULES:
             1. Use ONLY information from the DOCUMENT CONTEXT below. Do not use prior knowledge.
-            2. When referencing information, cite the source using its label (e.g. "According to Source 1...").
+            2. When referencing information, cite the source using its label (e.g. "According to Source 1..."). \
+            Cite each source ONCE. Do not repeat or restate the same citation within a single answer.
             3. If multiple sources contain relevant information, synthesize them and cite each.
             4. If the context does not contain enough information to fully answer the question, clearly \
             state what you can answer and what is missing.
-            5. Be concise and direct. Do not repeat the question or add unnecessary preamble.""";
+            5. Be concise and direct. Do not repeat the question or add unnecessary preamble.
+            6. You may apply standard world knowledge for unit conversions (temperatures, currencies, UTC offsets) \
+            when the document context provides the underlying fact but not the converted value. \
+            Do not invent document facts.""";
+
+    /** Cross-encoder reranker settings (disabled when url is blank). */
+    private RerankerProperties reranker = new RerankerProperties();
 
     /** Conversation memory settings. */
     private ConversationProperties conversation = new ConversationProperties();
 
     /** Source-specific deep-link templates returned in search and RAG responses. */
     private SourceLinkProperties sourceLinks = new SourceLinkProperties();
+
+    @Data
+    public static class RerankerProperties {
+
+        /** TEI cross-encoder endpoint (e.g. http://localhost:8081). Leave blank to disable reranking. */
+        private String url = "";
+
+        /** Number of top results to keep after reranking. */
+        private int topN = 8;
+    }
 
     @Data
     public static class ConversationProperties {
