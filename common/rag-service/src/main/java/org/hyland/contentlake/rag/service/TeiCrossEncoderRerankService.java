@@ -3,9 +3,11 @@ package org.hyland.contentlake.rag.service;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
 import java.util.*;
 
 /**
@@ -32,7 +34,10 @@ public class TeiCrossEncoderRerankService implements RerankService {
 
     public TeiCrossEncoderRerankService(RagProperties ragProperties) {
         this.ragProperties = ragProperties;
-        this.restTemplate = new RestTemplate();
+        this.restTemplate = new RestTemplateBuilder()
+                .connectTimeout(Duration.ofSeconds(3))
+                .readTimeout(Duration.ofSeconds(30))
+                .build();
     }
 
     @Override
