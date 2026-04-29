@@ -308,7 +308,7 @@ public class HxprService {
 
         try {
             // Step 1: Create upload slot
-            log.debug("Creating upload slot for embedding Parquet file");
+            log.info("Creating upload slot for embedding Parquet file");
             Map<String, String> uploadSlotResponse = restClient.post()
                     .uri("/api/upload/create")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -320,10 +320,10 @@ public class HxprService {
                 throw new RuntimeException("Failed to get uploadId from upload/create response");
             }
 
-            log.debug("Created upload slot: {}", uploadId);
+            log.info("Created upload slot: {}", uploadId);
 
             // Step 2: Upload Parquet bytes
-            log.debug("Uploading Parquet file ({} bytes) to uploadId: {}", parquetContent.length, uploadId);
+            log.info("Uploading Parquet file ({} bytes) to uploadId: {}", parquetContent.length, uploadId);
             restClient.post()
                     .uri("/api/upload?id=" + uploadId +
                          "&fileName=embeddings.parquet" +
@@ -333,7 +333,7 @@ public class HxprService {
                     .retrieve()
                     .toBodilessEntity();
 
-            log.debug("Successfully uploaded Parquet file");
+            log.info("Successfully uploaded Parquet file");
 
             // Step 3: Create SysEmbeddings child document
             Map<String, Object> childDoc = Map.of(
@@ -343,7 +343,7 @@ public class HxprService {
                     "sysemb_embeddings", Map.of("uploadId", uploadId)
             );
 
-            log.debug("Creating SysEmbeddings child document: {}", childName);
+            log.info("Creating SysEmbeddings child document: {} with payload: {}", childName, childDoc);
             restClient.post()
                     .uri("/api/documents/" + documentId)
                     .contentType(MediaType.APPLICATION_JSON)
