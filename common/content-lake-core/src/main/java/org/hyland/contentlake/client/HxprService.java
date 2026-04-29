@@ -192,15 +192,8 @@ public class HxprService {
     public void updateEmbeddings(String documentId, List<HxprEmbedding> embeddings) {
         log.info("Updating {} embeddings for document: {}", embeddings.size(), documentId);
 
-        HxprDocument currentDoc = documentApi.getById(documentId);
-        ensureSysEmbedMixin(documentId, currentDoc);
-
-        if (embeddings.size() > EMBEDDING_BATCH_SIZE) {
-            updateEmbeddingsInBatches(documentId, embeddings);
-        } else {
-            // Single batch: standard update (replaces existing embeddings)
-            documentApi.updateById(documentId, Map.of("sysembed_embeddings", embeddings));
-        }
+        // Always use Parquet storage for all embeddings
+        updateEmbeddingsInBatches(documentId, embeddings);
 
         int vectorDim = embeddings.isEmpty() || embeddings.get(0).getVector() == null
                 ? 0
