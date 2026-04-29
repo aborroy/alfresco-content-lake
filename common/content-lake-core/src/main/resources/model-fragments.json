@@ -1,4 +1,11 @@
 {
+  "documentTypes": {
+    "SysEmbeddings": {
+      "schemas": [
+        "sysemb"
+      ]
+    }
+  },
   "mixinTypes": {
     "CinContext": {
       "schemas": [
@@ -8,6 +15,11 @@
     "CinRemote": {
       "schemas": [
         "cinremote"
+      ]
+    },
+    "SysHasEmbeddings": {
+      "schemas": [
+        "syshasemb"
       ]
     }
   },
@@ -93,6 +105,18 @@
         }
       },
       "prefix": "cin"
+    },
+    "sysemb": {
+      "fields": {
+        "sysemb_embeddings": {
+          "type": "blob"
+        }
+      },
+      "prefix": "sysemb"
+    },
+    "syshasemb": {
+      "fields": {},
+      "prefix": "syshasemb"
     }
   },
   "types": {
