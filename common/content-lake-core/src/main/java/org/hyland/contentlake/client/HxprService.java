@@ -312,6 +312,7 @@ public class HxprService {
             Map<String, String> uploadSlotResponse = restClient.post()
                     .uri("/api/upload/create")
                     .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of())  // Empty JSON object required by HXPR
                     .retrieve()
                     .body(new org.springframework.core.ParameterizedTypeReference<Map<String, String>>() {});
 
