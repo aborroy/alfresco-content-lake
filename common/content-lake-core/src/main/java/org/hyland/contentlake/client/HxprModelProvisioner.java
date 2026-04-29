@@ -110,6 +110,7 @@ public class HxprModelProvisioner {
 
     private ArrayNode buildAddOnlyPatch(JsonNode current, JsonNode desired) {
         ArrayNode ops = objectMapper.createArrayNode();
+        addMissingSectionEntries(ops, current, desired, "documentTypes");
         addMissingSectionEntries(ops, current, desired, "schemas");
         addMissingSectionEntries(ops, current, desired, "types");
         addMissingSectionEntries(ops, current, desired, "mixinTypes");
