@@ -195,9 +195,13 @@ public class NodeSyncService {
             clearEmbeddings(hxprDocId);
 
             List<HxprEmbedding> hxprEmbeddings = toHxprEmbeddings(embedded);
+            log.info("About to update embeddings for hxprDocId: {}, nodeId: {}, count: {}", hxprDocId, nodeId, hxprEmbeddings.size());
             hxprService.updateEmbeddings(hxprDocId, hxprEmbeddings);
+            log.info("Successfully updated embeddings for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
 
+            log.info("About to update fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
             updateFulltextWithStatus(hxprDocId, text, baseIngestProps);
+            log.info("Successfully updated fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
 
             log.info("Completed sync for node {}: {} embeddings", nodeId, hxprEmbeddings.size());
         } catch (Exception e) {
@@ -496,14 +500,19 @@ public class NodeSyncService {
     }
 
     private void updateFulltextWithStatus(String hxprDocId, String text, Map<String, Object> baseIngestProps) {
+        log.info("updateFulltextWithStatus called for hxprDocId: {}, textLength: {}, baseIngestProps: {}",
+                hxprDocId, text != null ? text.length() : 0, baseIngestProps);
         Map<String, Object> props = buildStatusedProps(baseIngestProps, ContentLakeNodeStatus.Status.INDEXED, null);
+        log.info("Built statused props for hxprDocId: {}, props: {}", hxprDocId, props);
         HxprDocument update = new HxprDocument();
         update.setSysFulltextBinary(text);
         update.setSyncStatus(HxprDocument.SyncStatus.INDEXED);
         update.setSyncError(null);
         update.setCinIngestProperties(props);
         update.setCinIngestPropertyNames(new ArrayList<>(props.keySet()));
+        log.info("About to call documentApi.updateById for hxprDocId: {}", hxprDocId);
         documentApi.updateById(hxprDocId, update);
+        log.info("Successfully called documentApi.updateById for hxprDocId: {}", hxprDocId);
     }
 
     private void patchSyncState(String hxprDocId, Map<String, Object> baseIngestProps,
