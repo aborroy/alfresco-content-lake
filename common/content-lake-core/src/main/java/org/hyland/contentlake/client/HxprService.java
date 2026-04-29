@@ -307,12 +307,10 @@ public class HxprService {
         String childName = "_e_" + embeddingType;
 
         try {
-            // Step 1: Create upload slot
+            // Step 1: Create upload slot (no request body needed)
             log.info("Creating upload slot for embedding Parquet file");
             Map<String, String> uploadSlotResponse = restClient.post()
                     .uri("/api/upload/create")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of())  // Empty JSON object required by HXPR
                     .retrieve()
                     .body(new org.springframework.core.ParameterizedTypeReference<Map<String, String>>() {});
 
