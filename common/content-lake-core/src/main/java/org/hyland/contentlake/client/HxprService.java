@@ -35,9 +35,12 @@ import java.util.stream.Collectors;
 public class HxprService {
 
     private static final String EMBED_MIXIN = "SysEmbed";
+    private static final String EMBEDDING_PARENT_MIXIN = "SysHasEmbeddings";
     private static final String SYS_FOLDER = "SysFolder";
     private static final String SYS_FILE = "SysFile";
     private static final String DEFAULT_QUERY = "SELECT * FROM SysContent";
+    private static final int EMBEDDING_BATCH_SIZE = 500;
+    private static final String DEFAULT_EMBEDDING_TYPE = "mxbai-embed-large";
 
     private final HxprDocumentApi documentApi;
     private final HxprQueryApi queryApi;
@@ -179,6 +182,10 @@ public class HxprService {
     /**
      * Stores embeddings in {@code sysembed_embeddings} and ensures the {@code SysEmbed} mixin is present.
      *
+     * <p>For large embedding sets (>500), this method automatically batches updates to stay within
+     * MongoDB's 16MB document size limit. The first batch replaces existing embeddings, and
+     * subsequent batches append to ensure all embeddings are stored.</p>
+     *
      * @param documentId hxpr document identifier
      * @param embeddings embeddings to store
      */
@@ -188,7 +195,12 @@ public class HxprService {
         HxprDocument currentDoc = documentApi.getById(documentId);
         ensureSysEmbedMixin(documentId, currentDoc);
 
-        documentApi.updateById(documentId, Map.of("sysembed_embeddings", embeddings));
+        if (embeddings.size() > EMBEDDING_BATCH_SIZE) {
+            updateEmbeddingsInBatches(documentId, embeddings);
+        } else {
+            // Single batch: standard update (replaces existing embeddings)
+            documentApi.updateById(documentId, Map.of("sysembed_embeddings", embeddings));
+        }
 
         int vectorDim = embeddings.isEmpty() || embeddings.get(0).getVector() == null
                 ? 0
@@ -196,6 +208,154 @@ public class HxprService {
 
         log.info("Updated document {} with {} embeddings (vector dim: {})",
                 documentId, embeddings.size(), vectorDim);
+    }
+
+    /**
+     * Stores embeddings as Parquet file in a child document to avoid MongoDB's 16MB document size limit.
+     *
+     * <p>This method implements the HXPR Content Lake approach (CIN-6680) where embeddings are stored
+     * as Parquet files attached to child documents. The parent document is marked with the
+     * CIN_HasEmbeddingVectors mixin to indicate it has embeddings stored as children.</p>
+     *
+     * @param documentId hxpr document identifier
+     * @param embeddings complete list of embeddings to store
+     */
+    private void updateEmbeddingsInBatches(String documentId, List<HxprEmbedding> embeddings) {
+        String embeddingType = DEFAULT_EMBEDDING_TYPE;
+
+        log.info("Document {} has {} embeddings. Storing as Parquet file in child document (embedding type: {})",
+                documentId, embeddings.size(), embeddingType);
+
+        try {
+            // 1. Generate Parquet file
+            byte[] parquetContent = ParquetEmbeddingWriter.writeToParquet(embeddings, embeddingType);
+
+            // 2. Add parent mixin to indicate it has embedding children
+            ensureEmbeddingParentMixin(documentId);
+
+            // 3. Delete old embedding child if exists
+            deleteEmbeddingChild(documentId, embeddingType);
+
+            // 4. Create child document with Parquet file
+            createEmbeddingChild(documentId, embeddingType, parquetContent);
+
+            log.info("Successfully stored {} embeddings as Parquet file ({} bytes) for document {}",
+                    embeddings.size(), parquetContent.length, documentId);
+
+        } catch (Exception e) {
+            log.error("Failed to store embeddings as Parquet for document {}: {}", documentId, e.getMessage(), e);
+            throw new RuntimeException("Failed to store embeddings as Parquet for document " + documentId, e);
+        }
+    }
+
+    /**
+     * Ensures the parent document has the CIN_HasEmbeddingVectors mixin.
+     */
+    private void ensureEmbeddingParentMixin(String documentId) {
+        try {
+            HxprDocument doc = documentApi.getById(documentId);
+            List<String> mixins = doc.getSysMixinTypes();
+
+            if (mixins == null || !mixins.contains(EMBEDDING_PARENT_MIXIN)) {
+                log.debug("Adding {} mixin to document {}", EMBEDDING_PARENT_MIXIN, documentId);
+
+                List<String> newMixins = mixins != null ? new ArrayList<>(mixins) : new ArrayList<>();
+                newMixins.add(EMBEDDING_PARENT_MIXIN);
+
+                documentApi.updateById(documentId, Map.of("sys_mixinTypes", newMixins));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to add parent embedding mixin to {}: {}", documentId, e.getMessage());
+        }
+    }
+
+    /**
+     * Deletes existing embedding child document if it exists.
+     */
+    private void deleteEmbeddingChild(String documentId, String embeddingType) {
+        try {
+            // Query for existing embedding child (name format: _e_{embeddingType})
+            String childName = "_e_" + embeddingType;
+            String hxql = String.format(
+                    "SELECT * FROM SysContent WHERE sys_parentId = '%s' AND sys_name = '%s'",
+                    escapeHxql(documentId), escapeHxql(childName)
+            );
+
+            HxprDocument.QueryResult queryResult = queryApi.query(new Query().query(hxql));
+            List<HxprDocument> results = queryResult.getDocuments();
+
+            if (results != null && !results.isEmpty()) {
+                String childId = results.get(0).getSysId();
+                log.debug("Deleting existing embedding child: {}", childId);
+                documentApi.deleteById(childId);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to delete existing embedding child for {}: {}", documentId, e.getMessage());
+        }
+    }
+
+    /**
+     * Creates a child document containing the Parquet file with embeddings.
+     *
+     * Follows the HXPR Content Lake specification:
+     * 1. Create upload slot via POST /api/upload/create
+     * 2. Upload Parquet bytes via POST /api/upload?id={uploadId}
+     * 3. Create SysEmbeddings child document referencing the uploadId
+     */
+    private void createEmbeddingChild(String documentId, String embeddingType, byte[] parquetContent) {
+        // Child document name MUST start with "_e_" prefix per specification
+        String childName = "_e_" + embeddingType;
+
+        try {
+            // Step 1: Create upload slot
+            log.debug("Creating upload slot for embedding Parquet file");
+            Map<String, String> uploadSlotResponse = restClient.post()
+                    .uri("/api/upload/create")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .body(new org.springframework.core.ParameterizedTypeReference<Map<String, String>>() {});
+
+            String uploadId = uploadSlotResponse.get("id");
+            if (uploadId == null) {
+                throw new RuntimeException("Failed to get uploadId from upload/create response");
+            }
+
+            log.debug("Created upload slot: {}", uploadId);
+
+            // Step 2: Upload Parquet bytes
+            log.debug("Uploading Parquet file ({} bytes) to uploadId: {}", parquetContent.length, uploadId);
+            restClient.post()
+                    .uri("/api/upload?id=" + uploadId +
+                         "&fileName=embeddings.parquet" +
+                         "&mimeType=application/x-parquet")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(parquetContent)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            log.debug("Successfully uploaded Parquet file");
+
+            // Step 3: Create SysEmbeddings child document
+            Map<String, Object> childDoc = Map.of(
+                    "sys_primaryType", "SysEmbeddings",
+                    "sys_name", childName,
+                    "sys_title", "Embeddings",
+                    "sysemb_embeddings", Map.of("uploadId", uploadId)
+            );
+
+            log.debug("Creating SysEmbeddings child document: {}", childName);
+            restClient.post()
+                    .uri("/api/documents/" + documentId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(childDoc)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            log.info("Successfully created SysEmbeddings child document: {} (uploadId: {})", childName, uploadId);
+        } catch (Exception e) {
+            log.error("Failed to create embedding child for {}: {}", documentId, e.getMessage(), e);
+            throw new RuntimeException("Failed to create embedding child document", e);
+        }
     }
 
     /**
