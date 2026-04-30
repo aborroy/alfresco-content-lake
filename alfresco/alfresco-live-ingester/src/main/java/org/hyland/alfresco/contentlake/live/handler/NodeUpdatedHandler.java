@@ -23,6 +23,6 @@ public class NodeUpdatedHandler implements OnNodeUpdatedEventHandler {
 
     @Override
     public EventFilter getEventFilter() {
-        return IsFileFilter.get();
+        return IsFileFilter.get().and(IgnoreSyncStatusOnlyUpdateFilter.get());
     }
 }
