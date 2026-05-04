@@ -230,6 +230,12 @@ public class NuxeoAuditListener {
             return;
         }
 
+        if (node.folder()) {
+            refreshSubtreePermissions(node);
+            metrics.recordEvent(repositoryKey, entry.eventId(), "folder-permissions-propagated");
+            return;
+        }
+
         if (!scopeResolver.isInScope(node)) {
             boolean deleted = nodeSyncService.deleteNode(entry.docUUID(), effectiveEventTime(entry));
             metrics.recordEvent(repositoryKey, entry.eventId(), deleted ? "deleted" : "skipped");
@@ -238,6 +244,54 @@ public class NuxeoAuditListener {
 
         nodeSyncService.updatePermissions(node);
         metrics.recordEvent(repositoryKey, entry.eventId(), "updated");
+    }
+
+    private void refreshSubtreePermissions(SourceNode folder) {
+        NuxeoLiveProperties.SubtreeReeval cfg = liveProperties.getSubtreeReeval();
+        if (!cfg.isEnabled()) {
+            log.warn("Subtree permission refresh is disabled (subtreeReeval.enabled=false). "
+                    + "Folder {} permission change will not propagate to child documents. "
+                    + "Run a full batch resync to update ACLs.",
+                    getFolderPath(folder));
+            return;
+        }
+        refreshSubtreePermissionsRecursive(folder, 0, new int[]{0});
+    }
+
+    private void refreshSubtreePermissionsRecursive(SourceNode folder, int currentDepth, int[] nodeCount) {
+        NuxeoLiveProperties.SubtreeReeval cfg = liveProperties.getSubtreeReeval();
+        if (currentDepth > cfg.getMaxDepth()) {
+            log.warn("Subtree permission refresh for folder {} exceeded maxDepth={}; aborting. "
+                    + "Run a full batch resync to cover the remaining subtree.",
+                    getFolderPath(folder), cfg.getMaxDepth());
+            return;
+        }
+
+        int pageSize = liveProperties.getAudit().getPageSize();
+        int skip = 0;
+        while (true) {
+            List<SourceNode> children = nuxeoClient.getChildren(folder.nodeId(), skip, pageSize);
+            if (children.isEmpty()) {
+                break;
+            }
+            for (SourceNode child : children) {
+                if (nodeCount[0]++ >= cfg.getMaxNodes()) {
+                    log.warn("Subtree permission refresh for folder {} exceeded maxNodes={}; aborting. "
+                            + "Run a full batch resync to cover the remaining subtree.",
+                            getFolderPath(folder), cfg.getMaxNodes());
+                    return;
+                }
+                if (child.folder()) {
+                    refreshSubtreePermissionsRecursive(child, currentDepth + 1, nodeCount);
+                } else if (scopeResolver.isInScope(child)) {
+                    nodeSyncService.updatePermissions(child);
+                }
+            }
+            if (children.size() < pageSize) {
+                break;
+            }
+            skip += children.size();
+        }
     }
 
     private void processDelete(String repositoryKey, NuxeoAuditEntry entry) {

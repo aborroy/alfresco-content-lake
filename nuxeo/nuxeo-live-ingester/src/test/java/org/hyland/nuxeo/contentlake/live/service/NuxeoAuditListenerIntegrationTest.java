@@ -2,6 +2,7 @@ package org.hyland.nuxeo.contentlake.live.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -80,7 +81,7 @@ class NuxeoAuditListenerIntegrationTest {
         assumeTrue(waitForNuxeo(Duration.ofSeconds(90)),
                 "Start nuxeo-deployment/compose.yaml before running this integration test");
 
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         String namespace = "codex-live-it-" + UUID.randomUUID().toString().substring(0, 8);
         Path cursorFile = tempDir.resolve("audit-cursor.json");
         NuxeoDocument workspace = null;
@@ -144,7 +145,7 @@ class NuxeoAuditListenerIntegrationTest {
         assumeTrue(waitForNuxeo(Duration.ofSeconds(90)),
                 "Start nuxeo-deployment/compose.yaml before running this integration test");
 
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         String namespace = "codex-disable-it-" + UUID.randomUUID().toString().substring(0, 8);
         Path cursorFile = tempDir.resolve("audit-cursor-disable.json");
         NuxeoDocument workspace = null;
@@ -154,13 +155,14 @@ class NuxeoAuditListenerIntegrationTest {
 
         try (FakeHxprServer hxpr = new FakeHxprServer(objectMapper)) {
             workspace = createWorkspace(namespace);
-            subfolder = createFolder(workspace.getPath(), namespace);
-            noteInWorkspace = createNote(workspace.getPath(), namespace + "-w");
-            noteInSubfolder = createNote(subfolder.getPath(), namespace + "-s");
 
             ListenerHarness harness = createHarness(hxpr.baseUrl(), cursorFile, workspace.getPath(), objectMapper);
             OffsetDateTime cursorStart = OffsetDateTime.now(ZoneOffset.UTC);
             harness.cursorStore().save(REPOSITORY_KEY, AuditCursor.initial(cursorStart));
+
+            subfolder = createFolder(workspace.getPath(), namespace);
+            noteInWorkspace = createNote(workspace.getPath(), namespace + "-w");
+            noteInSubfolder = createNote(subfolder.getPath(), namespace + "-s");
 
             waitForAuditEvent(noteInSubfolder.getUid(), "documentCreated", Duration.ofSeconds(30));
             harness.listener().listen();
@@ -193,7 +195,7 @@ class NuxeoAuditListenerIntegrationTest {
         assumeTrue(waitForNuxeo(Duration.ofSeconds(90)),
                 "Start nuxeo-deployment/compose.yaml before running this integration test");
 
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         String namespace = "codex-remove-facet-it-" + UUID.randomUUID().toString().substring(0, 8);
         Path cursorFile = tempDir.resolve("audit-cursor-remove-facet.json");
         NuxeoDocument workspace = null;
@@ -204,13 +206,14 @@ class NuxeoAuditListenerIntegrationTest {
             // Use workspace NOT in includedRoots; rely solely on ContentLakeIndexed facet for scope
             workspace = createWorkspace(namespace);
             addFacet(workspace.getUid(), "ContentLakeIndexed");
-            subfolder = createFolder(workspace.getPath(), namespace);
-            note = createNote(subfolder.getPath(), namespace + "-note");
 
             // Use empty includedRoots so only ContentLakeIndexed drives scope
             ListenerHarness harness = createHarness(hxpr.baseUrl(), cursorFile, List.of(), objectMapper);
             OffsetDateTime cursorStart = OffsetDateTime.now(ZoneOffset.UTC);
             harness.cursorStore().save(REPOSITORY_KEY, AuditCursor.initial(cursorStart));
+
+            subfolder = createFolder(workspace.getPath(), namespace);
+            note = createNote(subfolder.getPath(), namespace + "-note");
 
             waitForAuditEvent(note.getUid(), "documentCreated", Duration.ofSeconds(30));
             harness.listener().listen();
@@ -218,8 +221,11 @@ class NuxeoAuditListenerIntegrationTest {
             assertThat(hxpr.findFileByNodeId(note.getUid())).isNotNull();
             assertThat(hxpr.fileDocumentCount()).isEqualTo(1);
 
-            // Remove ContentLakeIndexed — note must be removed from hxpr
+            // Remove ContentLakeIndexed and touch the workspace so Nuxeo fires documentModified.
+            // Document.RemoveFacet alone does not produce an audit entry in the Community image;
+            // a property update is needed to generate the event the live listener polls for.
             removeFacet(workspace.getUid(), "ContentLakeIndexed");
+            setProperty(workspace.getUid(), "dc:description", "scope-removed");
             waitForAuditEvent(workspace.getUid(), "documentModified", Duration.ofSeconds(30));
 
             harness.listener().listen();

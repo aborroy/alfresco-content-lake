@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
@@ -331,6 +332,103 @@ class NuxeoAuditListenerTest {
 
         verify(scopeResolver).invalidateFolderScope("/default-domain/workspaces/folder-48");
         verify(nodeSyncService, never()).syncNode(any());
+    }
+
+    @Test
+    void listen_permissionUpdate_onFolder_propagatesPermissionsToChildren() {
+        AuditCursor initialCursor = new AuditCursor(OffsetDateTime.parse("2026-03-26T16:48:41.235Z"), 46);
+        OffsetDateTime windowEnd = OffsetDateTime.parse("2026-03-26T17:00:00Z");
+        NuxeoAuditEntry securityUpdated = entry(54, "documentSecurityUpdated", "folder-54",
+                "2026-03-26T16:48:51.000Z", "2026-03-26T16:48:51.050Z");
+        SourceNode folder = folderNode("folder-54", List.of());
+        SourceNode child1 = sourceNode("child-1");
+        SourceNode child2 = sourceNode("child-2");
+
+        when(cursorStore.load("nuxeo:local")).thenReturn(Optional.of(initialCursor));
+        when(auditClient.fetchPage(initialCursor, windowEnd, 2)).thenReturn(pageOf(false, securityUpdated));
+        when(nuxeoClient.getNode("folder-54")).thenReturn(folder);
+        when(nuxeoClient.getChildren(eq("folder-54"), eq(0), any(Integer.class)))
+                .thenReturn(List.of(child1, child2));
+        when(scopeResolver.isInScope(child1)).thenReturn(true);
+        when(scopeResolver.isInScope(child2)).thenReturn(true);
+
+        listener.listen();
+
+        verify(nodeSyncService).updatePermissions(child1);
+        verify(nodeSyncService).updatePermissions(child2);
+        verify(nodeSyncService, never()).syncNode(any());
+        verify(nodeSyncService, never()).deleteNode(any(), any());
+    }
+
+    @Test
+    void listen_permissionUpdate_onFolder_skipsOutOfScopeChildren() {
+        AuditCursor initialCursor = new AuditCursor(OffsetDateTime.parse("2026-03-26T16:48:41.235Z"), 46);
+        OffsetDateTime windowEnd = OffsetDateTime.parse("2026-03-26T17:00:00Z");
+        NuxeoAuditEntry securityUpdated = entry(55, "documentSecurityUpdated", "folder-55",
+                "2026-03-26T16:48:52.000Z", "2026-03-26T16:48:52.050Z");
+        SourceNode folder = folderNode("folder-55", List.of());
+        SourceNode outOfScopeChild = sourceNode("child-out");
+
+        when(cursorStore.load("nuxeo:local")).thenReturn(Optional.of(initialCursor));
+        when(auditClient.fetchPage(initialCursor, windowEnd, 2)).thenReturn(pageOf(false, securityUpdated));
+        when(nuxeoClient.getNode("folder-55")).thenReturn(folder);
+        when(nuxeoClient.getChildren(eq("folder-55"), eq(0), any(Integer.class)))
+                .thenReturn(List.of(outOfScopeChild));
+        when(scopeResolver.isInScope(outOfScopeChild)).thenReturn(false);
+
+        listener.listen();
+
+        verify(nodeSyncService, never()).updatePermissions(any());
+        verify(nodeSyncService, never()).deleteNode(any(), any());
+        verify(nodeSyncService, never()).syncNode(any());
+    }
+
+    @Test
+    void listen_permissionUpdate_onFolder_recordsFolderPermissionsPropagatedMetric() {
+        AuditCursor initialCursor = new AuditCursor(OffsetDateTime.parse("2026-03-26T16:48:41.235Z"), 46);
+        OffsetDateTime windowEnd = OffsetDateTime.parse("2026-03-26T17:00:00Z");
+        NuxeoAuditEntry securityUpdated = entry(56, "documentSecurityUpdated", "folder-56",
+                "2026-03-26T16:48:53.000Z", "2026-03-26T16:48:53.050Z");
+        SourceNode folder = folderNode("folder-56", List.of());
+
+        when(cursorStore.load("nuxeo:local")).thenReturn(Optional.of(initialCursor));
+        when(auditClient.fetchPage(initialCursor, windowEnd, 2)).thenReturn(pageOf(false, securityUpdated));
+        when(nuxeoClient.getNode("folder-56")).thenReturn(folder);
+        when(nuxeoClient.getChildren(eq("folder-56"), eq(0), any(Integer.class))).thenReturn(List.of());
+
+        listener.listen();
+
+        assertThat(outcomeCount("documentSecurityUpdated", "folder-permissions-propagated")).isEqualTo(1.0);
+        assertThat(outcomeCount("documentSecurityUpdated", "updated")).isZero();
+        assertThat(outcomeCount("documentSecurityUpdated", "skipped")).isZero();
+    }
+
+    @Test
+    void listen_permissionUpdate_onFolder_respectsDisabledSubtreeReeval() {
+        NuxeoLiveProperties propsDisabled = new NuxeoLiveProperties();
+        propsDisabled.getAudit().setEnabled(true);
+        propsDisabled.getAudit().setPageSize(2);
+        propsDisabled.getAudit().setInitialLookback(Duration.ofMinutes(5));
+        propsDisabled.getSubtreeReeval().setEnabled(false);
+        NuxeoAuditListener disabledListener = new NuxeoAuditListener(
+                auditClient, cursorStore, nodeSyncService, nuxeoClient,
+                scopeResolver, propsDisabled, new NuxeoAuditMetrics(new SimpleMeterRegistry(), FIXED_CLOCK),
+                FIXED_CLOCK);
+
+        AuditCursor initialCursor = new AuditCursor(OffsetDateTime.parse("2026-03-26T16:48:41.235Z"), 46);
+        OffsetDateTime windowEnd = OffsetDateTime.parse("2026-03-26T17:00:00Z");
+        NuxeoAuditEntry securityUpdated = entry(57, "documentSecurityUpdated", "folder-57",
+                "2026-03-26T16:48:54.000Z", "2026-03-26T16:48:54.050Z");
+        SourceNode folder = folderNode("folder-57", List.of());
+
+        when(cursorStore.load("nuxeo:local")).thenReturn(Optional.of(initialCursor));
+        when(auditClient.fetchPage(initialCursor, windowEnd, 2)).thenReturn(pageOf(false, securityUpdated));
+        when(nuxeoClient.getNode("folder-57")).thenReturn(folder);
+
+        disabledListener.listen();
+
+        verify(nuxeoClient, never()).getChildren(any(), anyInt(), anyInt());
+        verify(nodeSyncService, never()).updatePermissions(any());
     }
 
     @Test
