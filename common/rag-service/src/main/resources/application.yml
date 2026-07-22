@@ -15,8 +15,7 @@ spring:
           temperature: ${LLM_TEMPERATURE:0.3}
           maxTokens: ${LLM_MAX_TOKENS:2048}
       embedding:
-        options:
-          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+        model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
 
 # Alfresco SDK configuration
 # Service account for internal operations (group resolution, metadata enrichment)

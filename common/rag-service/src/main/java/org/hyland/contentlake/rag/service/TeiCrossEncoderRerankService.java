@@ -3,7 +3,7 @@ package org.hyland.contentlake.rag.service;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
-import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.boot.restclient.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.web.client.RestTemplate;
 

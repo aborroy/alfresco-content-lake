@@ -10,8 +10,7 @@ spring:
       base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
-        options:
-          model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+        model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
 
 nuxeo:
   base-url: ${NUXEO_URL:http://localhost:8081/nuxeo}

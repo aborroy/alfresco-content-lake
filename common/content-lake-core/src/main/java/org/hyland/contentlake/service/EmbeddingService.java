@@ -1,12 +1,12 @@
 package org.hyland.contentlake.service;
 
+import com.openai.errors.OpenAIException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.model.Chunk;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.retry.TransientAiException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -168,7 +168,7 @@ public class EmbeddingService {
             float[] embedding = response.getResults().get(0).getOutput();
             return toDoubleList(embedding);
 
-        } catch (TransientAiException ex) {
+        } catch (OpenAIException ex) {
             if (!looksLikeTooLarge(ex)) {
                 throw ex;
             }
@@ -241,7 +241,7 @@ public class EmbeddingService {
         return Math.max(1.0, 2.2 - specialRatio * 5.0);
     }
 
-    private int extractTokenCount(TransientAiException ex) {
+    private int extractTokenCount(OpenAIException ex) {
         if (ex.getMessage() == null) return -1;
         Matcher m = TOO_LARGE.matcher(ex.getMessage());
         if (m.find()) {
@@ -271,7 +271,7 @@ public class EmbeddingService {
         return text.substring(0, end);
     }
 
-    private boolean looksLikeTooLarge(TransientAiException ex) {
+    private boolean looksLikeTooLarge(OpenAIException ex) {
         String msg = ex.getMessage();
         if (msg == null) return false;
         return TOO_LARGE.matcher(msg).find() || msg.contains("physical batch size");
