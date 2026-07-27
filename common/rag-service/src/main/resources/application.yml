@@ -5,9 +5,24 @@ spring:
   application:
     name: rag-service
 
+  # Spring Boot 4 switched the default JSON mapper to Jackson 3, which (unlike Jackson 2)
+  # rejects a missing/null JSON value bound to a Java primitive with
+  # "Cannot map `null` into type boolean". RagPromptRequest/search requests use primitive
+  # fields (topK, minScore, resetSession, includeContext) with defaults, and real clients
+  # (the ACA/demo UI) send partial JSON that omits them. Restore the lenient pre-Jackson-3
+  # behavior so those requests bind to their defaults instead of returning HTTP 400.
+  jackson:
+    deserialization:
+      fail-on-null-for-primitives: false
+
   ai:
     openai:
-      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      # Spring AI 2.0 wraps the official openai-java SDK, which treats base-url as the FULL API
+      # base and appends `/embeddings` and `/chat/completions` directly (it does NOT add `/v1`,
+      # unlike the pre-2.0 Spring AI client). MODEL_RUNNER_URL is a bare scheme://host:port, so the
+      # `/v1` segment must be appended here or every model call hits `.../embeddings` and 404s.
+      # Docker Model Runner serves the OpenAI API under both `/v1` and `/engines/v1`.
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}/v1
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       chat:
         options:

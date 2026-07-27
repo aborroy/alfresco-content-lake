@@ -14,7 +14,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -23,9 +30,24 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+/**
+ * Behavioral tests for {@link RagService} exercised through the real advisor-based
+ * {@link ChatClient} wiring (a real {@link ContentLakeRetrievalAdvisor} +
+ * {@link HxprDocumentRetriever} over mocked search services and a mocked {@link ChatModel}).
+ *
+ * <p>This preserves the pre-refactor assertions — reformulated retrieval query, session
+ * handling, empty-context fallback without an LLM call, and metadata mapping — while
+ * validating that they hold once retrieval/augmentation runs inside the advisor pipeline.</p>
+ */
 @ExtendWith(MockitoExtension.class)
 class RagServiceConversationTest {
 
@@ -47,7 +69,7 @@ class RagServiceConversationTest {
         properties.setDefaultMinScore(0.5);
         properties.setMaxContextLength(12000);
         properties.setDefaultSystemPrompt("system prompt");
-        // Use semantic-only path so existing assertions against semanticSearchService still apply.
+        // Use semantic-only path so assertions against semanticSearchService still apply.
         properties.setUseHybridSearch(false);
 
         RagProperties.ConversationProperties conversation = new RagProperties.ConversationProperties();
@@ -57,16 +79,33 @@ class RagServiceConversationTest {
         conversation.setQueryReformulation(true);
         properties.setConversation(conversation);
 
+        // ChatClient request-building reads the model's options; the mock returns null by default.
+        lenient().when(chatModel.getDefaultOptions()).thenReturn(ChatOptions.builder().build());
+        lenient().when(chatModel.getOptions()).thenReturn(ChatOptions.builder().build());
+
+        HxprDocumentRetriever retriever =
+                new HxprDocumentRetriever(semanticSearchService, hybridSearchService, properties);
+        ContentLakeRetrievalAdvisor advisor =
+                new ContentLakeRetrievalAdvisor(retriever, rerankService, properties);
+        ChatClient chatClient = ChatClient.builder(chatModel)
+                .defaultAdvisors(advisor)
+                .build();
+
         ragService = new RagService(
-                semanticSearchService,
-                hybridSearchService,
-                chatModel,
+                chatClient,
                 properties,
                 conversationMemoryService,
                 queryReformulationService,
-                rerankService,
                 securityContextService
         );
+    }
+
+    private static ChatResponse chatResponse(String text, String model, int totalTokens) {
+        ChatResponseMetadata metadata = ChatResponseMetadata.builder()
+                .model(model)
+                .usage(new DefaultUsage(0, totalTokens, totalTokens))
+                .build();
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))), metadata);
     }
 
     @Test
@@ -107,7 +146,8 @@ class RagServiceConversationTest {
         verify(conversationMemoryService).appendAssistantTurn(eq("session-1"), contains("I couldn't find any relevant documents"));
         verify(queryReformulationService).reformulate("Can you expand on the second point?", history);
         verify(rerankService).rerank(eq("expand second point from Q4 report"), anyList());
-        verifyNoInteractions(chatModel);
+        // Empty context short-circuits the LLM call.
+        verify(chatModel, never()).call(any(Prompt.class));
     }
 
     @Test
@@ -137,7 +177,7 @@ class RagServiceConversationTest {
 
         verify(rerankService).rerank(eq("What is new?"), anyList());
         verifyNoInteractions(conversationMemoryService, queryReformulationService, securityContextService);
-        verifyNoInteractions(chatModel);
+        verify(chatModel, never()).call(any(Prompt.class));
     }
 
     @Test
@@ -243,12 +283,8 @@ class RagServiceConversationTest {
                 .results(List.of(hit))
                 .build());
         when(rerankService.rerank(eq("What changed in Q4?"), anyList())).thenReturn(List.of(hit));
-
-        var chatResponse = mock(org.springframework.ai.chat.model.ChatResponse.class, RETURNS_DEEP_STUBS);
-        when(chatResponse.getResult().getOutput().getText()).thenReturn("Revenue increased by 12% in Q4.");
-        when(chatResponse.getMetadata().getModel()).thenReturn("ai/gpt-oss");
-        when(chatResponse.getMetadata().getUsage().getTotalTokens()).thenReturn(321);
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(chatResponse("Revenue increased by 12% in Q4.", "ai/gpt-oss", 321));
 
         RagPromptResponse response = ragService.prompt(RagPromptRequest.builder()
                 .question("What changed in Q4?")
@@ -271,6 +307,35 @@ class RagServiceConversationTest {
     }
 
     @Test
+    void prompt_withRetrievedContext_augmentsUserPromptWithContext() {
+        properties.getConversation().setEnabled(false);
+
+        SemanticSearchResponse.SearchHit hit = SemanticSearchResponse.SearchHit.builder()
+                .rank(1)
+                .score(0.91d)
+                .chunkText("Revenue increased by 12% in Q4.")
+                .sourceDocument(SemanticSearchResponse.SourceDocument.builder().name("Q4.pdf").build())
+                .build();
+        when(semanticSearchService.search(any())).thenReturn(SemanticSearchResponse.builder()
+                .query("What changed in Q4?")
+                .searchTimeMs(12)
+                .results(List.of(hit))
+                .build());
+        when(rerankService.rerank(eq("What changed in Q4?"), anyList())).thenReturn(List.of(hit));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("ok", "ai/gpt-oss", 10));
+
+        ragService.prompt(RagPromptRequest.builder().question("What changed in Q4?").build());
+
+        ArgumentCaptor<Prompt> promptCaptor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel).call(promptCaptor.capture());
+        String userText = promptCaptor.getValue().getUserMessage().getText();
+        // The grounded document context and the original question are both present in the augmented prompt.
+        assertThat(userText).contains("Revenue increased by 12% in Q4.");
+        assertThat(userText).contains("Question: What changed in Q4?");
+        assertThat(userText).contains("DOCUMENT CONTEXT");
+    }
+
+    @Test
     void streamPrompt_withoutRetrievedContext_streamsFallbackWithoutLlmCall() {
         when(conversationMemoryService.getRecentTurns("session-stream")).thenReturn(List.of());
         when(semanticSearchService.search(any())).thenReturn(SemanticSearchResponse.builder()
@@ -288,6 +353,6 @@ class RagServiceConversationTest {
         assertThat(emitter).isNotNull();
         verify(conversationMemoryService).appendUserTurn("session-stream", "question");
         verify(conversationMemoryService).appendAssistantTurn(eq("session-stream"), contains("I couldn't find any relevant documents"));
-        verifyNoInteractions(chatModel);
+        verify(chatModel, never()).stream(any(Prompt.class));
     }
 }

@@ -26,6 +26,13 @@
             <artifactId>content-lake-spi</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Spring AI RAG module: DocumentRetriever, RetrievalAugmentationAdvisor, Query.
+             Version managed by spring-ai-bom (imported in the root pom). The Advisor API
+             (BaseAdvisor, CallAdvisor, StreamAdvisor) comes transitively via spring-ai-client-chat. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-rag</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
