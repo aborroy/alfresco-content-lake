@@ -10,18 +10,11 @@ import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
 import org.hyland.contentlake.rag.model.RagPromptResponse.ContextChunk;
 import org.hyland.contentlake.rag.model.RagPromptResponse.Source;
-import org.hyland.contentlake.rag.model.HybridSearchRequest;
-import org.hyland.contentlake.rag.model.HybridSearchResponse;
-import org.hyland.contentlake.rag.model.SemanticSearchRequest;
-import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.client.ChatClient.ChatClientRequestSpec;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
@@ -34,18 +27,20 @@ import java.util.regex.Pattern;
 /**
  * RAG (Retrieval-Augmented Generation) service.
  *
- * <p>Orchestrates the three-phase pipeline:
+ * <p>Both the synchronous and streaming paths drive a single Spring AI {@link ChatClient}
+ * whose default advisor ({@link ContentLakeRetrievalAdvisor}) performs the
+ * retrieve -&gt; rerank -&gt; augment steps as a composable unit. This service is now
+ * responsible only for:</p>
  * <ol>
- *   <li><strong>Retrieve</strong> — Permission-filtered hybrid or semantic search</li>
- *   <li><strong>Augment</strong> — Assembles a grounded prompt with retrieved chunks as context</li>
- *   <li><strong>Generate</strong> — Calls the LLM via Spring AI {@link ChatModel}</li>
+ *   <li>conversation state (session resolution, history, query reformulation),</li>
+ *   <li>invoking the {@link ChatClient} with the right advisor params, and</li>
+ *   <li>mapping the reranked hits recorded in a {@link RetrievalTrace} into the response.</li>
  * </ol>
  *
- * <p>Retrieval uses {@link HybridSearchService} when {@code rag.use-hybrid-search=true} (default),
- * falling back to {@link SemanticSearchService} for pure vector search.</p>
- *
- * <p>The context sent to the LLM is capped at {@code rag.max-context-length} characters
- * to stay within reasonable token limits for the model.</p>
+ * <p>Retrieval uses {@link HybridSearchService} when {@code rag.use-hybrid-search=true}
+ * (default) and {@link SemanticSearchService} otherwise; the choice lives in the retriever.
+ * The context sent to the LLM is capped at {@code rag.max-context-length} characters by the
+ * advisor.</p>
  */
 @Slf4j
 @Service
@@ -57,13 +52,10 @@ public class RagService {
     @Value("${spring.ai.openai.chat.options.model:}")
     private String configuredModel;
 
-    private final SemanticSearchService semanticSearchService;
-    private final HybridSearchService hybridSearchService;
-    private final ChatModel chatModel;
+    private final ChatClient ragChatClient;
     private final RagProperties ragProperties;
     private final ConversationMemoryService conversationMemoryService;
     private final QueryReformulationService queryReformulationService;
-    private final RerankService rerankService;
     private final SecurityContextService securityContextService;
 
     /**
@@ -75,21 +67,21 @@ public class RagService {
     public RagPromptResponse prompt(RagPromptRequest request) {
         long totalStart = System.currentTimeMillis();
 
-        PromptPreparation preparation = preparePromptGeneration(request);
-        GenerationResult generation = generateAnswer(preparation);
+        PromptContext promptContext = prepareContext(request);
+        GenerationResult generation = generateAnswer(promptContext);
         long totalTimeMs = System.currentTimeMillis() - totalStart;
 
-        persistConversationTurn(request, preparation, generation);
-        return buildPromptResponse(request, preparation, generation, totalTimeMs);
+        persistConversationTurn(request, promptContext, generation);
+        return buildPromptResponse(request, promptContext, generation, totalTimeMs);
     }
 
     /**
      * Streams LLM output token-by-token over SSE.
      *
-     * <p>This uses Spring AI {@link ChatClient#prompt()} streaming API and emits:</p>
+     * <p>Emits:</p>
      * <ul>
      *   <li>{@code event: token} for every non-empty token delta</li>
-     *   <li>{@code event: metadata} with final {@link RagPromptResponse}</li>
+     *   <li>{@code event: metadata} with the final {@link RagPromptResponse}</li>
      *   <li>{@code event: done} when the stream completes</li>
      *   <li>{@code event: error} on terminal failures</li>
      * </ul>
@@ -98,32 +90,12 @@ public class RagService {
         SseEmitter emitter = new SseEmitter(0L);
         final long totalStart = System.currentTimeMillis();
 
-        final PromptPreparation preparation;
+        final PromptContext promptContext;
         try {
-            preparation = preparePromptGeneration(request);
+            promptContext = prepareContext(request);
         } catch (Exception e) {
             log.error("RAG stream preparation failed: {}", e.getMessage(), e);
             sendErrorEvent(emitter, "Failed to prepare RAG stream: " + e.getMessage());
-            emitter.complete();
-            return emitter;
-        }
-
-        if (preparation.retrieval().rerankedHits().isEmpty()) {
-            String answer = "I couldn't find any relevant documents to answer your question. "
-                    + "Please try rephrasing your query or ensure the relevant documents have been ingested.";
-            Integer tokenCount = estimateTotalTokenCount(
-                    preparation.prompt().systemPrompt(),
-                    preparation.prompt().userPrompt(),
-                    answer
-            );
-            GenerationResult generation = new GenerationResult(answer, "none (no context available)", tokenCount, 0L);
-            sendTokenEvent(emitter, answer);
-            persistConversationTurn(request, preparation, generation);
-            RagPromptResponse response = buildPromptResponse(
-                    request, preparation, generation, System.currentTimeMillis() - totalStart
-            );
-            sendMetadataEvent(emitter, response);
-            sendDoneEvent(emitter);
             emitter.complete();
             return emitter;
         }
@@ -132,8 +104,7 @@ public class RagService {
         StreamAccumulator accumulator = new StreamAccumulator();
         long generationStart = System.currentTimeMillis();
 
-        Disposable subscription = ChatClient.create(chatModel)
-                .prompt(buildPrompt(preparation))
+        Disposable subscription = requestSpec(promptContext)
                 .stream()
                 .chatResponse()
                 .subscribe(chatResponse -> {
@@ -157,15 +128,16 @@ public class RagService {
                         () -> {
                             long generationTimeMs = System.currentTimeMillis() - generationStart;
                             String answer = answerBuilder.toString();
+                            boolean hasContext = !promptContext.trace().rerankedHits().isEmpty();
                             GenerationResult generation = new GenerationResult(
                                     answer,
-                                    resolveStreamModel(accumulator),
-                                    resolveStreamTokenCount(accumulator, preparation, answer),
+                                    hasContext ? resolveStreamModel(accumulator) : "none (no context available)",
+                                    resolveStreamTokenCount(accumulator, answer),
                                     generationTimeMs
                             );
-                            persistConversationTurn(request, preparation, generation);
+                            persistConversationTurn(request, promptContext, generation);
                             RagPromptResponse response = buildPromptResponse(
-                                    request, preparation, generation, System.currentTimeMillis() - totalStart
+                                    request, promptContext, generation, System.currentTimeMillis() - totalStart
                             );
                             sendMetadataEvent(emitter, response);
                             sendDoneEvent(emitter);
@@ -181,16 +153,102 @@ public class RagService {
         return emitter;
     }
 
+    // ---------------------------------------------------------------
+    // ChatClient invocation
+    // ---------------------------------------------------------------
+
     /**
-     * Shared preparation phase for both synchronous and streaming generation.
-     *
-     * <p>Computes conversation context, retrieval query, reranked hits, and rendered prompts.</p>
+     * Builds the {@link ChatClientRequestSpec} shared by the sync and stream paths.
+     * The system + user messages carry the prompt; advisor params carry the reformulated
+     * retrieval query, the conversation-history block, and the {@link RetrievalTrace} holder
+     * that the advisor fills during retrieval.
      */
-    private PromptPreparation preparePromptGeneration(RagPromptRequest request) {
+    private ChatClientRequestSpec requestSpec(PromptContext promptContext) {
+        return ragChatClient.prompt()
+                .system(promptContext.systemPrompt())
+                .user(promptContext.question())
+                .advisors(advisor -> advisor
+                        .param(ContentLakeRetrievalAdvisor.PARAM_RETRIEVAL_QUERY, promptContext.retrievalQuery())
+                        .param(ContentLakeRetrievalAdvisor.PARAM_HISTORY_BLOCK, promptContext.historyBlock())
+                        .param(RetrievalTrace.PARAM_KEY, promptContext.trace())
+                        .param(HxprDocumentRetriever.CTX_TOP_K, promptContext.topK())
+                        .param(HxprDocumentRetriever.CTX_MIN_SCORE, promptContext.minScore())
+                        .params(promptContext.optionalRetrievalParams()));
+    }
+
+    private GenerationResult generateAnswer(PromptContext promptContext) {
+        long generationStart = System.currentTimeMillis();
+
+        try {
+            ChatResponse chatResponse = requestSpec(promptContext).call().chatResponse();
+            long generationTimeMs = System.currentTimeMillis() - generationStart;
+
+            boolean hasContext = !promptContext.trace().rerankedHits().isEmpty();
+            String answer = chatResponse != null && chatResponse.getResult() != null
+                    ? chatResponse.getResult().getOutput().getText()
+                    : "";
+            String modelName = hasContext ? resolveModelName(chatResponse) : "none (no context available)";
+            Integer tokenCount = hasContext ? resolveTokenCount(chatResponse) : null;
+
+            log.info("RAG generate phase complete: model={}, answer length={} chars",
+                    modelName, answer != null ? answer.length() : 0);
+
+            return new GenerationResult(answer, modelName, tokenCount, generationTimeMs);
+        } catch (Exception e) {
+            log.error("LLM generation failed: {}", e.getMessage(), e);
+            long generationTimeMs = System.currentTimeMillis() - generationStart;
+            return new GenerationResult(
+                    "An error occurred while generating the answer: " + e.getMessage(),
+                    "error",
+                    null,
+                    generationTimeMs
+            );
+        }
+    }
+
+    private String resolveModelName(ChatResponse chatResponse) {
+        if (configuredModel != null && !configuredModel.isBlank()) {
+            return configuredModel;
+        }
+        if (chatResponse != null && chatResponse.getMetadata() != null && chatResponse.getMetadata().getModel() != null) {
+            return chatResponse.getMetadata().getModel();
+        }
+        return "unknown";
+    }
+
+    private Integer resolveTokenCount(ChatResponse chatResponse) {
+        if (chatResponse != null && chatResponse.getMetadata() != null && chatResponse.getMetadata().getUsage() != null) {
+            return chatResponse.getMetadata().getUsage().getTotalTokens();
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------
+    // Preparation (conversation state + retrieval query + prompt)
+    // ---------------------------------------------------------------
+
+    private PromptContext prepareContext(RagPromptRequest request) {
         ConversationState conversation = prepareConversationState(request);
-        RetrievalState retrieval = retrieveContext(request, conversation.history());
-        PromptState prompt = preparePromptState(request, conversation.history(), retrieval);
-        return new PromptPreparation(conversation, retrieval, prompt);
+        String retrievalQuery = resolveRetrievalQuery(request.getQuestion(), conversation.history());
+        String historyBlock = assembleConversationHistory(conversation.history());
+        String systemPrompt = resolveSystemPrompt(request);
+
+        int topK = request.getTopK() > 0 ? request.getTopK() : ragProperties.getDefaultTopK();
+        double minScore = request.getMinScore() > 0 ? request.getMinScore() : ragProperties.getDefaultMinScore();
+
+        return new PromptContext(
+                conversation,
+                request.getQuestion(),
+                retrievalQuery,
+                historyBlock,
+                systemPrompt,
+                topK,
+                minScore,
+                request.getFilter(),
+                request.getSourceType(),
+                request.getEmbeddingType(),
+                new RetrievalTrace()
+        );
     }
 
     private ConversationState prepareConversationState(RagPromptRequest request) {
@@ -208,160 +266,38 @@ public class RagService {
         return new ConversationState(true, sessionId, history != null ? history : List.of());
     }
 
-    private RetrievalState retrieveContext(RagPromptRequest request, List<ConversationTurn> history) {
-        String retrievalQuery = resolveRetrievalQuery(request.getQuestion(), history);
-        int topK = request.getTopK() > 0 ? request.getTopK() : ragProperties.getDefaultTopK();
-        double minScore = request.getMinScore() > 0 ? request.getMinScore() : ragProperties.getDefaultMinScore();
-        boolean useHybrid = ragProperties.isUseHybridSearch();
-
-        log.info("RAG retrieve phase: query=\"{}\", topK={}, minScore={}, hybrid={}",
-                retrievalQuery, topK, minScore, useHybrid);
-
-        List<SearchHit> hits;
-        long searchTimeMs;
-
-        if (useHybrid) {
-            HybridSearchRequest hybridRequest = HybridSearchRequest.builder()
-                    .query(retrievalQuery)
-                    .maxResults(topK)
-                    .filter(request.getFilter())
-                    .sourceType(request.getSourceType())
-                    .embeddingType(request.getEmbeddingType())
-                    .build();
-            HybridSearchResponse hybridResponse = hybridSearchService.search(hybridRequest);
-            searchTimeMs = hybridResponse.getSearchTimeMs();
-            hits = mapHybridHits(hybridResponse.getResults());
-        } else {
-            SemanticSearchRequest searchRequest = SemanticSearchRequest.builder()
-                    .query(retrievalQuery)
-                    .topK(topK)
-                    .minScore(minScore)
-                    .filter(request.getFilter())
-                    .sourceType(request.getSourceType())
-                    .embeddingType(request.getEmbeddingType())
-                    .build();
-            SemanticSearchResponse searchResponse = semanticSearchService.search(searchRequest);
-            searchTimeMs = searchResponse.getSearchTimeMs();
-            hits = searchResponse.getResults() != null ? searchResponse.getResults() : List.of();
-        }
-
-        List<SearchHit> reranked = rerankService.rerank(retrievalQuery, hits);
-        List<SearchHit> rerankedHits = reranked != null ? reranked : List.of();
-
-        log.info("RAG retrieve phase complete: {} chunks retrieved in {}ms (reranked={})",
-                hits.size(), searchTimeMs, rerankedHits.size());
-
-        return new RetrievalState(retrievalQuery, searchTimeMs, rerankedHits);
-    }
-
-    private List<SearchHit> mapHybridHits(List<HybridSearchResponse.HybridHit> hits) {
-        if (hits == null) {
-            return List.of();
-        }
-        return hits.stream()
-                .map(h -> SearchHit.builder()
-                        .rank(h.getRank())
-                        .score(h.getScore())
-                        .chunkText(h.getChunkText())
-                        .sourceDocument(h.getSourceDocument())
-                        .chunkMetadata(h.getChunkMetadata())
-                        .build())
-                .toList();
-    }
-
-    private PromptState preparePromptState(RagPromptRequest request,
-                                           List<ConversationTurn> history,
-                                           RetrievalState retrieval) {
-        String contextBlock = assembleContext(retrieval.rerankedHits());
-        String historyBlock = assembleConversationHistory(history);
-        String systemPrompt = resolveSystemPrompt(request);
-        String userPrompt = buildUserPrompt(request.getQuestion(), historyBlock, contextBlock);
-
-        log.debug("RAG augment phase: context length={} chars, {} sources, history turns={}",
-                contextBlock.length(), retrieval.rerankedHits().size(), history.size());
-
-        return new PromptState(systemPrompt, userPrompt);
-    }
-
-    private Prompt buildPrompt(PromptPreparation preparation) {
-        return new Prompt(List.of(
-                new SystemMessage(preparation.prompt().systemPrompt()),
-                new UserMessage(preparation.prompt().userPrompt())
-        ));
-    }
-
-    private GenerationResult generateAnswer(PromptPreparation preparation) {
-        long generationStart = System.currentTimeMillis();
-
-        if (preparation.retrieval().rerankedHits().isEmpty()) {
-            long generationTimeMs = System.currentTimeMillis() - generationStart;
-            return new GenerationResult(
-                    "I couldn't find any relevant documents to answer your question. "
-                            + "Please try rephrasing your query or ensure the relevant documents have been ingested.",
-                    "none (no context available)",
-                    null,
-                    generationTimeMs
-            );
-        }
-
-        try {
-            ChatResponse chatResponse = chatModel.call(buildPrompt(preparation));
-
-            String answer = chatResponse.getResult().getOutput().getText();
-            String modelName = configuredModel != null && !configuredModel.isBlank()
-                    ? configuredModel
-                    : (chatResponse.getMetadata() != null && chatResponse.getMetadata().getModel() != null
-                            ? chatResponse.getMetadata().getModel()
-                            : "unknown");
-            Integer tokenCount = chatResponse.getMetadata() != null && chatResponse.getMetadata().getUsage() != null
-                    ? chatResponse.getMetadata().getUsage().getTotalTokens()
-                    : null;
-
-            log.info("RAG generate phase complete: model={}, answer length={} chars", modelName, answer.length());
-
-            long generationTimeMs = System.currentTimeMillis() - generationStart;
-            return new GenerationResult(answer, modelName, tokenCount, generationTimeMs);
-        } catch (Exception e) {
-            log.error("LLM generation failed: {}", e.getMessage(), e);
-            long generationTimeMs = System.currentTimeMillis() - generationStart;
-            return new GenerationResult(
-                    "An error occurred while generating the answer: " + e.getMessage(),
-                    "error",
-                    null,
-                    generationTimeMs
-            );
-        }
-    }
-
     private void persistConversationTurn(RagPromptRequest request,
-                                         PromptPreparation preparation,
+                                         PromptContext promptContext,
                                          GenerationResult generation) {
-        if (!preparation.conversation().enabled()) {
+        if (!promptContext.conversation().enabled()) {
             return;
         }
-        conversationMemoryService.appendUserTurn(preparation.conversation().sessionId(), request.getQuestion());
-        conversationMemoryService.appendAssistantTurn(preparation.conversation().sessionId(), generation.answer());
+        conversationMemoryService.appendUserTurn(promptContext.conversation().sessionId(), request.getQuestion());
+        conversationMemoryService.appendAssistantTurn(promptContext.conversation().sessionId(), generation.answer());
     }
 
     private RagPromptResponse buildPromptResponse(RagPromptRequest request,
-                                                  PromptPreparation preparation,
+                                                  PromptContext promptContext,
                                                   GenerationResult generation,
                                                   long totalTimeMs) {
-        List<SearchHit> rerankedHits = preparation.retrieval().rerankedHits();
+        List<SearchHit> rerankedHits = promptContext.trace().rerankedHits();
         List<Source> sources = mapSources(rerankedHits);
         List<ContextChunk> contextChunks = request.isIncludeContext() ? mapContextChunks(rerankedHits) : null;
+        String retrievalQuery = promptContext.trace().retrievalQuery() != null
+                ? promptContext.trace().retrievalQuery()
+                : promptContext.retrievalQuery();
 
         return RagPromptResponse.builder()
                 .answer(generation.answer())
                 .question(request.getQuestion())
-                .sessionId(preparation.conversation().sessionId())
-                .retrievalQuery(preparation.retrieval().retrievalQuery())
-                .historyTurnsUsed(preparation.conversation().enabled()
-                        ? preparation.conversation().history().size()
+                .sessionId(promptContext.conversation().sessionId())
+                .retrievalQuery(retrievalQuery)
+                .historyTurnsUsed(promptContext.conversation().enabled()
+                        ? promptContext.conversation().history().size()
                         : null)
                 .model(generation.modelName())
                 .tokenCount(generation.tokenCount())
-                .searchTimeMs(preparation.retrieval().searchTimeMs())
+                .searchTimeMs(promptContext.trace().searchTimeMs())
                 .generationTimeMs(generation.generationTimeMs())
                 .totalTimeMs(totalTimeMs)
                 .sourcesUsed(sources.size())
@@ -399,6 +335,10 @@ public class RagService {
                         .build())
                 .toList();
     }
+
+    // ---------------------------------------------------------------
+    // SSE helpers
+    // ---------------------------------------------------------------
 
     private void sendTokenEvent(SseEmitter emitter, String token) {
         try {
@@ -487,21 +427,11 @@ public class RagService {
         return "unknown";
     }
 
-    private Integer resolveStreamTokenCount(StreamAccumulator accumulator,
-                                            PromptPreparation preparation,
-                                            String answer) {
+    private Integer resolveStreamTokenCount(StreamAccumulator accumulator, String answer) {
         if (accumulator.tokenCount != null && accumulator.tokenCount > 0) {
             return accumulator.tokenCount;
         }
-        return estimateTotalTokenCount(preparation.prompt().systemPrompt(), preparation.prompt().userPrompt(), answer);
-    }
-
-    private int estimateTotalTokenCount(String... parts) {
-        int total = 0;
-        for (String part : parts) {
-            total += estimateTokenCount(part);
-        }
-        return total;
+        return estimateTokenCount(answer);
     }
 
     private int estimateTokenCount(String text) {
@@ -517,49 +447,7 @@ public class RagService {
     }
 
     // ---------------------------------------------------------------
-    // Context assembly
-    // ---------------------------------------------------------------
-
-    /**
-     * Assembles chunk texts into a single context string, respecting the max length.
-     * Each chunk is wrapped with source attribution for the LLM.
-     */
-    private String assembleContext(List<SearchHit> hits) {
-        if (hits.isEmpty()) {
-            return "";
-        }
-
-        int maxLength = ragProperties.getMaxContextLength();
-        StringBuilder context = new StringBuilder();
-        int chunkIndex = 1;
-
-        for (SearchHit hit : hits) {
-            String sourceName = hit.getSourceDocument() != null && hit.getSourceDocument().getName() != null
-                    ? hit.getSourceDocument().getName()
-                    : "Unknown document";
-
-            String chunkEntry = String.format(
-                    "[Source %d: %s (score: %.2f)]\n%s\n\n",
-                    chunkIndex++, sourceName, hit.getScore(), hit.getChunkText()
-            );
-
-            if (context.length() + chunkEntry.length() > maxLength) {
-                int remaining = maxLength - context.length();
-                if (remaining > 100) {
-                    context.append(chunkEntry, 0, remaining);
-                    context.append("\n... (context truncated)");
-                }
-                break;
-            }
-
-            context.append(chunkEntry);
-        }
-
-        return context.toString().trim();
-    }
-
-    // ---------------------------------------------------------------
-    // Prompt building
+    // Prompt building / conversation
     // ---------------------------------------------------------------
 
     private String resolveSystemPrompt(RagPromptRequest request) {
@@ -567,25 +455,6 @@ public class RagService {
             return request.getSystemPrompt();
         }
         return ragProperties.getDefaultSystemPrompt();
-    }
-
-    private String buildUserPrompt(String question, String history, String context) {
-        String conversationSection = history == null || history.isBlank() ? "(none)" : history;
-        return String.format("""
-                Based on the conversation history and document context, answer the current question.
-
-                --- CONVERSATION HISTORY ---
-                %s
-                --- END CONVERSATION HISTORY ---
-
-                --- DOCUMENT CONTEXT ---
-                %s
-                --- END CONTEXT ---
-
-                Question: %s
-
-                Answer:""",
-                conversationSection, context, question);
     }
 
     private String assembleConversationHistory(List<ConversationTurn> turns) {
@@ -629,19 +498,38 @@ public class RagService {
     }
 
     // ---------------------------------------------------------------
-    // Pipeline state (shared by sync + stream flows)
+    // Pipeline state
     // ---------------------------------------------------------------
 
     private record ConversationState(boolean enabled, String sessionId, List<ConversationTurn> history) {
     }
 
-    private record RetrievalState(String retrievalQuery, long searchTimeMs, List<SearchHit> rerankedHits) {
-    }
+    private record PromptContext(ConversationState conversation,
+                                 String question,
+                                 String retrievalQuery,
+                                 String historyBlock,
+                                 String systemPrompt,
+                                 int topK,
+                                 double minScore,
+                                 String filter,
+                                 String sourceType,
+                                 String embeddingType,
+                                 RetrievalTrace trace) {
 
-    private record PromptState(String systemPrompt, String userPrompt) {
-    }
-
-    private record PromptPreparation(ConversationState conversation, RetrievalState retrieval, PromptState prompt) {
+        /** Non-null optional retrieval params for the advisor context (filter/sourceType/embeddingType). */
+        Map<String, Object> optionalRetrievalParams() {
+            java.util.Map<String, Object> params = new java.util.HashMap<>();
+            if (filter != null) {
+                params.put(HxprDocumentRetriever.CTX_FILTER, filter);
+            }
+            if (sourceType != null) {
+                params.put(HxprDocumentRetriever.CTX_SOURCE_TYPE, sourceType);
+            }
+            if (embeddingType != null) {
+                params.put(HxprDocumentRetriever.CTX_EMBEDDING_TYPE, embeddingType);
+            }
+            return params;
+        }
     }
 
     private record GenerationResult(String answer, String modelName, Integer tokenCount, long generationTimeMs) {
