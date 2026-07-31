@@ -1,5 +1,6 @@
 package org.hyland.contentlake.rag.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -63,6 +64,13 @@ public class SemanticSearchResponse {
 
         /** Chunk positioning and strategy metadata. */
         private ChunkMetadata chunkMetadata;
+
+        /**
+         * Per-chunk embedding vector, carried through retrieval for MMR diversity selection.
+         * Never serialized to API responses.
+         */
+        @JsonIgnore
+        private List<Double> vector;
     }
 
     @Data

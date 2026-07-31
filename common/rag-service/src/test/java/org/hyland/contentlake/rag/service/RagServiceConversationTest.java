@@ -57,6 +57,7 @@ class RagServiceConversationTest {
     @Mock ConversationMemoryService conversationMemoryService;
     @Mock QueryReformulationService queryReformulationService;
     @Mock RerankService rerankService;
+    @Mock DiversitySelector diversitySelector;
     @Mock SecurityContextService securityContextService;
 
     private RagProperties properties;
@@ -86,7 +87,7 @@ class RagServiceConversationTest {
         HxprDocumentRetriever retriever =
                 new HxprDocumentRetriever(semanticSearchService, hybridSearchService, properties);
         ContentLakeRetrievalAdvisor advisor =
-                new ContentLakeRetrievalAdvisor(retriever, rerankService, properties);
+                new ContentLakeRetrievalAdvisor(retriever, diversitySelector, rerankService, properties);
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();

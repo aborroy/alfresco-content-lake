@@ -61,6 +61,9 @@ public class RagProperties {
     /** Cross-encoder reranker settings (disabled when url is blank). */
     private RerankerProperties reranker = new RerankerProperties();
 
+    /** Max Marginal Relevance diversity-selection settings (disabled by default). */
+    private MmrProperties mmr = new MmrProperties();
+
     /** Conversation memory settings. */
     private ConversationProperties conversation = new ConversationProperties();
 
@@ -75,6 +78,29 @@ public class RagProperties {
 
         /** Number of top results to keep after reranking. */
         private int topN = 8;
+
+        /**
+         * Enables LLM-based reranking when no TEI {@code url} is set. Escape hatch: when false
+         * (default) and no url is set, reranking is a no-op. Ignored when a TEI url is present
+         * (the TEI reranker always takes precedence).
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
+    public static class MmrProperties {
+
+        /** Enables MMR diversity selection between retrieval and reranking. */
+        private boolean enabled = false;
+
+        /**
+         * Trade-off between relevance and diversity. 1.0 = pure relevance (original order),
+         * 0.0 = pure diversity.
+         */
+        private double lambda = 0.5;
+
+        /** Size of the over-retrieved candidate pool MMR selects from. */
+        private int poolSize = 30;
     }
 
     @Data

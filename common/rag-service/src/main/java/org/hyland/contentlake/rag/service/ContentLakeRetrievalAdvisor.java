@@ -63,13 +63,16 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     private static final int ORDER = 0;
 
     private final DocumentRetriever documentRetriever;
+    private final DiversitySelector diversitySelector;
     private final RerankService rerankService;
     private final RagProperties ragProperties;
 
     public ContentLakeRetrievalAdvisor(DocumentRetriever documentRetriever,
+                                       DiversitySelector diversitySelector,
                                        RerankService rerankService,
                                        RagProperties ragProperties) {
         this.documentRetriever = documentRetriever;
+        this.diversitySelector = diversitySelector;
         this.rerankService = rerankService;
         this.ragProperties = ragProperties;
     }
@@ -135,11 +138,19 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
             }
         }
 
-        List<SearchHit> reranked = rerankService.rerank(retrievalQuery, hits);
+        // MMR diversity selection: trim the over-retrieved pool down to topK before reranking,
+        // so relevance (rerank) and diversity (MMR) compose instead of competing over final order.
+        List<SearchHit> diversified = hits;
+        if (ragProperties.getMmr().isEnabled()) {
+            int topK = intValue(context.get(HxprDocumentRetriever.CTX_TOP_K), ragProperties.getDefaultTopK());
+            diversified = diversitySelector.select(hits, topK);
+        }
+
+        List<SearchHit> reranked = rerankService.rerank(retrievalQuery, diversified);
         List<SearchHit> rerankedHits = reranked != null ? reranked : List.of();
 
-        log.info("Retrieve phase complete: {} chunks retrieved in {}ms (reranked={})",
-                hits.size(), searchTimeMs, rerankedHits.size());
+        log.info("Retrieve phase complete: {} chunks retrieved in {}ms (diversified={}, reranked={})",
+                hits.size(), searchTimeMs, diversified.size(), rerankedHits.size());
 
         trace(context).ifPresent(t -> t.record(retrievalQuery, searchTimeMs, rerankedHits));
         return new Retrieval(rerankedHits);
@@ -245,6 +256,10 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
             return s;
         }
         return fallback;
+    }
+
+    private static int intValue(Object value, int fallback) {
+        return value instanceof Number number ? number.intValue() : fallback;
     }
 
     private record Retrieval(List<SearchHit> hits) {

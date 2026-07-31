@@ -1,5 +1,6 @@
 package org.hyland.contentlake.rag.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -81,5 +82,12 @@ public class HybridSearchResponse {
 
         /** Rank in the keyword search results (null if not present in keyword results). */
         private Integer keywordRank;
+
+        /**
+         * Per-chunk embedding vector, carried through retrieval for MMR diversity selection.
+         * Present only for hits surfaced via the vector leg. Never serialized to API responses.
+         */
+        @JsonIgnore
+        private List<Double> vector;
     }
 }

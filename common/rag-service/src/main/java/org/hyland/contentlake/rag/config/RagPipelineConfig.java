@@ -1,6 +1,7 @@
 package org.hyland.contentlake.rag.config;
 
 import org.hyland.contentlake.rag.service.ContentLakeRetrievalAdvisor;
+import org.hyland.contentlake.rag.service.DiversitySelector;
 import org.hyland.contentlake.rag.service.HxprDocumentRetriever;
 import org.hyland.contentlake.rag.service.HybridSearchService;
 import org.hyland.contentlake.rag.service.RerankService;
@@ -32,9 +33,10 @@ public class RagPipelineConfig {
 
     @Bean
     public ContentLakeRetrievalAdvisor contentLakeRetrievalAdvisor(DocumentRetriever hxprDocumentRetriever,
+                                                                   DiversitySelector diversitySelector,
                                                                    RerankService rerankService,
                                                                    RagProperties ragProperties) {
-        return new ContentLakeRetrievalAdvisor(hxprDocumentRetriever, rerankService, ragProperties);
+        return new ContentLakeRetrievalAdvisor(hxprDocumentRetriever, diversitySelector, rerankService, ragProperties);
     }
 
     /**

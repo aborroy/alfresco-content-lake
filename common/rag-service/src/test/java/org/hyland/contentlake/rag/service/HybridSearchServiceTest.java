@@ -66,11 +66,11 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseRRF_bothLegsHaveResults_combinesScores() {
-            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "vector text 1", "model", 0.9, 1, null);
-            var v2 = new ScoredChunk("doc2::e2", "doc2", "e2", "vector text 2", "model", 0.7, 2, null);
+            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "vector text 1", "model", 0.9, 1, null, null, null);
+            var v2 = new ScoredChunk("doc2::e2", "doc2", "e2", "vector text 2", "model", 0.7, 2, null, null, null);
 
-            var k1 = new ScoredChunk("doc2::e2", "doc2", "e2", "vector text 2", "model", 0.8, 1, null);
-            var k2 = new ScoredChunk("doc3::e3", "doc3", "e3", "keyword text", "model", 0.6, 2, null);
+            var k1 = new ScoredChunk("doc2::e2", "doc2", "e2", "vector text 2", "model", 0.8, 1, null, null, null);
+            var k2 = new ScoredChunk("doc3::e3", "doc3", "e3", "keyword text", "model", 0.6, 2, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseRRF(List.of(v1, v2), List.of(k1, k2), 60);
 
@@ -90,7 +90,7 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseRRF_emptyVectorLeg_returnsKeywordOnly() {
-            var k1 = new ScoredChunk("doc1::e1", "doc1", "e1", "keyword text", "model", 0.9, 1, null);
+            var k1 = new ScoredChunk("doc1::e1", "doc1", "e1", "keyword text", "model", 0.9, 1, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseRRF(List.of(), List.of(k1), 60);
 
@@ -101,7 +101,7 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseRRF_emptyKeywordLeg_returnsVectorOnly() {
-            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "vector text", "model", 0.9, 1, null);
+            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "vector text", "model", 0.9, 1, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseRRF(List.of(v1), List.of(), 60);
 
@@ -118,8 +118,8 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseRRF_higherKSmooths_rankDifferences() {
-            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null);
-            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.1, 10, null);
+            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null, null, null);
+            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.1, 10, null, null, null);
 
             // With k=1 (low smoothing), rank 1 gets 1/2 = 0.5, rank 10 gets 1/11 = 0.09
             List<FusedResult> lowK = HybridSearchService.fuseRRF(List.of(v1, v2), List.of(), 1);
@@ -142,8 +142,8 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseWeighted_appliesWeightsCorrectly() {
-            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "text", "model", 0.8, 1, null);
-            var k1 = new ScoredChunk("doc1::e1", "doc1", "e1", "text", "model", 1.0, 1, null);
+            var v1 = new ScoredChunk("doc1::e1", "doc1", "e1", "text", "model", 0.8, 1, null, null, null);
+            var k1 = new ScoredChunk("doc1::e1", "doc1", "e1", "text", "model", 1.0, 1, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseWeighted(
                     List.of(v1), List.of(k1), 0.7, 0.3);
@@ -156,8 +156,8 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseWeighted_normalisesScores() {
-            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 1.0, 1, null);
-            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.5, 2, null);
+            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 1.0, 1, null, null, null);
+            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.5, 2, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseWeighted(
                     List.of(v1, v2), List.of(), 0.7, 0.3);
@@ -170,7 +170,7 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseWeighted_vectorOnlyResult_noKeywordContribution() {
-            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null);
+            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseWeighted(
                     List.of(v1), List.of(), 0.6, 0.4);
@@ -183,7 +183,7 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseWeighted_keywordOnlyResult_noVectorContribution() {
-            var k1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.8, 1, null);
+            var k1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.8, 1, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseWeighted(
                     List.of(), List.of(k1), 0.6, 0.4);
@@ -196,8 +196,8 @@ class HybridSearchServiceTest {
 
         @Test
         void fuseWeighted_minMaxNormalisation_changesDistribution() {
-            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null);
-            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.3, 2, null);
+            var v1 = new ScoredChunk("a", "d1", "e1", "t1", "m", 0.9, 1, null, null, null);
+            var v2 = new ScoredChunk("b", "d2", "e2", "t2", "m", 0.3, 2, null, null, null);
 
             List<FusedResult> results = HybridSearchService.fuseWeighted(
                     List.of(v1, v2), List.of(), 1.0, 0.0, "minmax");

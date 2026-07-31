@@ -217,6 +217,12 @@ public class HybridSearchService {
         List<ScoredChunk> chunks = new ArrayList<>();
         int rank = 1;
         for (Embedding emb : result.getEmbeddings()) {
+            Integer page = null;
+            Integer paragraph = null;
+            if (emb.getSysembedLocation() != null && emb.getSysembedLocation().getText() != null) {
+                page = emb.getSysembedLocation().getText().getPage();
+                paragraph = emb.getSysembedLocation().getText().getParagraph();
+            }
             chunks.add(new ScoredChunk(
                     chunkKey(emb.getSysembedDocId(), emb.getSysembedId()),
                     emb.getSysembedDocId(),
@@ -225,7 +231,9 @@ public class HybridSearchService {
                     emb.getSysembedType(),
                     emb.getSysembedScore() != null ? emb.getSysembedScore() : 0.0,
                     rank++,
-                    emb.getSysembedLocation()
+                    page,
+                    paragraph,
+                    emb.getSysembedVector()
             ));
         }
         return chunks;
@@ -289,6 +297,13 @@ public class HybridSearchService {
                     continue;
                 }
 
+                Integer page = null;
+                Integer paragraph = null;
+                if (emb.getLocation() != null && emb.getLocation().getText() != null) {
+                    page = emb.getLocation().getText().getPage();
+                    paragraph = emb.getLocation().getText().getParagraph();
+                }
+
                 chunks.add(new ScoredChunk(
                         chunkKey(doc.getSysId(), emb.getChunkId()),
                         doc.getSysId(),
@@ -297,7 +312,9 @@ public class HybridSearchService {
                         emb.getType(),
                         docPositionScore * chunkTf,
                         0,  // rank assigned after sort
-                        null
+                        page,
+                        paragraph,
+                        null  // vector not available on the keyword leg
                 ));
             }
         }
@@ -306,7 +323,7 @@ public class HybridSearchService {
         List<ScoredChunk> ranked = new ArrayList<>();
         int rank = 1;
         for (ScoredChunk c : chunks) {
-            ranked.add(new ScoredChunk(c.key, c.docId, c.embeddingId, c.text, c.embeddingType, c.score, rank++, c.location));
+            ranked.add(new ScoredChunk(c.key, c.docId, c.embeddingId, c.text, c.embeddingType, c.score, rank++, c.page, c.paragraph, c.vector));
         }
         return ranked;
     }
@@ -488,12 +505,9 @@ public class HybridSearchService {
             ChunkMetadata.ChunkMetadataBuilder chunkMeta = ChunkMetadata.builder()
                     .embeddingId(chunk.embeddingId)
                     .embeddingType(chunk.embeddingType)
-                    .chunkLength(chunk.text != null ? chunk.text.length() : 0);
-
-            if (chunk.location != null && chunk.location.getText() != null) {
-                chunkMeta.page(chunk.location.getText().getPage());
-                chunkMeta.paragraph(chunk.location.getText().getParagraph());
-            }
+                    .chunkLength(chunk.text != null ? chunk.text.length() : 0)
+                    .page(chunk.page)
+                    .paragraph(chunk.paragraph);
 
             SourceDocument sourceDoc = (chunk.docId != null && docCache.containsKey(chunk.docId))
                     ? docCache.get(chunk.docId)
@@ -505,6 +519,7 @@ public class HybridSearchService {
                     .chunkText(chunk.text)
                     .sourceDocument(sourceDoc)
                     .chunkMetadata(chunkMeta.build())
+                    .vector(chunk.vector)
                     .vectorScore(r.vectorScore)
                     .keywordScore(r.keywordScore)
                     .vectorRank(r.vectorRank)
@@ -1081,7 +1096,9 @@ public class HybridSearchService {
             String embeddingType,
             double score,
             int rank,
-            org.hyland.contentlake.hxpr.api.model.LocationModel location
+            Integer page,
+            Integer paragraph,
+            List<Double> vector
     ) {}
 
     static class FusedResult {

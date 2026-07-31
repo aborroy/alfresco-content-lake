@@ -491,6 +491,7 @@ public class SemanticSearchService {
                     .chunkText(chunkText)
                     .sourceDocument(sourceDoc)
                     .chunkMetadata(chunkMeta.build())
+                    .vector(embedding.getSysembedVector())
                     .build());
         }
 

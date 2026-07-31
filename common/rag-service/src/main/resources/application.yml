@@ -91,6 +91,11 @@ rag:
   reranker:
     url: ${RAG_RERANKER_URL:}
     top-n: ${RAG_RERANKER_TOP_N:8}
+    enabled: ${RAG_RERANKER_ENABLED:false}
+  mmr:
+    enabled: ${RAG_MMR_ENABLED:false}
+    lambda: ${RAG_MMR_LAMBDA:0.5}
+    pool-size: ${RAG_MMR_POOL_SIZE:30}
   conversation:
     enabled: ${RAG_CONVERSATION_ENABLED:true}
     max-history-turns: ${RAG_CONVERSATION_MAX_HISTORY_TURNS:10}

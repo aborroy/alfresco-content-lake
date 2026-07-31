@@ -1,5 +1,7 @@
 package org.hyland.contentlake.client;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -78,6 +80,8 @@ public class ParquetEmbeddingWriter {
 
     private static final Schema SCHEMA = new Schema.Parser().parse(EMBEDDING_SCHEMA);
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     /**
      * Writes embeddings to a Parquet file and returns the file content as byte array.
      *
@@ -136,13 +140,8 @@ public class ParquetEmbeddingWriter {
                     // Optional: blobref
                     record.put("blobref", null);
 
-                    // Optional: location (convert to JSON string if present)
-                    if (embedding.getLocation() != null) {
-                        // TODO: Serialize location to JSON string
-                        record.put("location", null);
-                    } else {
-                        record.put("location", null);
-                    }
+                    // Optional: location (serialized to a JSON string when present)
+                    record.put("location", serializeLocationSafely(embedding.getLocation(), id));
 
                     writer.write(record);
                     index++;
@@ -180,5 +179,32 @@ public class ParquetEmbeddingWriter {
                 }
             }
         }
+    }
+
+    /**
+     * Serializes location metadata for a single record, degrading to {@code null} (and logging a
+     * warning) on failure so that one malformed location cannot abort an entire Parquet batch.
+     */
+    private static String serializeLocationSafely(HxprEmbedding.EmbeddingLocation location, String id) {
+        try {
+            return serializeLocation(location);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize location for embedding {}; writing null: {}", id, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Serializes {@link HxprEmbedding.EmbeddingLocation} to the JSON string stored in the Parquet
+     * {@code location} column. The location model's Jackson annotations produce the wire format
+     * expected by HXPR (keys {@code text}, {@code position}, {@code timestamp}, {@code spreadsheet}).
+     *
+     * @return the JSON string, or {@code null} when {@code location} is {@code null}
+     */
+    static String serializeLocation(HxprEmbedding.EmbeddingLocation location) throws JsonProcessingException {
+        if (location == null) {
+            return null;
+        }
+        return OBJECT_MAPPER.writeValueAsString(location);
     }
 }

@@ -64,14 +64,19 @@ public class HxprDocumentRetriever implements DocumentRetriever {
         String embeddingType = stringValue(ctx.get(CTX_EMBEDDING_TYPE));
         boolean useHybrid = ragProperties.isUseHybridSearch();
 
-        log.info("Retrieve phase: query=\"{}\", topK={}, minScore={}, hybrid={}",
-                query.text(), topK, minScore, useHybrid);
+        // When MMR is enabled, over-retrieve a larger candidate pool; the advisor's diversity
+        // selector trims it back down to topK before reranking. Otherwise retrieve exactly topK.
+        boolean mmrEnabled = ragProperties.getMmr().isEnabled();
+        int retrievalSize = mmrEnabled ? Math.max(ragProperties.getMmr().getPoolSize(), topK) : topK;
+
+        log.info("Retrieve phase: query=\"{}\", topK={}, retrievalSize={}, minScore={}, hybrid={}, mmr={}",
+                query.text(), topK, retrievalSize, minScore, useHybrid, mmrEnabled);
 
         List<SearchHit> hits;
         if (useHybrid) {
             HybridSearchRequest hybridRequest = HybridSearchRequest.builder()
                     .query(query.text())
-                    .maxResults(topK)
+                    .maxResults(retrievalSize)
                     .filter(filter)
                     .sourceType(sourceType)
                     .embeddingType(embeddingType)
@@ -81,7 +86,7 @@ public class HxprDocumentRetriever implements DocumentRetriever {
         } else {
             SemanticSearchRequest searchRequest = SemanticSearchRequest.builder()
                     .query(query.text())
-                    .topK(topK)
+                    .topK(retrievalSize)
                     .minScore(minScore)
                     .filter(filter)
                     .sourceType(sourceType)
@@ -121,6 +126,7 @@ public class HxprDocumentRetriever implements DocumentRetriever {
                         .chunkText(h.getChunkText())
                         .sourceDocument(h.getSourceDocument())
                         .chunkMetadata(h.getChunkMetadata())
+                        .vector(h.getVector())
                         .build())
                 .toList();
     }
