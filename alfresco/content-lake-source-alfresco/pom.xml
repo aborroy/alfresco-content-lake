@@ -30,6 +30,20 @@
             <version>${alfresco.sdk.version}</version>
         </dependency>
 
+        <!--
+            Plain OpenFeign Jackson codec. The ACS SDK's Feign handlers are built manually in
+            AlfrescoFeignConfig (Feign.builder + SpringMvcContract) instead of via spring-cloud's
+            @EnableFeignClients, because spring-cloud-openfeign 4.2.1 is not Boot 4 compatible
+            (see AlfrescoFeignConfig / issue #77). feign-jackson provides Boot-independent
+            encode/decode; version is managed by the feign-bom the SDK already imports.
+        -->
+        <dependency>
+            <groupId>io.github.openfeign</groupId>
+            <artifactId>feign-jackson</artifactId>
+            <!-- Aligned with feign-core 13.5 pulled in transitively via the ACS SDK. -->
+            <version>13.5</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>

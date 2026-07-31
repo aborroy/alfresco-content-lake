@@ -5,6 +5,49 @@ spring:
   application:
     name: live-ingester
 
+  # The Alfresco ACS REST starter (content-lake-source-alfresco) wires its Feign handlers via
+  # spring-cloud-openfeign 4.2.1, which is NOT Spring Boot 4 compatible: its auto-configurations
+  # reference Boot classes that Boot 4 relocated/removed (web.ServerProperties,
+  # web.context.WebServerInitializedEvent, data.web.SpringDataWebProperties) and fail context
+  # refresh with NoClassDefFoundError. We build the NodesApi/DiscoveryApi/SearchApi handlers
+  # ourselves with plain OpenFeign in AlfrescoFeignConfig, so ALL spring-cloud auto-configuration
+  # (which self-registers from the jars on the classpath) plus the ACS starter's @EnableFeignClients
+  # must be disabled. See issue #77. The spring-cloud-openfeign-core JAR stays on the classpath
+  # because AlfrescoFeignConfig reuses its (Boot-independent) SpringMvcContract + ResponseEntityDecoder.
+  autoconfigure:
+    exclude:
+      - org.alfresco.rest.sdk.config.AlfrescoRestApiAutoConfiguration
+      # spring-cloud-commons
+      - org.springframework.cloud.client.CommonsClientAutoConfiguration
+      - org.springframework.cloud.client.ReactiveCommonsClientAutoConfiguration
+      - org.springframework.cloud.client.discovery.composite.CompositeDiscoveryClientAutoConfiguration
+      - org.springframework.cloud.client.discovery.composite.reactive.ReactiveCompositeDiscoveryClientAutoConfiguration
+      - org.springframework.cloud.client.discovery.simple.SimpleDiscoveryClientAutoConfiguration
+      - org.springframework.cloud.client.discovery.simple.reactive.SimpleReactiveDiscoveryClientAutoConfiguration
+      - org.springframework.cloud.client.hypermedia.CloudHypermediaAutoConfiguration
+      - org.springframework.cloud.client.loadbalancer.LoadBalancerAutoConfiguration
+      - org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration
+      - org.springframework.cloud.client.loadbalancer.reactive.LoadBalancerBeanPostProcessorAutoConfiguration
+      - org.springframework.cloud.client.loadbalancer.reactive.ReactorLoadBalancerClientAutoConfiguration
+      - org.springframework.cloud.client.serviceregistry.ServiceRegistryAutoConfiguration
+      - org.springframework.cloud.client.serviceregistry.AutoServiceRegistrationAutoConfiguration
+      - org.springframework.cloud.commons.util.UtilAutoConfiguration
+      - org.springframework.cloud.commons.security.ResourceServerTokenRelayAutoConfiguration
+      - org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration
+      - org.springframework.cloud.configuration.CompatibilityVerifierAutoConfiguration
+      # spring-cloud-context
+      - org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration
+      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration
+      - org.springframework.cloud.autoconfigure.RefreshAutoConfiguration
+      - org.springframework.cloud.autoconfigure.RefreshEndpointAutoConfiguration
+      - org.springframework.cloud.autoconfigure.WritableEnvironmentEndpointAutoConfiguration
+      # spring-cloud-openfeign-core
+      - org.springframework.cloud.openfeign.hateoas.FeignHalAutoConfiguration
+      - org.springframework.cloud.openfeign.FeignAutoConfiguration
+      - org.springframework.cloud.openfeign.encoding.FeignAcceptGzipEncodingAutoConfiguration
+      - org.springframework.cloud.openfeign.encoding.FeignContentGzipEncodingAutoConfiguration
+      - org.springframework.cloud.openfeign.loadbalancer.FeignLoadBalancerAutoConfiguration
+
   activemq:
     broker-url: ${ACTIVEMQ_URL:tcp://localhost:61616}
     user: ${ACTIVEMQ_USER:admin}
@@ -15,7 +58,11 @@ spring:
 
   ai:
     openai:
-      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      # Spring AI 2.0 wraps the openai-java SDK, which treats base-url as the FULL API base and
+      # appends `/embeddings` directly (it does NOT add `/v1`). MODEL_RUNNER_URL is a bare
+      # scheme://host:port, so `/v1` must be appended here or every embedding call 404s and
+      # ingestion silently stores no vectors (issue #79; matches the rag-service fix).
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}/v1
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}

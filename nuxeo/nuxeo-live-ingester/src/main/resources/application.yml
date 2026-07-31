@@ -7,7 +7,11 @@ spring:
 
   ai:
     openai:
-      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}
+      # Spring AI 2.0 wraps the openai-java SDK, which treats base-url as the FULL API base and
+      # appends `/embeddings` directly (it does NOT add `/v1`). MODEL_RUNNER_URL is a bare
+      # scheme://host:port, so `/v1` must be appended here or every embedding call 404s and
+      # ingestion silently stores no vectors (issue #79; matches the rag-service fix).
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}/v1
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}

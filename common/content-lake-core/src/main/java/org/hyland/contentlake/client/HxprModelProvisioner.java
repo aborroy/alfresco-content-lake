@@ -69,26 +69,42 @@ public class HxprModelProvisioner {
 
     private JsonNode fetchCurrentModel() {
         try {
-            return hxprRestClient.get()
+            // Retrieve as a raw String and parse with the injected Jackson 2 ObjectMapper.
+            // Spring Boot 4's RestClient uses Jackson 3 (tools.jackson) message converters by
+            // default, which cannot construct a Jackson 2 com.fasterxml.jackson.databind.JsonNode
+            // (InvalidDefinitionException). Parsing the body ourselves keeps this class on Jackson 2
+            // end to end (buildAddOnlyPatch / patchAdd all use the Jackson 2 objectMapper).
+            String body = hxprRestClient.get()
                     .uri(uriBuilder -> uriBuilder.path("/api/repository/model").build())
                     .retrieve()
-                    .body(JsonNode.class);
+                    .body(String.class);
+            if (body == null || body.isBlank()) {
+                return objectMapper.createObjectNode();
+            }
+            return objectMapper.readTree(body);
         } catch (HttpClientErrorException e) {
             throw new IllegalStateException("Failed to GET /api/repository/model from HXPR", e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to parse HXPR model response", e);
         }
     }
 
     private void applyPatch(ArrayNode patchOps) {
         try {
+            // Serialize with the Jackson 2 ObjectMapper and send as a raw JSON string; Boot 4's
+            // RestClient Jackson 3 converters cannot serialize a Jackson 2 ArrayNode.
+            String patchJson = objectMapper.writeValueAsString(patchOps);
             hxprRestClient.patch()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/repository/model")
                             .queryParam("validateOnly", "false")
                             .build())
                     .contentType(JSON_PATCH)
-                    .body(patchOps)
+                    .body(patchJson)
                     .retrieve()
                     .toBodilessEntity();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize HXPR model patch", e);
         } catch (HttpClientErrorException e) {
             // If you run multiple instances, a race may occur. Keep strict by default.
             // If HXPR returns 409 for "already applied", you can treat it as success here.

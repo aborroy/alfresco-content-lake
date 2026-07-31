@@ -97,8 +97,7 @@ public class NodeDiscoveryService {
         log.info("Discovering nodes from folder: {}, recursive: {}", folderId, recursive);
 
         if (recursive) {
-            List<Node> nodes = searchService.findDescendantFiles(
-                    folderId, scopeResolver.getExcludedAspects());
+            List<Node> nodes = findDescendantFilesWithRetry(folderId);
             return nodes.stream()
                     .filter(node -> matchesType(node, types))
                     .filter(node -> !matchesExcludedPath(node));
@@ -109,6 +108,48 @@ public class NodeDiscoveryService {
                 .filter(node -> Boolean.FALSE.equals(node.isIsFolder()))
                 .filter(node -> matchesType(node, types))
                 .filter(node -> scopeResolver.isInScope(node));
+    }
+
+    /**
+     * Runs the recursive AFTS {@code ANCESTOR:} descendant query, retrying while it returns empty
+     * to absorb the Solr commit lag on the {@code ANCESTOR} relationship and a just-added
+     * {@code cl:indexed} folder aspect (issue #78). A genuinely empty folder exhausts the bounded
+     * attempts and returns an empty list.
+     */
+    private List<Node> findDescendantFilesWithRetry(String folderId) {
+        int maxAttempts = Math.max(1, props.getDiscovery().getMaxAttempts());
+        long intervalMs = Math.max(0, props.getDiscovery().getRetryIntervalMs());
+
+        List<Node> nodes = List.of();
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            nodes = searchService.findDescendantFiles(folderId, scopeResolver.getExcludedAspects());
+            if (!nodes.isEmpty()) {
+                if (attempt > 1) {
+                    log.info("Discovery for folder {} returned {} descendants on attempt {}/{}",
+                            folderId, nodes.size(), attempt, maxAttempts);
+                }
+                return nodes;
+            }
+            if (attempt < maxAttempts) {
+                log.info("Discovery for folder {} found 0 descendants (attempt {}/{}); "
+                                + "retrying in {}ms to allow Solr ANCESTOR/aspect commit",
+                        folderId, attempt, maxAttempts, intervalMs);
+                sleep(intervalMs);
+            }
+        }
+        log.info("Discovery for folder {} found 0 descendants after {} attempt(s)", folderId, maxAttempts);
+        return nodes;
+    }
+
+    private static void sleep(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private boolean matchesExcludedPath(Node node) {

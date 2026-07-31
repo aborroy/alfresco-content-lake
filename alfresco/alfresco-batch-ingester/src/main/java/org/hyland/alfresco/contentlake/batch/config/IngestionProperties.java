@@ -19,6 +19,30 @@ public class IngestionProperties {
     private Exclude exclude = new Exclude();
     private Transform transform = new Transform();
     private Embedding embedding = new Embedding();
+    private Discovery discovery = new Discovery();
+
+    /**
+     * Discovery-time retry to absorb the Solr ANCESTOR-commit lag (issue #78).
+     *
+     * <p>Recursive discovery finds descendants with an AFTS {@code ANCESTOR:} query. The
+     * {@code ANCESTOR} (transitive path) relationship and a just-added {@code cl:indexed} folder
+     * aspect commit to Solr later than the direct {@code PARENT} relationship, so a freshly
+     * uploaded/onboarded folder can transiently return 0 descendants. To avoid silently ingesting
+     * nothing, discovery re-runs the query on an empty result up to {@code maxAttempts} times,
+     * waiting {@code retryIntervalMs} between attempts. A genuinely empty folder simply exhausts the
+     * (bounded) attempts and proceeds with 0.</p>
+     */
+    @Data
+    public static class Discovery {
+        /**
+         * Max attempts for the recursive ANCESTOR discovery query when it returns empty (>=1).
+         * Default 10 x {@code retryIntervalMs} (~30s) comfortably exceeds the observed Solr
+         * ANCESTOR-commit lag on a cold stack (~25s); a genuinely empty folder just exhausts these.
+         */
+        private int maxAttempts = 10;
+        /** Delay between empty-result discovery attempts, in milliseconds. */
+        private long retryIntervalMs = 3000;
+    }
 
     @Data
     public static class Source {
