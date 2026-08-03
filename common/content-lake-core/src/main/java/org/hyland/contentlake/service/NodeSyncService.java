@@ -188,8 +188,8 @@ public class NodeSyncService {
             List<EmbeddingService.ChunkWithEmbedding> embedded =
                     embeddingService.embedChunks(chunks, docContext);
 
-            clearEmbeddings(hxprDocId);
-
+            // updateEmbeddings net-replaces any existing embedding child, so no separate
+            // clear step is needed here (a redundant clear would just re-delete the same child).
             List<HxprEmbedding> hxprEmbeddings = toHxprEmbeddings(embedded);
             log.info("About to update embeddings for hxprDocId: {}, nodeId: {}, count: {}", hxprDocId, nodeId, hxprEmbeddings.size());
             hxprService.updateEmbeddings(hxprDocId, hxprEmbeddings);
@@ -485,14 +485,6 @@ public class NodeSyncService {
         txt.setParagraph(paragraphIndex);
         loc.setText(txt);
         return loc;
-    }
-
-    private void clearEmbeddings(String hxprDocId) {
-        try {
-            hxprService.deleteEmbeddings(hxprDocId);
-        } catch (Exception e) {
-            log.debug("No existing embeddings to clear for {}", hxprDocId);
-        }
     }
 
     private void updateFulltextWithStatus(String hxprDocId, String text, Map<String, Object> baseIngestProps,

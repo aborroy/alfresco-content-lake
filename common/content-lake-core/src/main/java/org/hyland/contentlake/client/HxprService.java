@@ -41,6 +41,7 @@ public class HxprService {
     private static final String DEFAULT_QUERY = "SELECT * FROM SysContent";
     private static final int EMBEDDING_BATCH_SIZE = 500;
     private static final String DEFAULT_EMBEDDING_TYPE = "mxbai-embed-large";
+    private static final int INDEX_WAIT_TIMEOUT_SECONDS = 30;
 
     private final HxprDocumentApi documentApi;
     private final HxprQueryApi queryApi;
@@ -180,11 +181,13 @@ public class HxprService {
     }
 
     /**
-     * Stores embeddings in {@code sysembed_embeddings} and ensures the {@code SysEmbed} mixin is present.
+     * Stores embeddings as a Parquet file in a {@code SysEmbeddings} child document, net-replacing
+     * any previously stored embeddings for the same embedding type.
      *
-     * <p>For large embedding sets (>500), this method automatically batches updates to stay within
-     * MongoDB's 16MB document size limit. The first batch replaces existing embeddings, and
-     * subsequent batches append to ensure all embeddings are stored.</p>
+     * <p>The parent is marked with the {@code SysHasEmbeddings} mixin and any existing embedding
+     * child (including auto-suffixed duplicates) is removed before the new child is created, so a
+     * re-sync of an unchanged node leaves the embedding/chunk count unchanged rather than
+     * accumulating duplicates.</p>
      *
      * @param documentId hxpr document identifier
      * @param embeddings embeddings to store
@@ -263,27 +266,48 @@ public class HxprService {
     }
 
     /**
-     * Deletes existing embedding child document if it exists.
+     * Deletes every existing embedding child of a document for the given embedding type.
+     *
+     * <p>Matches the canonical child name ({@code _e_{embeddingType}}) as well as any
+     * auto-suffixed siblings hxpr may have created for name collisions
+     * (e.g. {@code _e_mxbai-embed-large.<n>}). All matches are removed so a re-sync
+     * nets to a single fresh child rather than accumulating duplicates.</p>
+     *
+     * @throws RuntimeException if the lookup or any delete fails; the caller must abort
+     *         before creating a new child, otherwise duplicates would survive.
      */
     private void deleteEmbeddingChild(String documentId, String embeddingType) {
+        String childName = "_e_" + embeddingType;
+
+        // hxpr's query index is eventually consistent: a child created on a prior sync may not yet
+        // be visible here, so the lookup would miss it and a re-sync would create a duplicate. Wait
+        // for the index to catch up before querying (same eventual-consistency class as #78).
         try {
-            // Query for existing embedding child (name format: _e_{embeddingType})
-            String childName = "_e_" + embeddingType;
-            String hxql = String.format(
-                    "SELECT * FROM SysContent WHERE sys_parentId = '%s' AND sys_name = '%s'",
-                    escapeHxql(documentId), escapeHxql(childName)
-            );
-
-            HxprDocument.QueryResult queryResult = queryApi.query(new Query().query(hxql));
-            List<HxprDocument> results = queryResult.getDocuments();
-
-            if (results != null && !results.isEmpty()) {
-                String childId = results.get(0).getSysId();
-                log.debug("Deleting existing embedding child: {}", childId);
-                documentApi.deleteById(childId);
-            }
+            queryApi.waitForFullTextSearchIndexing(true, INDEX_WAIT_TIMEOUT_SECONDS);
         } catch (Exception e) {
-            log.warn("Failed to delete existing embedding child for {}: {}", documentId, e.getMessage());
+            log.warn("waitForFullTextSearchIndexing failed before embedding-child lookup for {}: {}",
+                    documentId, e.getMessage());
+        }
+
+        // hxpr treats limit=0 (the Query default) as "return no rows", so an explicit
+        // positive limit is required or the lookup silently matches nothing and the old
+        // child is never deleted -- the root cause of duplicated embeddings on re-sync.
+        String hxql = String.format(
+                "SELECT * FROM SysContent WHERE sys_parentId = '%s' AND sys_name LIKE '%s%%'",
+                escapeHxql(documentId), escapeHxql(childName)
+        );
+
+        HxprDocument.QueryResult queryResult = queryApi.query(newQuery(hxql, 100, 0));
+        List<HxprDocument> results = queryResult.getDocuments();
+
+        if (results == null || results.isEmpty()) {
+            return;
+        }
+
+        for (HxprDocument child : results) {
+            String childId = child.getSysId();
+            log.debug("Deleting existing embedding child: {} ({})", childId, child.getSysName());
+            documentApi.deleteById(childId);
         }
     }
 
@@ -335,9 +359,12 @@ public class HxprService {
                     "sysemb_embeddings", Map.of("uploadId", uploadId)
             );
 
+            // enforceSysName=true makes hxpr reject a duplicate child name instead of
+            // silently auto-suffixing it (e.g. _e_mxbai-embed-large.<n>), which would
+            // otherwise let a stale child survive alongside the new one after a re-sync.
             log.info("Creating SysEmbeddings child document: {} with payload: {}", childName, childDoc);
             restClient.post()
-                    .uri("/api/documents/" + documentId)
+                    .uri("/api/documents/" + documentId + "?enforceSysName=true")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(childDoc)
                     .retrieve()
@@ -351,7 +378,12 @@ public class HxprService {
     }
 
     /**
-     * Clears {@code sysembed_embeddings} for the document.
+     * Removes all stored embeddings for a document.
+     *
+     * <p>Deletes the Parquet {@code SysEmbeddings} child document(s) where embeddings are stored,
+     * and also clears the deprecated inline {@code sysembed_embeddings} array when the legacy
+     * {@code SysEmbed} mixin is present, so documents indexed before the Parquet migration are
+     * cleaned up too.</p>
      *
      * @param documentId hxpr document identifier
      */
@@ -359,18 +391,15 @@ public class HxprService {
         log.info("Clearing embeddings for document: {}", documentId);
 
         try {
+            // Current storage: Parquet child document(s).
+            deleteEmbeddingChild(documentId, DEFAULT_EMBEDDING_TYPE);
+
+            // Legacy storage: inline sysembed_embeddings array (pre-Parquet documents).
             HxprDocument doc = documentApi.getById(documentId);
-            if (doc == null) {
-                log.warn("Document not found: {}", documentId);
-                return;
+            if (doc != null && hasSysEmbedMixin(doc)) {
+                documentApi.updateById(documentId, Map.of("sysembed_embeddings", List.of()));
             }
 
-            if (!hasSysEmbedMixin(doc)) {
-                log.debug("Document {} does not have {} mixin, nothing to clear", documentId, EMBED_MIXIN);
-                return;
-            }
-
-            documentApi.updateById(documentId, Map.of("sysembed_embeddings", List.of()));
             log.info("Cleared embeddings for document: {}", documentId);
 
         } catch (Exception e) {
