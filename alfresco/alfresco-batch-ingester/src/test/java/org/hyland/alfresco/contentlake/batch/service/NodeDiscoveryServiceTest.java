@@ -102,4 +102,21 @@ class NodeDiscoveryServiceTest {
         assertThat(discovered).isEmpty();
         verify(searchService, times(3)).findDescendantFiles(anyString(), any());
     }
+
+    @Test
+    void discoverNodes_filtersNodesExcludedViaRest_evenWhenAftsStillReturnsThem() {
+        // Issue #81: the Solr AFTS query still returns a subtree that was excluded moments ago
+        // (cl:excludeFromLake set on an ancestor just before sync). The authoritative REST check
+        // must drop those so they are never ingested.
+        Node inScope = file("doc-in");
+        Node excluded = file("doc-excluded");
+        when(searchService.findDescendantFiles(anyString(), any()))
+                .thenReturn(List.of(inScope, excluded));
+        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(inScope)).thenReturn(false);
+        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(excluded)).thenReturn(true);
+
+        List<Node> discovered = service.discoverNodes(recursiveRequest()).toList();
+
+        assertThat(discovered).extracting(Node::getId).containsExactly("doc-in");
+    }
 }

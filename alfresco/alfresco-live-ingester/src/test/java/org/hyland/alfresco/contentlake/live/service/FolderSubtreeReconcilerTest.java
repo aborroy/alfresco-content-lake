@@ -134,6 +134,46 @@ class FolderSubtreeReconcilerTest {
     }
 
     @Test
+    void reconcile_skipsChildExcludedBySelfOrAncestorViaRest() {
+        // Issue #81: cl:excludeFromLake set on an ancestor folder just before this event. The AFTS
+        // descendant query still returns the subtree (Solr commit lag), so a scope reconcile must
+        // drop it via the authoritative REST check, not re-ingest it.
+        Node folder = folder("folder-1");
+        Node inScope = file("file-ok").modifiedAt(OffsetDateTime.parse("2026-03-30T09:10:00Z"));
+        Node excluded = file("file-excluded").modifiedAt(OffsetDateTime.parse("2026-03-30T09:10:00Z"));
+
+        searchService.descendantsByFolderId.put("folder-1", List.of(inScope, excluded));
+        when(scopeResolver.getExcludedAspects()).thenReturn(Set.of());
+        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(inScope)).thenReturn(false);
+        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(excluded)).thenReturn(true);
+
+        FolderSubtreeReconciler.ReconciliationResult result =
+                reconciler.reconcile(folder, OffsetDateTime.parse("2026-03-30T09:11:00Z"));
+
+        ArgumentCaptor<SourceNode> synced = ArgumentCaptor.forClass(SourceNode.class);
+        verify(nodeSyncService).syncNode(synced.capture());
+        assertThat(synced.getValue().nodeId()).isEqualTo("file-ok");
+        assertThat(result.synced()).isEqualTo(1);
+        assertThat(result.skipped()).isEqualTo(1);
+    }
+
+    @Test
+    void reconcilePermissions_doesNotApplyRestExclusionFilter() {
+        // PERMISSIONS mode only refreshes ACLs on already-in-scope nodes; it must not do the
+        // per-child REST exclusion walk (that is a SCOPE-mode concern).
+        Node folder = folder("folder-1");
+        Node child = file("file-1").modifiedAt(OffsetDateTime.parse("2026-03-30T09:10:00Z"));
+
+        searchService.descendantsByFolderId.put("folder-1", List.of(child));
+        when(scopeResolver.getExcludedAspects()).thenReturn(Set.of());
+
+        reconciler.reconcilePermissions(folder, OffsetDateTime.parse("2026-03-30T09:11:00Z"));
+
+        verify(scopeResolver, never()).isExcludedBySelfOrAncestorViaRest(any());
+        verify(nodeSyncService).updatePermissions(any());
+    }
+
+    @Test
     void reconcile_doesNotConsultIsInScopePerChild() {
         Node folder = folder("folder-1");
         Node child = file("file-1")

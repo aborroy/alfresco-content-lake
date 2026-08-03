@@ -100,7 +100,12 @@ public class NodeDiscoveryService {
             List<Node> nodes = findDescendantFilesWithRetry(folderId);
             return nodes.stream()
                     .filter(node -> matchesType(node, types))
-                    .filter(node -> !matchesExcludedPath(node));
+                    .filter(node -> !matchesExcludedPath(node))
+                    // The AFTS descendant query filters cl:excludeFromLake via Solr, which races the
+                    // commit of a just-set exclusion (issue #81, same class as #78). Re-check each
+                    // discovered node authoritatively via the Nodes REST API so a subtree excluded
+                    // immediately before sync is not ingested.
+                    .filter(node -> !scopeResolver.isExcludedBySelfOrAncestorViaRest(node));
         }
 
         // Non-recursive: single level only, no AFTS needed

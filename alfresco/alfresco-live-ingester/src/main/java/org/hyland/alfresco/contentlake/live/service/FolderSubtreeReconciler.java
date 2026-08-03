@@ -97,14 +97,25 @@ public class FolderSubtreeReconciler {
         //
         // Reaching this method means the root folder's cl:indexed aspect was just
         // added (or its permissions changed). Every descendant returned is therefore
-        // in scope by construction. We deliberately skip scopeResolver.isInScope(child)
-        // here: that would issue a per-child AFTS query for cl:indexed on ancestors,
-        // which races with the Solr commit of the very aspect that triggered THIS
-        // reconciliation.
+        // in scope by construction. We deliberately skip the AFTS-based
+        // scopeResolver.isInScope(child) here: that would issue a per-child AFTS query
+        // for cl:indexed on ancestors, which races with the Solr commit of the very
+        // aspect that triggered THIS reconciliation.
+        //
+        // We DO apply the REST-based exclusion check below (issue #81): the AFTS
+        // `NOT @cl:excludeFromLake:true` predicate only matches a file that directly
+        // carries the property and races the Solr commit anyway, so a subtree excluded
+        // (on an ancestor folder) just before this event would otherwise be re-synced.
+        // isExcludedBySelfOrAncestorViaRest reads from the DB and does not race Solr.
         Set<String> excludedAspects = scopeResolver.getExcludedAspects();
         for (Node child : searchService.findDescendantFiles(folderId, excludedAspects)) {
             try {
                 if (matchesTechnicalPathExclusion(child)) {
+                    result.skipped++;
+                    continue;
+                }
+                if (mode == ReconciliationMode.SCOPE
+                        && scopeResolver.isExcludedBySelfOrAncestorViaRest(child)) {
                     result.skipped++;
                     continue;
                 }
