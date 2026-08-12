@@ -234,7 +234,10 @@ public class RagService {
         String systemPrompt = resolveSystemPrompt(request);
 
         int topK = request.getTopK() > 0 ? request.getTopK() : ragProperties.getDefaultTopK();
-        double minScore = request.getMinScore() > 0 ? request.getMinScore() : ragProperties.getDefaultMinScore();
+        // An explicit 0.0 means "no threshold" and must survive; only an absent value falls back.
+        double minScore = request.getMinScore() != null
+                ? request.getMinScore()
+                : ragProperties.getDefaultMinScore();
 
         return new PromptContext(
                 conversation,

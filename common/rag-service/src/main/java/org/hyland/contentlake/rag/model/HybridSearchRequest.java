@@ -58,9 +58,15 @@ public class HybridSearchRequest {
     /** Embedding type to match. Defaults to wildcard ("*"). */
     private String embeddingType;
 
-    /** Minimum score threshold for final results. */
-    @Builder.Default
-    private double minScore = 0.0;
+    /**
+     * Minimum score threshold for final results, or {@code null} to use the configured default.
+     *
+     * <p>Nullable rather than a primitive so that an explicit {@code 0.0} is distinguishable from
+     * "not supplied". As a primitive defaulting to 0.0, a caller asking for no threshold was
+     * indistinguishable from a caller saying nothing, so the server default replaced it and no
+     * request could actually turn the threshold off.</p>
+     */
+    private Double minScore;
 
     @Data
     @Builder

@@ -61,6 +61,17 @@ public class NodeSyncService {
     private static final String P_LEGACY_ALF_MODIFIED_AT = ContentLakeIngestProperties.ALFRESCO_MODIFIED_AT;
     private static final String P_CL_SYNC_STATUS    = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_STATUS;
     private static final String P_CL_SYNC_ERROR     = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_ERROR;
+    private static final String P_CL_EXTRACTED_TEXT = ContentLakeIngestProperties.CONTENT_LAKE_EXTRACTED_TEXT;
+
+    /**
+     * Cap on the extracted text copied into {@code cin_ingestProperties} for keyword search.
+     *
+     * <p>hxpr accepts much larger values, but this property travels in every document read and
+     * every query response, so an uncapped copy of a large document is paid for on every hit. The
+     * cap trades tail-of-document keyword recall for bounded documents; the vector leg is
+     * unaffected because it indexes chunks rather than this field.</p>
+     */
+    private static final int MAX_EXTRACTED_TEXT_CHARS = 64_000;
 
     /* ---- ACL constants ---- */
     private static final String EVERYONE_PRINCIPAL = "__Everyone__";
@@ -492,7 +503,13 @@ public class NodeSyncService {
         log.info("updateFulltextWithStatus called for hxprDocId: {}, textLength: {}, baseIngestProps: {}",
                 hxprDocId, text != null ? text.length() : 0, baseIngestProps);
         Map<String, Object> props = buildStatusedProps(baseIngestProps, ContentLakeNodeStatus.Status.INDEXED, null);
-        log.info("Built statused props for hxprDocId: {}, props: {}", hxprDocId, props);
+        // The keyword leg of hybrid search cannot read sys_fulltextBinary: hxpr does not expose that
+        // field to HXQL, so a query against it matches nothing. Mirroring the text into an ingest
+        // property is what makes term matching work at all, and hxpr also folds ingest properties
+        // into sys_fulltext.
+        putExtractedText(props, text);
+        // Logged by key rather than by value: the extracted text is now one of the values.
+        log.info("Built statused props for hxprDocId: {}, propertyNames: {}", hxprDocId, props.keySet());
         HxprDocument update = new HxprDocument();
         update.setSysFulltextBinary(text);
         update.setSyncStatus(HxprDocument.SyncStatus.INDEXED);
@@ -519,6 +536,31 @@ public class NodeSyncService {
             log.warn("Failed to update sync status {} for document {}: {}", status, hxprDocId, e.getMessage());
         }
         sourceClient.writeSyncStatus(nodeId, status.name(), error);
+    }
+
+    /**
+     * Copies extracted text into the ingest properties for the keyword leg, truncated to
+     * {@link #MAX_EXTRACTED_TEXT_CHARS}.
+     *
+     * <p>Blank text removes the key rather than storing an empty string, so a document whose
+     * extraction produced nothing does not advertise a searchable-but-empty body.</p>
+     *
+     * <p>Stored as extracted, not case-folded: hxpr's {@code sys_fulltext} index analyses this text
+     * and matches it case-insensitively, so folding it here would lose information for nothing.</p>
+     */
+    private void putExtractedText(Map<String, Object> props, String text) {
+        if (text == null || text.isBlank()) {
+            props.remove(P_CL_EXTRACTED_TEXT);
+            return;
+        }
+        String value = text.length() > MAX_EXTRACTED_TEXT_CHARS
+                ? text.substring(0, MAX_EXTRACTED_TEXT_CHARS)
+                : text;
+        if (value.length() < text.length()) {
+            log.debug("Truncated extracted text for keyword search from {} to {} chars",
+                    text.length(), value.length());
+        }
+        props.put(P_CL_EXTRACTED_TEXT, value);
     }
 
     private Map<String, Object> buildStatusedProps(Map<String, Object> baseProps,

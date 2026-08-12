@@ -29,6 +29,20 @@ public final class ContentLakeIngestProperties {
     public static final String CONTENT_LAKE_SYNC_STATUS = "contentLake_syncStatus";
     public static final String CONTENT_LAKE_SYNC_ERROR = "contentLake_syncError";
 
+    /**
+     * Extracted document text, mirrored here so the keyword leg of hybrid search can reach it.
+     *
+     * <p>{@code sys_fulltextBinary} is where extracted text naturally belongs and the sync writes it
+     * there too, but hxpr does not expose that field to HXQL, so a query against it matches nothing.
+     * hxpr does fold {@code cin_ingestProperties} into its analysed {@code sys_fulltext} index, so
+     * populating this key is what makes document body text searchable by term at all.</p>
+     *
+     * <p>Query {@code sys_fulltext}, not this property directly: the property's own index truncates
+     * at 256 characters, so {@code cin_ingestProperties.contentLake_extractedText LIKE '%term%'}
+     * silently only ever matches a document's opening lines.</p>
+     */
+    public static final String CONTENT_LAKE_EXTRACTED_TEXT = "contentLake_extractedText";
+
     private ContentLakeIngestProperties() {
     }
 }

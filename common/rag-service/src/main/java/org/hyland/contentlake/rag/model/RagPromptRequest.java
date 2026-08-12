@@ -33,9 +33,14 @@ public class RagPromptRequest {
     @Builder.Default
     private int topK = 0;
 
-    /** Minimum similarity threshold (default: configured in rag.default-min-score). */
-    @Builder.Default
-    private double minScore = 0.0;
+    /**
+     * Minimum similarity threshold, or {@code null} for the configured {@code rag.default-min-score}.
+     *
+     * <p>Nullable so that an explicit {@code 0.0} ("no threshold") is distinguishable from an absent
+     * value. As a primitive it was not, so the configured default silently replaced it and a caller
+     * could not switch the threshold off.</p>
+     */
+    private Double minScore;
 
     /** Optional HXQL filter to scope the search. */
     private String filter;

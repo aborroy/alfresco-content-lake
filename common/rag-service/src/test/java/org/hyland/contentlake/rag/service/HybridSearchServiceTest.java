@@ -4,7 +4,6 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.HxprDocument;
-import org.hyland.contentlake.model.HxprEmbedding;
 import org.hyland.contentlake.rag.config.HybridSearchProperties;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.HybridSearchResponse;
@@ -285,34 +284,120 @@ class HybridSearchServiceTest {
     // Fulltext query building
     // -----------------------------------------------------------------------
 
+    /**
+     * The keyword leg's HXQL. Every expectation here was verified against a live hxpr index.
+     *
+     * <p>The previous form queried {@code cin_ingestProperties.contentLake_extractedText}, a key no
+     * ingester ever wrote, so the leg contributed nothing to fusion on any query and
+     * {@code keyword_leg_hit_rate} measured 0.0000. The sync now mirrors extracted text into that
+     * property and this leg queries {@code sys_fulltext}, hxpr's analysed index over it, because the
+     * property's own index truncates at 256 characters.</p>
+     */
     @Nested
     class FulltextQueryBuilding {
+
+        private static final String FIELD = "sys_fulltext";
 
         @Test
         void buildFulltextQuery_withPermissionFilter_combinesCorrectly() {
             String permFilter = "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')";
-            String hxql = service.buildFulltextQuery("search terms", permFilter);
+            String hxql = service.buildFulltextQuery("revenue growth", permFilter);
 
-            assertThat(hxql).startsWith("SELECT * FROM SysContent WHERE cin_ingestProperties.contentLake_extractedText = 'search terms'");
+            assertThat(hxql).startsWith("SELECT * FROM SysContent WHERE (" + FIELD + " = 'revenue'");
+            assertThat(hxql).contains(FIELD + " = 'growth'");
             assertThat(hxql).contains("AND (sys_racl = '__Everyone__')");
         }
 
         @Test
         void buildFulltextQuery_nullPermissionFilter_fulltextOnly() {
-            String hxql = service.buildFulltextQuery("test query", null);
-            assertThat(hxql).isEqualTo("SELECT * FROM SysContent WHERE cin_ingestProperties.contentLake_extractedText = 'test query'");
+            String hxql = service.buildFulltextQuery("revenue", null);
+            assertThat(hxql).isEqualTo(
+                    "SELECT * FROM SysContent WHERE " + FIELD + " = 'revenue'");
         }
 
         @Test
-        void buildFulltextQuery_escapesQuotes() {
-            String hxql = service.buildFulltextQuery("it's a test", null);
-            assertThat(hxql).contains("it s a test");
+        void buildFulltextQuery_usesLikeNotEquality() {
+            // The previous form queried cin_ingestProperties.contentLake_extractedText, which no
+            // ingester wrote, so the leg measured a 0.0000 hit rate. Querying that property with
+            // LIKE is also wrong: its index truncates at 256 chars. sys_fulltext has no such limit.
+            String hxql = service.buildFulltextQuery("volatility", null);
+            assertThat(hxql).contains(FIELD + " = 'volatility'");
         }
 
         @Test
-        void buildFulltextQuery_sanitizesBackslashes() {
-            String hxql = service.buildFulltextQuery("path\\to\\file", null);
-            assertThat(hxql).contains("path to file");
+        void buildFulltextQuery_oneClausePerTerm_orred() {
+            String hxql = service.buildFulltextQuery("alpha beta gamma", null);
+            assertThat(hxql).isEqualTo("SELECT * FROM SysContent WHERE ("
+                    + FIELD + " = 'alpha' OR "
+                    + FIELD + " = 'beta' OR "
+                    + FIELD + " = 'gamma')");
+        }
+
+        @Test
+        void buildFulltextQuery_lowercasesTerms() {
+            // sys_fulltext matches case-insensitively, so this is normalisation for a stable query
+            // string and for term de-duplication rather than a correctness requirement.
+            String hxql = service.buildFulltextQuery("Severity RESPONSE", null);
+            assertThat(hxql).contains(FIELD + " = 'severity'");
+            assertThat(hxql).contains(FIELD + " = 'response'");
+        }
+
+        @Test
+        void buildFulltextQuery_keepsSentinelIdentifiersIntact() {
+            // The entire point of the keyword leg: an exact identifier must survive as one term,
+            // hyphen included.
+            String hxql = service.buildFulltextQuery("change CHG-105402", null);
+            assertThat(hxql).contains(FIELD + " = 'chg-105402'");
+        }
+
+        @Test
+        void buildFulltextQuery_dropsQuotesAndBackslashes() {
+            // The parser cannot escape either inside a string literal.
+            String hxql = service.buildFulltextQuery("company's backslash\\path", null);
+            assertThat(hxql).doesNotContain("\\");
+            assertThat(hxql).doesNotContain("'s ");
+            assertThat(hxql).contains(FIELD + " = 'companys'");
+            assertThat(hxql).contains(FIELD + " = 'backslashpath'");
+        }
+
+        @Test
+        void buildFulltextQuery_stripsLikeWildcardsFromTerms() {
+            // An unescaped % in a term would widen the pattern to match every document.
+            String hxql = service.buildFulltextQuery("100% cover_age", null);
+            assertThat(hxql).contains(FIELD + " = '100'");
+            assertThat(hxql).contains(FIELD + " = 'coverage'");
+            assertThat(hxql).doesNotContain("''");
+        }
+
+        @Test
+        void buildFulltextQuery_dropsStopWordsAndShortTerms() {
+            String hxql = service.buildFulltextQuery("what is the revenue", null);
+            assertThat(hxql).contains(FIELD + " = 'revenue'");
+            assertThat(hxql).doesNotContain(FIELD + " = 'the'");
+            assertThat(hxql).doesNotContain(FIELD + " = 'what'");
+            assertThat(hxql).doesNotContain(FIELD + " = 'is'");
+        }
+
+        @Test
+        void buildFulltextQuery_deduplicatesRepeatedTerms() {
+            String hxql = service.buildFulltextQuery("revenue revenue revenue", null);
+            assertThat(hxql).isEqualTo(
+                    "SELECT * FROM SysContent WHERE " + FIELD + " = 'revenue'");
+        }
+
+        @Test
+        void buildFulltextQuery_noUsableTerm_fallsBackToPermissionFilter() {
+            // A clause-less WHERE would hand the keyword leg the entire corpus.
+            String permFilter = "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')";
+            assertThat(service.buildFulltextQuery("is a the", permFilter)).isEqualTo(permFilter);
+            assertThat(service.buildFulltextQuery("", null)).isEqualTo("SELECT * FROM SysContent");
+            assertThat(service.buildFulltextQuery(null, null)).isEqualTo("SELECT * FROM SysContent");
+        }
+
+        @Test
+        void buildFulltextClause_nullWhenNothingUsable() {
+            assertThat(service.buildFulltextClause("the is a")).isNull();
+            assertThat(service.buildFulltextClause("   ")).isNull();
         }
     }
 
@@ -571,7 +656,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -600,7 +685,7 @@ class HybridSearchServiceTest {
             HybridSearchService svc = spy(service);
             ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
             doReturn(List.of("user")).when(svc).getUserAuthorities("user", "nuxeo-demo");
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             svc.search(HybridSearchRequest.builder()
                     .query("test")
@@ -643,7 +728,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -685,7 +770,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -710,7 +795,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder()
                     .query("test")
@@ -735,7 +820,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder()
                     .query("test")
@@ -780,7 +865,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
 
             // Set minScore high enough to filter the second result
             // RRF score for rank 1 = 1/61 ≈ 0.0164, rank 2 = 1/62 ≈ 0.0161
@@ -798,119 +883,146 @@ class HybridSearchServiceTest {
     // Keyword search extraction
     // -----------------------------------------------------------------------
 
+    /**
+     * The keyword leg reads chunks through the embeddings endpoint, not through a plain HXQL query.
+     *
+     * <p>A plain query returns documents with no chunks attached: chunk text lives in an
+     * {@code embeddings.parquet} blob that only {@code /api/query/embeddings} decodes. The previous
+     * implementation queried documents, found their embeddings null, skipped every one and returned
+     * an empty list for every query, which is half of why {@code keyword_leg_hit_rate} measured
+     * 0.0000. Passing the keyword HXQL as that endpoint's filter is what makes the leg able to
+     * produce a chunk at all.</p>
+     */
     @Nested
     class KeywordSearchExtraction {
 
+        /**
+         * Built with doReturn so a nested stub never sits inside an open when(...), and lenient
+         * because a chunk that no query term matches is dropped before its ids are ever read.
+         */
+        private Embedding embedding(String docId, String chunkId, String text) {
+            Embedding emb = mock(Embedding.class, withSettings().lenient());
+            doReturn(docId).when(emb).getSysembedDocId();
+            doReturn(chunkId).when(emb).getSysembedId();
+            doReturn(text).when(emb).getSysembedText();
+            return emb;
+        }
+
+        private void stubChunks(List<Embedding> embeddings) {
+            VectorSearchResult result = mock(VectorSearchResult.class);
+            doReturn(embeddings).when(result).getEmbeddings();
+            doReturn(result).when(hxprService).vectorSearch(any(), any(), any(), anyInt());
+        }
+
         @Test
-        void executeKeywordSearch_extractsAndScoresChunks() {
-            HxprDocument doc = new HxprDocument();
-            doc.setSysId("doc-1");
-
-            HxprEmbedding emb1 = new HxprEmbedding();
-            emb1.setText("This chunk contains alfresco content management");
-            emb1.setType("mxbai");
-
-            HxprEmbedding emb2 = new HxprEmbedding();
-            emb2.setText("This chunk is about something else entirely");
-            emb2.setType("mxbai");
-
-            doc.setSysembedEmbeddings(List.of(emb1, emb2));
-
-            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
-            result.setDocuments(List.of(doc));
-
-            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+        void executeKeywordSearch_scoresChunksByTermFrequency() {
+            stubChunks(List.of(
+                    embedding("doc-1", "c1", "This chunk contains alfresco content management"),
+                    embedding("doc-1", "c2", "This chunk is about something else entirely")));
 
             List<ScoredChunk> chunks = service.executeKeywordSearch(
-                    "alfresco content", "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')", 20);
+                    "alfresco content",
+                    "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')",
+                    20,
+                    List.of(0.1d, 0.2d));
 
-            // Only emb1 matches any query terms; emb2 scores 0 and is excluded.
-            // Score = docPositionScore(rank-1 doc) × BM25-TF(chunk) — always > 0.
+            // Only the first chunk carries a query term; the second scores 0 and is dropped.
             assertThat(chunks).hasSize(1);
-            assertThat(chunks.get(0).score()).isGreaterThan(0.0);
             assertThat(chunks.getFirst().text()).isEqualTo("This chunk contains alfresco content management");
+            assertThat(chunks.getFirst().score()).isGreaterThan(0.0);
+            assertThat(chunks.getFirst().rank()).isEqualTo(1);
         }
 
         @Test
-        void executeKeywordSearch_emptyDocuments_returnsEmpty() {
-            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
-            result.setDocuments(List.of());
+        void executeKeywordSearch_passesTheKeywordClauseAsTheEmbeddingFilter() {
+            stubChunks(List.of());
 
-            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+            service.executeKeywordSearch(
+                    "alfresco content",
+                    "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')",
+                    20,
+                    List.of(0.1d, 0.2d));
 
-            List<ScoredChunk> chunks = service.executeKeywordSearch("test", "filter", 20);
-            assertThat(chunks).isEmpty();
+            verify(hxprService).vectorSearch(any(), any(), argThat(filter ->
+                    filter.contains("sys_fulltext = 'alfresco'")
+                            && filter.contains("sys_fulltext = 'content'")
+                            && filter.contains("sys_racl = '__Everyone__'")
+            ), anyInt());
         }
 
         @Test
-        void executeKeywordSearch_queryFailure_returnsEmpty() {
-            when(hxprService.query(any(), anyInt(), anyInt())).thenThrow(new RuntimeException("connection error"));
-
-            List<ScoredChunk> chunks = service.executeKeywordSearch("test", "filter", 20);
-            assertThat(chunks).isEmpty();
-        }
-
-        @Test
-        void executeKeywordSearch_respectsHxprDocumentOrder() {
-            // doc1 is rank-1 (best BM25 from hxpr), doc2 is rank-2.
-            // Both have identical chunk text, so the doc-position signal must decide.
-            HxprDocument doc1 = new HxprDocument();
-            doc1.setSysId("doc-1");
-            HxprEmbedding emb1 = new HxprEmbedding();
-            emb1.setText("alfresco content management system");
-            emb1.setType("mxbai");
-            doc1.setSysembedEmbeddings(List.of(emb1));
-
-            HxprDocument doc2 = new HxprDocument();
-            doc2.setSysId("doc-2");
-            HxprEmbedding emb2 = new HxprEmbedding();
-            emb2.setText("alfresco content management system");
-            emb2.setType("mxbai");
-            doc2.setSysembedEmbeddings(List.of(emb2));
-
-            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
-            result.setDocuments(List.of(doc1, doc2));
-
-            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+        void executeKeywordSearch_ranksByTermScoreNotByVectorOrder() {
+            // The endpoint returns chunks in vector-similarity order, which carries no keyword
+            // signal. The chunk mentioning the term twice must win regardless of arriving second.
+            stubChunks(List.of(
+                    embedding("doc-1", "c1", "alfresco appears once here among many other words"),
+                    embedding("doc-2", "c2", "alfresco alfresco")));
 
             List<ScoredChunk> chunks = service.executeKeywordSearch(
-                    "alfresco content", "SELECT * FROM SysContent", 20);
+                    "alfresco", "SELECT * FROM SysContent", 20, List.of(0.1d, 0.2d));
 
             assertThat(chunks).hasSize(2);
-            // doc-1 (rank 1 from hxpr) must outrank doc-2 (rank 2)
-            assertThat(chunks.get(0).docId()).isEqualTo("doc-1");
-            assertThat(chunks.get(0).score()).isGreaterThan(chunks.get(1).score());
+            assertThat(chunks.getFirst().docId()).isEqualTo("doc-2");
+            assertThat(chunks.getFirst().score()).isGreaterThan(chunks.get(1).score());
+            assertThat(chunks.get(1).rank()).isEqualTo(2);
         }
 
         @Test
-        void executeKeywordSearch_queryWithApostrophe_sanitizesAndSucceeds() {
-            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
-            result.setDocuments(List.of());
-            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+        void executeKeywordSearch_reusesTheSuppliedQueryVector() {
+            // Embedding the same query twice per search would double the inference cost of every
+            // hybrid request, since the vector is only needed to read chunk text.
+            stubChunks(List.of());
 
-            // Must not throw; apostrophe must not appear inside the NXQL string literal
+            service.executeKeywordSearch("alfresco", "SELECT * FROM SysContent", 20, List.of(0.1d, 0.2d));
+
+            verify(embeddingService, never()).embedQuery(any());
+        }
+
+        @Test
+        void executeKeywordSearch_embedsTheQueryWhenNoVectorIsSupplied() {
+            doReturn(List.of(0.1d, 0.2d)).when(embeddingService).embedQuery("alfresco");
+            stubChunks(List.of());
+
+            service.executeKeywordSearch("alfresco", "SELECT * FROM SysContent", 20);
+
+            verify(embeddingService).embedQuery("alfresco");
+        }
+
+        @Test
+        void executeKeywordSearch_noUsableTerm_skipsTheLegEntirely() {
+            // Falling back to the permission filter alone would hand the whole corpus to this leg
+            // and let fusion promote arbitrary documents.
             List<ScoredChunk> chunks = service.executeKeywordSearch(
-                    "king arthur's legend", "SELECT * FROM SysContent WHERE (sys_racl = '__Everyone__')", 20);
+                    "is a the", "SELECT * FROM SysContent", 20, List.of(0.1d, 0.2d));
 
             assertThat(chunks).isEmpty();
-            verify(hxprService).query(argThat(q ->
-                    q.contains("king arthur s legend") && !q.contains("arthur's")
-            ), anyInt(), anyInt());
+            verify(hxprService, never()).vectorSearch(any(), any(), any(), anyInt());
         }
 
         @Test
-        void executeKeywordSearch_documentsWithoutEmbeddings_skipped() {
-            HxprDocument doc = new HxprDocument();
-            doc.setSysId("doc-1");
-            doc.setSysembedEmbeddings(null);
+        void executeKeywordSearch_emptyResult_returnsEmpty() {
+            stubChunks(List.of());
 
-            HxprDocument.QueryResult result = new HxprDocument.QueryResult();
-            result.setDocuments(List.of(doc));
+            assertThat(service.executeKeywordSearch(
+                    "alfresco", "filter", 20, List.of(0.1d, 0.2d))).isEmpty();
+        }
 
-            when(hxprService.query(any(), anyInt(), anyInt())).thenReturn(result);
+        @Test
+        void executeKeywordSearch_failureReturnsEmptyRatherThanFailingTheSearch() {
+            // A dead keyword leg must degrade to vector-only, not fail the whole request.
+            doThrow(new RuntimeException("connection error"))
+                    .when(hxprService).vectorSearch(any(), any(), any(), anyInt());
 
-            List<ScoredChunk> chunks = service.executeKeywordSearch("test", "filter", 20);
-            assertThat(chunks).isEmpty();
+            assertThat(service.executeKeywordSearch(
+                    "alfresco", "filter", 20, List.of(0.1d, 0.2d))).isEmpty();
+        }
+
+        @Test
+        void executeKeywordSearch_noEmbeddingAvailable_returnsEmpty() {
+            doReturn(List.of()).when(embeddingService).embedQuery("alfresco");
+
+            assertThat(service.executeKeywordSearch("alfresco", "filter", 20)).isEmpty();
+            verify(hxprService, never()).vectorSearch(any(), any(), any(), anyInt());
         }
     }
 }

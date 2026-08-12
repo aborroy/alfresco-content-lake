@@ -74,9 +74,14 @@ public class HxprDocumentRetriever implements DocumentRetriever {
 
         List<SearchHit> hits;
         if (useHybrid) {
+            // minScore must be passed through: omitting it silently substituted the server-side
+            // search.hybrid.default-min-score for both the request value and rag.default-min-score,
+            // and since hybrid search is the default path that made every minScore setting and any
+            // sweep over it meaningless.
             HybridSearchRequest hybridRequest = HybridSearchRequest.builder()
                     .query(query.text())
                     .maxResults(retrievalSize)
+                    .minScore(minScore)
                     .filter(filter)
                     .sourceType(sourceType)
                     .embeddingType(embeddingType)
