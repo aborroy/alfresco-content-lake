@@ -20,6 +20,7 @@ import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +35,8 @@ import java.util.Map;
  *       minScore, filter, sourceType, embeddingType) carried in the request context.</li>
  *   <li>Retrieves candidate {@link Document}s via {@link HxprDocumentRetriever}.</li>
  *   <li>Reranks them through the {@link RerankService} extension point.</li>
+ *   <li>Grades the result through the {@link RetrievalGrader} extension point, optionally retrying
+ *       once with broadened params before declining to answer.</li>
  *   <li>Assembles a bounded context block and rebuilds the user message so the LLM sees
  *       conversation history + grounded document context (same prompt shape as before).</li>
  *   <li>Records the reranked hits + timing into the {@link RetrievalTrace} so the service can
@@ -42,7 +45,8 @@ import java.util.Map;
  *
  * <p>When retrieval yields no usable context, the advisor <strong>short-circuits the LLM
  * call</strong> and synthesizes a fallback answer, preserving the previous behavior where
- * the chat model was never invoked for empty context.</p>
+ * the chat model was never invoked for empty context. A persistently weak grade routes into that
+ * same path, so declining to answer needs no separate branch.</p>
  *
  * <p>ACL/permission and source-type filtering are delegated entirely to the search services
  * via the retriever; this advisor adds no filtering of its own.</p>
@@ -65,15 +69,18 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     private final DocumentRetriever documentRetriever;
     private final DiversitySelector diversitySelector;
     private final RerankService rerankService;
+    private final RetrievalGrader retrievalGrader;
     private final RagProperties ragProperties;
 
     public ContentLakeRetrievalAdvisor(DocumentRetriever documentRetriever,
                                        DiversitySelector diversitySelector,
                                        RerankService rerankService,
+                                       RetrievalGrader retrievalGrader,
                                        RagProperties ragProperties) {
         this.documentRetriever = documentRetriever;
         this.diversitySelector = diversitySelector;
         this.rerankService = rerankService;
+        this.retrievalGrader = retrievalGrader;
         this.ragProperties = ragProperties;
     }
 
@@ -123,12 +130,22 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         String retrievalQuery = stringParam(context.get(PARAM_RETRIEVAL_QUERY), userText);
 
         long searchStart = System.currentTimeMillis();
+        List<SearchHit> rerankedHits = retrievePass(retrievalQuery, context, false);
+        rerankedHits = applyRelevanceGate(retrievalQuery, context, rerankedHits);
+        long searchTimeMs = System.currentTimeMillis() - searchStart;
+
+        final List<SearchHit> graded = rerankedHits;
+        trace(context).ifPresent(t -> t.record(retrievalQuery, searchTimeMs, graded));
+        return new Retrieval(graded);
+    }
+
+    /** Retrieve, diversify, rerank. One pass over the hxpr search stack. */
+    private List<SearchHit> retrievePass(String retrievalQuery, Map<String, Object> context, boolean broadened) {
         Query query = Query.builder()
                 .text(retrievalQuery)
-                .context(context)
+                .context(broadened ? broaden(context) : context)
                 .build();
         List<Document> documents = documentRetriever.retrieve(query);
-        long searchTimeMs = System.currentTimeMillis() - searchStart;
 
         List<SearchHit> hits = new ArrayList<>();
         for (Document document : documents) {
@@ -149,11 +166,55 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         List<SearchHit> reranked = rerankService.rerank(retrievalQuery, diversified);
         List<SearchHit> rerankedHits = reranked != null ? reranked : List.of();
 
-        log.info("Retrieve phase complete: {} chunks retrieved in {}ms (diversified={}, reranked={})",
-                hits.size(), searchTimeMs, diversified.size(), rerankedHits.size());
+        log.info("Retrieve phase complete: {} chunks retrieved (diversified={}, reranked={}, broadened={})",
+                hits.size(), diversified.size(), rerankedHits.size(), broadened);
 
-        trace(context).ifPresent(t -> t.record(retrievalQuery, searchTimeMs, rerankedHits));
-        return new Retrieval(rerankedHits);
+        return rerankedHits;
+    }
+
+    /**
+     * Self-RAG gate: grades the reranked context and reacts instead of always generating.
+     *
+     * <p>A weak verdict buys one broadened retrieval attempt, and one only: a grade-then-retry loop
+     * with no bound is how a retrieval pipeline turns a bad query into an unbounded spend. If the
+     * broadened pass is still weak, the hits are dropped, which routes into the empty-context
+     * short-circuit that already exists and returns {@link #NO_CONTEXT_ANSWER} without an LLM call.</p>
+     */
+    private List<SearchHit> applyRelevanceGate(String retrievalQuery,
+                                               Map<String, Object> context,
+                                               List<SearchHit> hits) {
+        if (!ragProperties.getRetrievalGrading().isEnabled()) {
+            return hits;
+        }
+        if (retrievalGrader.grade(retrievalQuery, hits) == RetrievalGrader.Verdict.RELEVANT) {
+            return hits;
+        }
+        if (!ragProperties.getRetrievalGrading().isBroaden()) {
+            log.info("Retrieval graded weak and broadening is off; skipping generation");
+            return List.of();
+        }
+
+        log.info("Retrieval graded weak; retrying once with a broadened pass");
+        List<SearchHit> broadenedHits = retrievePass(retrievalQuery, context, true);
+        if (retrievalGrader.grade(retrievalQuery, broadenedHits) == RetrievalGrader.Verdict.RELEVANT) {
+            return broadenedHits;
+        }
+
+        log.info("Broadened retrieval still graded weak; skipping generation");
+        return List.of();
+    }
+
+    /**
+     * Relaxes the retrieval params for the second attempt: threshold off, candidate pool widened to the
+     * MMR pool size. Both are the knobs that discard otherwise-retrievable evidence, and a weak first
+     * pass is exactly the case where paying for a wider net is worthwhile.
+     */
+    private Map<String, Object> broaden(Map<String, Object> context) {
+        Map<String, Object> broadened = new HashMap<>(context);
+        broadened.put(HxprDocumentRetriever.CTX_MIN_SCORE, 0.0d);
+        int topK = intValue(context.get(HxprDocumentRetriever.CTX_TOP_K), ragProperties.getDefaultTopK());
+        broadened.put(HxprDocumentRetriever.CTX_TOP_K, Math.max(ragProperties.getMmr().getPoolSize(), topK));
+        return broadened;
     }
 
     /** Rebuilds the user message with conversation history + grounded document context. */

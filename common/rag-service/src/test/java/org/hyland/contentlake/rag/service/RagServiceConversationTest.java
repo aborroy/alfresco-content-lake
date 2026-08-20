@@ -86,8 +86,8 @@ class RagServiceConversationTest {
 
         HxprDocumentRetriever retriever =
                 new HxprDocumentRetriever(semanticSearchService, hybridSearchService, properties);
-        ContentLakeRetrievalAdvisor advisor =
-                new ContentLakeRetrievalAdvisor(retriever, diversitySelector, rerankService, properties);
+        ContentLakeRetrievalAdvisor advisor = new ContentLakeRetrievalAdvisor(
+                retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties);
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();

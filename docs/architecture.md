@@ -227,3 +227,11 @@ Source adapters add extra properties via `SourceNode.sourceProperties()` using t
 - **Nuxeo auth** -- Basic auth for MVP, wrapped in an abstraction for future token/OAuth2
 - **Nuxeo discovery** -- NXQL query preferred over `@children` tree walk for scalability
 - **`rag-service` security** -- needs its own `SecurityConfig`; options are permit-all behind network policy or OAuth2/OIDC via hxpr IDP
+- **Query expansion in the search services, not the RAG advisor** -- multi-query, HyDE and decomposition
+  all run inside `SemanticSearchService`/`HybridSearchService`, which both the search controllers and
+  `HxprDocumentRetriever` go through. Placing them in `ContentLakeRetrievalAdvisor` instead would hide
+  them from the `/search/*` endpoints the retrieval-quality gate measures
+- **Retrieval-quality stages are opt-in and NoOp by default** -- rerank (`RerankService`), diversity
+  (`DiversitySelector`), expansion (`QueryExpansionService`) and the pre-generation relevance gate
+  (`RetrievalGrader`) each register one bean chosen by a single `@Configuration`, defaulting to the
+  behaviour that predates them, so a build with every flag off retrieves exactly as before

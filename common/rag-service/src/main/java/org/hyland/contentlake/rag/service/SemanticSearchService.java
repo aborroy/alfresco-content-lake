@@ -2,6 +2,7 @@ package org.hyland.contentlake.rag.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.rag.security.DualSourceAuthentication;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -63,6 +65,8 @@ public class SemanticSearchService {
     private final EmbeddingService embeddingService;
     private final SecurityContextService securityContextService;
     private final SourceMetadataResolver sourceMetadataResolver;
+    private final QueryExpansionService queryExpansionService;
+    private final RagProperties ragProperties;
 
     private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
     private static final int SOURCE_DISCOVERY_LIMIT = 25;
@@ -106,65 +110,158 @@ public class SemanticSearchService {
 
         double minScore = resolveMinScore(request);
 
-        // 1) Embed (using query-specific instruction prefix for asymmetric models)
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String logUser = auth != null ? auth.getName() : "anonymous";
-        log.info("Embedding query: \"{}\" (topK={}, minScore={}, user={})", request.getQuery(), topK, minScore, logUser);
 
-        List<Double> queryVector = embeddingService.embedQuery(request.getQuery());
+        // Permission filter resolution is deferred and memoized: resolving group membership costs REST
+        // calls to Alfresco and Nuxeo, so a query that never reaches hxpr should not pay for it, and a
+        // query that runs several variants should pay for it once. Expansion changes what is asked,
+        // never who is allowed to see the answer.
+        Supplier<String> hxqlFilter = memoize(() -> buildHxqlFilter(request, auth));
 
-        if (queryVector.isEmpty()) {
-            log.warn("Empty embedding vector for query: {}", request.getQuery());
-            return emptyResponse(request, 0, System.currentTimeMillis() - startTime);
+        List<QueryVariant> variants = expand(request.getQuery());
+
+        if (variants == null) {
+            VariantResult single = searchVariant(
+                    QueryVariant.original(request.getQuery()), request, topK, minScore, hxqlFilter, logUser);
+            long searchTimeMs = System.currentTimeMillis() - startTime;
+            log.info("Semantic search completed: {} results in {}ms for query: \"{}\" (minScore={})",
+                    single.hits().size(), searchTimeMs, request.getQuery(), minScore);
+            return response(request, single.hits(), single.vectorDimension(), single.totalCount(), searchTimeMs);
         }
 
-        // 2) Build permission filter using sys_racl — dual-auth aware
+        List<List<SearchHit>> perVariant = new ArrayList<>(variants.size());
+        int vectorDimension = 0;
+        long totalCount = 0;
+        for (QueryVariant variant : variants) {
+            VariantResult result = searchVariant(variant, request, topK, minScore, hxqlFilter, logUser);
+            if (!result.hits().isEmpty()) {
+                perVariant.add(result.hits());
+            }
+            if (vectorDimension == 0) {
+                vectorDimension = result.vectorDimension();
+            }
+            // The variants search the same index, so the widest match count is the informative one;
+            // summing would report the same chunk several times over.
+            totalCount = Math.max(totalCount, result.totalCount());
+        }
+
+        List<SearchHit> hits = RrfFusion.fuse(perVariant, ragProperties.getQueryExpansion().getRrfK(), topK);
+        long searchTimeMs = System.currentTimeMillis() - startTime;
+
+        log.info("Semantic search completed: {} results in {}ms for query: \"{}\" "
+                        + "(minScore={}, variants={}, contributing={})",
+                hits.size(), searchTimeMs, request.getQuery(), minScore, variants.size(), perVariant.size());
+
+        return response(request, hits, vectorDimension, totalCount, searchTimeMs);
+    }
+
+    /** Expansion is best-effort: a failure here must never fail the search. */
+    private List<QueryVariant> expand(String query) {
+        try {
+            List<QueryVariant> variants = queryExpansionService.expand(query);
+            return variants != null && variants.size() > 1 ? variants : null;
+        } catch (Exception e) {
+            log.warn("Query expansion failed, searching the original query only: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Builds the sys_racl permission filter, dual-auth aware, combined with the request's own filters. */
+    private String buildHxqlFilter(SemanticSearchRequest request, Authentication auth) {
         String sourceTypeFilter = buildSourceTypeFilter(request.getSourceType());
         String additionalFilter = combineFilters(request.getFilter(), sourceTypeFilter);
-        String hxqlFilter;
         if (auth instanceof DualSourceAuthentication dual) {
-            hxqlFilter = buildPermissionFilter(
+            return buildPermissionFilter(
                     dual.getAlfrescoUsername(), dual.getNuxeoUsername(),
                     request.getSourceType(), additionalFilter);
-        } else {
-            String username = securityContextService.getCurrentUsername();
-            hxqlFilter = buildPermissionFilter(username, request.getSourceType(), additionalFilter);
+        }
+        String username = securityContextService.getCurrentUsername();
+        return buildPermissionFilter(username, request.getSourceType(), additionalFilter);
+    }
+
+    /** Single-threaded memoization; each search resolves its filter at most once. */
+    private static <T> Supplier<T> memoize(Supplier<T> delegate) {
+        return new Supplier<>() {
+
+            private T value;
+            private boolean resolved;
+
+            @Override
+            public T get() {
+                if (!resolved) {
+                    value = delegate.get();
+                    resolved = true;
+                }
+                return value;
+            }
+        };
+    }
+
+    /** One retrieval pass for one query variant: embed, kNN, enrich, threshold. */
+    private VariantResult searchVariant(QueryVariant variant,
+                                        SemanticSearchRequest request,
+                                        int topK,
+                                        double minScore,
+                                        Supplier<String> hxqlFilter,
+                                        String logUser) {
+        // A variant may arrive with its own vector (HyDE embeds document-side, without the query
+        // instruction prefix); otherwise embed query-side as usual.
+        List<Double> queryVector = variant.vectorVector();
+        if (queryVector == null) {
+            log.info("Embedding query: \"{}\" (variant={}, topK={}, minScore={}, user={})",
+                    variant.vectorText(), variant.label(), topK, minScore, logUser);
+            queryVector = embeddingService.embedQuery(variant.vectorText());
         }
 
-        // 3) Vector search
-        log.debug("Executing vector search with filter: {}", hxqlFilter);
+        if (queryVector == null || queryVector.isEmpty()) {
+            log.warn("Empty embedding vector for query: {}", variant.vectorText());
+            return VariantResult.empty(0);
+        }
+
+        String filter = hxqlFilter.get();
+        log.debug("Executing vector search with filter: {}", filter);
         VectorSearchResult vectorResult = hxprService.vectorSearch(
                 queryVector,
                 request.getEmbeddingType(),
-                hxqlFilter,
+                filter,
                 topK
         );
 
         if (vectorResult == null || vectorResult.getEmbeddings() == null || vectorResult.getEmbeddings().isEmpty()) {
-            log.info("No results for query: \"{}\"", request.getQuery());
-            return emptyResponse(request, queryVector.size(), System.currentTimeMillis() - startTime);
+            log.info("No results for query: \"{}\"", variant.vectorText());
+            return VariantResult.empty(queryVector.size());
         }
 
-        // 4) Enrich with parent document metadata
         Map<String, SourceDocument> documentCache = fetchDocumentMetadata(vectorResult.getEmbeddings());
-
-        // 5) Build response (apply minScore)
         List<SearchHit> hits = buildSearchHits(vectorResult.getEmbeddings(), documentCache, minScore);
+        long totalCount = vectorResult.getTotalCount() != null ? vectorResult.getTotalCount() : hits.size();
 
-        long searchTimeMs = System.currentTimeMillis() - startTime;
+        return new VariantResult(hits, queryVector.size(), totalCount);
+    }
 
-        log.info("Semantic search completed: {} results in {}ms for query: \"{}\" (minScore={})",
-                hits.size(), searchTimeMs, request.getQuery(), minScore);
-
+    private SemanticSearchResponse response(SemanticSearchRequest request,
+                                            List<SearchHit> hits,
+                                            int vectorDimension,
+                                            long totalCount,
+                                            long searchTimeMs) {
         return SemanticSearchResponse.builder()
                 .query(request.getQuery())
                 .model(embeddingService.getModelName())
-                .vectorDimension(queryVector.size())
+                .vectorDimension(vectorDimension)
                 .resultCount(hits.size())
-                .totalCount(vectorResult.getTotalCount() != null ? vectorResult.getTotalCount() : hits.size())
+                .totalCount(totalCount)
                 .searchTimeMs(searchTimeMs)
                 .results(hits)
                 .build();
+    }
+
+    /** Outcome of a single variant's retrieval pass. */
+    private record VariantResult(List<SearchHit> hits, int vectorDimension, long totalCount) {
+
+        static VariantResult empty(int vectorDimension) {
+            return new VariantResult(List.of(), vectorDimension, 0);
+        }
     }
 
     private double resolveMinScore(SemanticSearchRequest request) {
@@ -496,18 +593,6 @@ public class SemanticSearchService {
         }
 
         return hits;
-    }
-
-    private SemanticSearchResponse emptyResponse(SemanticSearchRequest request, int vectorDim, long timeMs) {
-        return SemanticSearchResponse.builder()
-                .query(request.getQuery())
-                .model(embeddingService.getModelName())
-                .vectorDimension(vectorDim)
-                .resultCount(0)
-                .totalCount(0)
-                .searchTimeMs(timeMs)
-                .results(List.of())
-                .build();
     }
 
     // ---------------------------------------------------------------

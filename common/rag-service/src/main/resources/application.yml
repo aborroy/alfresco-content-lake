@@ -101,6 +101,28 @@ rag:
     max-history-turns: ${RAG_CONVERSATION_MAX_HISTORY_TURNS:10}
     session-ttl-minutes: ${RAG_CONVERSATION_SESSION_TTL_MINUTES:30}
     query-reformulation: ${RAG_CONVERSATION_QUERY_REFORMULATION:true}
+  # Query expansion. Shared bounds for multi-query, HyDE and decomposition, all of which append to the
+  # same variant list; max-variants is the ceiling on the per-request embedding and hxpr call count.
+  # rrf-k here fuses across variants, one level above search.hybrid.rrf-k which fuses the two legs.
+  query-expansion:
+    max-variants: ${RAG_QUERY_EXPANSION_MAX_VARIANTS:6}
+    rrf-k: ${RAG_QUERY_EXPANSION_RRF_K:60}
+  multi-query:
+    enabled: ${RAG_MULTI_QUERY_ENABLED:false}
+    variants: ${RAG_MULTI_QUERY_VARIANTS:3}
+  hyde:
+    enabled: ${RAG_HYDE_ENABLED:false}
+    max-chars: ${RAG_HYDE_MAX_CHARS:1000}
+  query-decomposition:
+    enabled: ${RAG_QUERY_DECOMPOSITION_ENABLED:false}
+    max-sub-questions: ${RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS:4}
+  # Self-RAG relevance gate. min-score is on the fusion's scale, not cosine's (see
+  # RagProperties.RetrievalGradingProperties), so 0.0 leaves the gate inert even when enabled.
+  retrieval-grading:
+    enabled: ${RAG_RETRIEVAL_GRADING_ENABLED:false}
+    min-score: ${RAG_RETRIEVAL_GRADING_MIN_SCORE:0.0}
+    min-hits: ${RAG_RETRIEVAL_GRADING_MIN_HITS:1}
+    broaden: ${RAG_RETRIEVAL_GRADING_BROADEN:true}
 
 # Semantic Search configuration
 semantic-search:

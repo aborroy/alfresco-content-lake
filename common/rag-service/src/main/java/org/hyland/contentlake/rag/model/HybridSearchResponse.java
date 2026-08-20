@@ -43,6 +43,14 @@ public class HybridSearchResponse {
     /** Number of keyword candidates retrieved before fusion. */
     private int keywordCandidates;
 
+    /**
+     * Number of query formulations retrieved for, counting the original.
+     *
+     * <p>Null when query expansion is disabled, which keeps the default response shape unchanged for
+     * clients that predate it.</p>
+     */
+    private Integer queryVariants;
+
     /** Time taken for the full hybrid search in milliseconds. */
     private long searchTimeMs;
 

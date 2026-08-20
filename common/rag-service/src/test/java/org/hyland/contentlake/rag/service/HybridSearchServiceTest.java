@@ -5,6 +5,7 @@ import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.rag.config.HybridSearchProperties;
+import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.HybridSearchResponse;
 import org.hyland.contentlake.rag.service.HybridSearchService.FusedResult;
@@ -40,6 +41,8 @@ class HybridSearchServiceTest {
     @Mock SecurityContextService securityContextService;
     @Mock HybridSearchProperties properties;
     @Mock SourceMetadataResolver sourceMetadataResolver;
+    @Mock QueryExpansionService queryExpansionService;
+    @Mock RagProperties ragProperties;
 
     @InjectMocks HybridSearchService service;
 

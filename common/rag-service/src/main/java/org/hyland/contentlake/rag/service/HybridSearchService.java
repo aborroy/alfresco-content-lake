@@ -8,6 +8,7 @@ import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.rag.config.HybridSearchProperties;
+import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.security.DualSourceAuthentication;
 import org.hyland.contentlake.rag.model.HybridSearchResponse;
@@ -90,6 +91,8 @@ public class HybridSearchService {
     private final SecurityContextService securityContextService;
     private final HybridSearchProperties properties;
     private final SourceMetadataResolver sourceMetadataResolver;
+    private final QueryExpansionService queryExpansionService;
+    private final RagProperties ragProperties;
 
     @Value("${alfresco.source-id:}")
     private String alfrescoSourceId;
@@ -152,29 +155,120 @@ public class HybridSearchService {
                 ? request.getMinScore()
                 : properties.getDefaultMinScore();
 
+        // --- Expand into query variants (no-op unless multi-query, HyDE or decomposition is on) ---
+        List<QueryVariant> variants = expand(request.getQuery());
+        List<QueryVariant> passes = variants != null
+                ? variants
+                : List.of(QueryVariant.original(request.getQuery()));
+
+        // --- Retrieve and leg-fuse once per variant ---
+        List<List<FusedResult>> perVariant = new ArrayList<>(passes.size());
+        int vectorCandidates = 0;
+        int keywordCandidates = 0;
+        for (QueryVariant variant : passes) {
+            VariantResult result = searchVariant(
+                    variant, request, permissionFilter, candidateCount, strategy, normalization, minScore, logUser);
+            vectorCandidates += result.vectorCount();
+            keywordCandidates += result.keywordCount();
+            if (!result.fused().isEmpty()) {
+                perVariant.add(result.fused());
+            }
+        }
+
+        // --- Fuse across variants ---
+        // Rank-based, deliberately: a vector-only variant such as HyDE has no keyword contribution, so
+        // under weighted fusion its scores top out at vectorWeight while a both-legs variant reaches
+        // 1.0. Fusing on rank makes that scale difference irrelevant.
+        List<FusedResult> fused = perVariant.size() <= 1
+                ? (perVariant.isEmpty() ? List.<FusedResult>of() : perVariant.get(0))
+                : fuseAcrossVariants(perVariant, ragProperties.getQueryExpansion().getRrfK());
+
+        List<FusedResult> filtered = fused.stream()
+                .limit(maxResults)
+                .toList();
+
+        // --- Enrich with document metadata ---
+        Map<String, SourceDocument> docCache = fetchDocumentMetadata(filtered);
+
+        // --- Build response ---
+        List<HybridHit> hits = buildHits(filtered, docCache);
+
+        long searchTimeMs = System.currentTimeMillis() - startTime;
+        log.info("Hybrid search completed: {} results in {}ms (strategy={}, vector={}, keyword={}, variants={})",
+                hits.size(), searchTimeMs, strategy, vectorCandidates, keywordCandidates, passes.size());
+
+        return HybridSearchResponse.builder()
+                .query(request.getQuery())
+                .strategy(strategy)
+                .normalization(normalization)
+                .model(embeddingService.getModelName())
+                .resultCount(hits.size())
+                .vectorCandidates(vectorCandidates)
+                .keywordCandidates(keywordCandidates)
+                .queryVariants(variants != null ? passes.size() : null)
+                .searchTimeMs(searchTimeMs)
+                .results(hits)
+                .build();
+    }
+
+    /** Expansion is best-effort: a failure here must never fail the search. */
+    private List<QueryVariant> expand(String query) {
+        try {
+            List<QueryVariant> variants = queryExpansionService.expand(query);
+            return variants != null && variants.size() > 1 ? variants : null;
+        } catch (Exception e) {
+            log.warn("Query expansion failed, searching the original query only: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * One retrieval pass for one query variant: vector leg, keyword leg, leg fusion, threshold.
+     *
+     * <p>{@code minScore} is applied here rather than after cross-variant fusion because it is
+     * calibrated against the leg-fusion scale (roughly 0.02-0.03 under rrf, 0-1 under
+     * weighted/minmax). Applied to a cross-variant RRF score it would mean something else entirely.</p>
+     */
+    private VariantResult searchVariant(QueryVariant variant,
+                                        HybridSearchRequest request,
+                                        String permissionFilter,
+                                        int candidateCount,
+                                        String strategy,
+                                        String normalization,
+                                        double minScore,
+                                        String logUser) {
         // --- Vector (semantic) leg ---
-        log.info("Hybrid search vector leg: query=\"{}\", candidates={}, user={}",
-                request.getQuery(), candidateCount, logUser);
-        List<Double> queryVector = embeddingService.embedQuery(request.getQuery());
+        log.info("Hybrid search vector leg: query=\"{}\", variant={}, candidates={}, user={}",
+                variant.vectorText(), variant.label(), candidateCount, logUser);
+        // A variant may arrive with its own vector: HyDE embeds its passage document-side, without the
+        // query instruction prefix, because the passage is answer-shaped rather than question-shaped.
+        List<Double> queryVector = variant.vectorVector();
+        if (queryVector == null) {
+            queryVector = embeddingService.embedQuery(variant.vectorText());
+        }
         List<ScoredChunk> vectorChunks = List.of();
 
-        if (!queryVector.isEmpty()) {
+        if (queryVector != null && !queryVector.isEmpty()) {
             VectorSearchResult vectorResult = hxprService.vectorSearch(
                     queryVector, request.getEmbeddingType(), permissionFilter, candidateCount);
             vectorChunks = extractVectorChunks(vectorResult);
         }
 
         // --- Keyword (fulltext) leg ---
-        log.info("Hybrid search keyword leg: query=\"{}\", candidates={}", request.getQuery(), candidateCount);
-        // The query embedding is reused: the keyword leg needs a vector only because the embeddings
-        // endpoint is the sole way to read chunk text, and embedding the same query twice per search
-        // would double the inference cost of every hybrid request for nothing.
-        List<ScoredChunk> keywordChunks = executeKeywordSearch(
-                request.getQuery(), permissionFilter, candidateCount, queryVector);
+        List<ScoredChunk> keywordChunks = List.of();
+        if (variant.hasKeywordLeg()) {
+            log.info("Hybrid search keyword leg: query=\"{}\", candidates={}",
+                    variant.keywordText(), candidateCount);
+            // The query embedding is reused: the keyword leg needs a vector only because the embeddings
+            // endpoint is the sole way to read chunk text, and embedding the same query twice per search
+            // would double the inference cost of every hybrid request for nothing.
+            keywordChunks = executeKeywordSearch(
+                    variant.keywordText(), permissionFilter, candidateCount, queryVector);
+        }
 
         log.info("Hybrid search candidates: vector={}, keyword={}", vectorChunks.size(), keywordChunks.size());
 
-        // --- Fuse ---
+        // --- Fuse the two legs ---
         List<FusedResult> fused;
         if (STRATEGY_WEIGHTED.equalsIgnoreCase(strategy)) {
             double vectorWeight = request.getVectorWeight() > 0 ? request.getVectorWeight() : properties.getVectorWeight();
@@ -184,7 +278,6 @@ public class HybridSearchService {
             fused = fuseRRF(vectorChunks, keywordChunks, properties.getRrfK());
         }
 
-        // --- Filter and limit ---
         if (log.isDebugEnabled()) {
             long wouldFilter = fused.stream().filter(r -> r.score < minScore).count();
             log.debug("Fusion filter: minScore={} total={} filtered={} passing={}",
@@ -200,32 +293,16 @@ public class HybridSearchService {
                         preview);
             }
         }
-        List<FusedResult> filtered = fused.stream()
+
+        List<FusedResult> passing = fused.stream()
                 .filter(r -> r.score >= minScore)
-                .limit(maxResults)
                 .toList();
 
-        // --- Enrich with document metadata ---
-        Map<String, SourceDocument> docCache = fetchDocumentMetadata(filtered);
+        return new VariantResult(passing, vectorChunks.size(), keywordChunks.size());
+    }
 
-        // --- Build response ---
-        List<HybridHit> hits = buildHits(filtered, docCache);
-
-        long searchTimeMs = System.currentTimeMillis() - startTime;
-        log.info("Hybrid search completed: {} results in {}ms (strategy={}, vector={}, keyword={})",
-                hits.size(), searchTimeMs, strategy, vectorChunks.size(), keywordChunks.size());
-
-        return HybridSearchResponse.builder()
-                .query(request.getQuery())
-                .strategy(strategy)
-                .normalization(normalization)
-                .model(embeddingService.getModelName())
-                .resultCount(hits.size())
-                .vectorCandidates(vectorChunks.size())
-                .keywordCandidates(keywordChunks.size())
-                .searchTimeMs(searchTimeMs)
-                .results(hits)
-                .build();
+    /** Outcome of a single variant's retrieval pass, thresholded but not yet limited. */
+    private record VariantResult(List<FusedResult> fused, int vectorCount, int keywordCount) {
     }
 
     // ---------------------------------------------------------------
@@ -542,6 +619,50 @@ public class HybridSearchService {
 
         return fused.values().stream()
                 .sorted(Comparator.comparingDouble(FusedResult::getScore).reversed())
+                .toList();
+    }
+
+    // ---------------------------------------------------------------
+    // Fusion: across query variants
+    // ---------------------------------------------------------------
+
+    /**
+     * Fuses the leg-fused result sets of several query variants into one ranking.
+     *
+     * <p>One level above {@link #fuseRRF}: that merges the vector and keyword legs of a single query,
+     * this merges whole result sets produced by different formulations of the question. Same
+     * {@code 1 / (k + rank)} formula, so a chunk that several formulations found outranks one that only
+     * a single formulation found at the same depth.</p>
+     *
+     * <p>Each surviving {@link FusedResult} keeps the score, per-leg scores and per-leg ranks from the
+     * variant that ranked it highest. The cross-variant score decides order only and is deliberately
+     * not written back: {@code HybridHit.score} is thresholded and displayed downstream on the
+     * leg-fusion scale, and an RRF value there would be meaningless.</p>
+     */
+    static List<FusedResult> fuseAcrossVariants(List<List<FusedResult>> perVariant, int k) {
+        Map<String, FusedResult> best = new LinkedHashMap<>();
+        Map<String, Double> rrfScores = new HashMap<>();
+
+        for (List<FusedResult> variantResults : perVariant) {
+            if (variantResults == null) {
+                continue;
+            }
+            for (int i = 0; i < variantResults.size(); i++) {
+                FusedResult result = variantResults.get(i);
+                String key = result.chunk.key;
+                int rank = i + 1;
+                rrfScores.merge(key, 1.0 / (k + rank), Double::sum);
+                FusedResult incumbent = best.get(key);
+                if (incumbent == null || result.score > incumbent.score) {
+                    best.put(key, result);
+                }
+            }
+        }
+
+        return best.entrySet().stream()
+                .sorted(Comparator.comparingDouble(
+                        (Map.Entry<String, FusedResult> e) -> rrfScores.getOrDefault(e.getKey(), 0.0)).reversed())
+                .map(Map.Entry::getValue)
                 .toList();
     }
 

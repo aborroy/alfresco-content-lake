@@ -70,6 +70,21 @@ public class RagProperties {
     /** Source-specific deep-link templates returned in search and RAG responses. */
     private SourceLinkProperties sourceLinks = new SourceLinkProperties();
 
+    /** Shared bounds for the query-expansion stage that multi-query, HyDE and decomposition feed. */
+    private QueryExpansionProperties queryExpansion = new QueryExpansionProperties();
+
+    /** Multi-query retrieval settings (disabled by default). */
+    private MultiQueryProperties multiQuery = new MultiQueryProperties();
+
+    /** Hypothetical Document Embedding settings (disabled by default). */
+    private HydeProperties hyde = new HydeProperties();
+
+    /** Compound-question decomposition settings (disabled by default). */
+    private QueryDecompositionProperties queryDecomposition = new QueryDecompositionProperties();
+
+    /** Pre-generation retrieval relevance gate (disabled by default). */
+    private RetrievalGradingProperties retrievalGrading = new RetrievalGradingProperties();
+
     @Data
     public static class RerankerProperties {
 
@@ -129,5 +144,85 @@ public class RagProperties {
         /** Default Nuxeo Web UI browse link using the full repository path. */
         private String nuxeoTemplate =
                 "${nuxeo.base-url}/ui/#!/browse{nuxeoPath}";
+    }
+
+    @Data
+    public static class QueryExpansionProperties {
+
+        /**
+         * Hard cap on the total number of query variants a single search may run, counting the
+         * original. Multi-query, HyDE and decomposition all append to the same list, so without a
+         * shared ceiling enabling all three multiplies the per-request embedding and hxpr calls.
+         */
+        private int maxVariants = 6;
+
+        /**
+         * Reciprocal-rank-fusion constant used when merging the per-variant result sets.
+         *
+         * <p>Distinct from {@code search.hybrid.rrf-k}, which fuses the vector and keyword legs of a
+         * single variant. This one fuses across variants, one level up.</p>
+         */
+        private int rrfK = 60;
+    }
+
+    @Data
+    public static class MultiQueryProperties {
+
+        /** Enables multi-query retrieval: N LLM-generated query variants, fused by RRF. */
+        private boolean enabled = false;
+
+        /** Number of variants to request from the LLM, excluding the original query. */
+        private int variants = 3;
+    }
+
+    @Data
+    public static class HydeProperties {
+
+        /**
+         * Enables Hypothetical Document Embedding: the LLM drafts an answer-shaped passage which is
+         * embedded document-side (no query instruction prefix) and searched alongside the original
+         * query.
+         */
+        private boolean enabled = false;
+
+        /** Upper bound on the generated passage, truncated before embedding. */
+        private int maxChars = 1000;
+    }
+
+    @Data
+    public static class QueryDecompositionProperties {
+
+        /** Enables decomposition of compound questions into independently-retrievable sub-questions. */
+        private boolean enabled = false;
+
+        /** Upper bound on the sub-questions accepted from the LLM. */
+        private int maxSubQuestions = 4;
+    }
+
+    @Data
+    public static class RetrievalGradingProperties {
+
+        /** Enables the pre-generation relevance gate on the reranked hits. */
+        private boolean enabled = false;
+
+        /**
+         * Score a hit must reach to count as relevant.
+         *
+         * <p>This is <strong>not</strong> a cosine value on the default hybrid path: fused scores sit
+         * on the fusion's own scale, roughly 0.02-0.03 under {@code rrf} and 0-1 under
+         * {@code weighted}/{@code minmax}. The default of 0.0 leaves the gate inert even when
+         * enabled, so a threshold has to be chosen against the configured fusion strategy.</p>
+         */
+        private double minScore = 0.0;
+
+        /** Number of hits that must clear {@code minScore} for the verdict to be relevant. */
+        private int minHits = 1;
+
+        /**
+         * When true, a weak verdict triggers one broadened re-retrieval pass (threshold dropped,
+         * candidate pool widened) before generation is skipped. When false, a weak verdict skips
+         * generation immediately.
+         */
+        private boolean broaden = true;
     }
 }

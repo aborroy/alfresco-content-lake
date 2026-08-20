@@ -4,6 +4,7 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.HxprDocument;
+import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.security.SecurityContextService;
@@ -33,6 +34,8 @@ class SemanticSearchServiceTest {
     @Mock EmbeddingService embeddingService;
     @Mock SecurityContextService securityContextService;
     @Mock SourceMetadataResolver sourceMetadataResolver;
+    @Mock QueryExpansionService queryExpansionService;
+    @Mock RagProperties ragProperties;
 
     @InjectMocks SemanticSearchService service;
 
@@ -323,6 +326,106 @@ class SemanticSearchServiceTest {
         assertThat(response.getResults()).hasSize(1);
         assertThat(response.getResults().get(0).getScore()).isEqualTo(0.8d);
         assertThat(response.getResults().get(0).getChunkText()).isEqualTo("relevant chunk");
+    }
+
+    // -----------------------------------------------------------------------
+    // Query expansion
+    // -----------------------------------------------------------------------
+
+    @Test
+    void search_noExpansion_runsExactlyOnePass() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
+
+        when(securityContextService.getCurrentUsername()).thenReturn("user");
+        when(embeddingService.embedQuery(any())).thenReturn(List.of(0.1d, 0.2d));
+        when(embeddingService.getModelName()).thenReturn("test-model");
+        when(hxprService.vectorSearch(any(), any(), any(), anyInt())).thenReturn(null);
+        when(queryExpansionService.expand(any())).thenReturn(null);
+
+        svc.search(SemanticSearchRequest.builder().query("test").build());
+
+        verify(embeddingService, times(1)).embedQuery("test");
+        verify(hxprService, times(1)).vectorSearch(any(), any(), any(), anyInt());
+        verifyNoInteractions(ragProperties);
+    }
+
+    @Test
+    void search_expandedIntoVariants_searchesEachAndFusesTheResults() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
+
+        when(securityContextService.getCurrentUsername()).thenReturn("user");
+        when(embeddingService.getModelName()).thenReturn("test-model");
+        when(ragProperties.getQueryExpansion()).thenReturn(new RagProperties.QueryExpansionProperties());
+
+        when(queryExpansionService.expand("test")).thenReturn(List.of(
+                QueryVariant.original("test"),
+                QueryVariant.rephrased("variant-1", "rephrased")));
+
+        // Built up front: nesting a when(...) inside another when(...) leaves Mockito mid-stubbing.
+        VectorSearchResult firstResult = vectorResult(embedding("emb-1", 0.8d, "chunk one"));
+        VectorSearchResult secondResult = vectorResult(embedding("emb-2", 0.6d, "chunk two"));
+
+        when(embeddingService.embedQuery("test")).thenReturn(List.of(0.1d, 0.2d));
+        when(embeddingService.embedQuery("rephrased")).thenReturn(List.of(0.3d, 0.4d));
+        when(hxprService.vectorSearch(eq(List.of(0.1d, 0.2d)), any(), any(), anyInt()))
+                .thenReturn(firstResult);
+        when(hxprService.vectorSearch(eq(List.of(0.3d, 0.4d)), any(), any(), anyInt()))
+                .thenReturn(secondResult);
+
+        SemanticSearchResponse response = svc.search(
+                SemanticSearchRequest.builder().query("test").minScore(0.1d).build());
+
+        // Both variants were embedded and searched, and the permission filter was resolved once.
+        verify(embeddingService).embedQuery("test");
+        verify(embeddingService).embedQuery("rephrased");
+        verify(hxprService, times(2)).vectorSearch(any(), any(), any(), anyInt());
+        verify(svc, times(1)).getUserAuthorities(anyString(), anyString());
+
+        assertThat(response.getResults()).hasSize(2);
+        assertThat(response.getResults()).extracting(SemanticSearchResponse.SearchHit::getChunkText)
+                .containsExactly("chunk one", "chunk two");
+        // Fusion reassigns rank but leaves each hit's own score alone.
+        assertThat(response.getResults()).extracting(SemanticSearchResponse.SearchHit::getRank)
+                .containsExactly(1, 2);
+        assertThat(response.getResults()).extracting(SemanticSearchResponse.SearchHit::getScore)
+                .containsExactly(0.8d, 0.6d);
+    }
+
+    @Test
+    void search_expansionThrows_fallsBackToTheOriginalQuery() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
+
+        when(securityContextService.getCurrentUsername()).thenReturn("user");
+        when(embeddingService.embedQuery(any())).thenReturn(List.of(0.1d, 0.2d));
+        when(embeddingService.getModelName()).thenReturn("test-model");
+        when(hxprService.vectorSearch(any(), any(), any(), anyInt())).thenReturn(null);
+        when(queryExpansionService.expand(any())).thenThrow(new RuntimeException("expansion down"));
+
+        SemanticSearchResponse response = svc.search(SemanticSearchRequest.builder().query("test").build());
+
+        assertThat(response.getResults()).isEmpty();
+        verify(embeddingService, times(1)).embedQuery("test");
+    }
+
+    private static Embedding embedding(String id, double score, String text) {
+        Embedding embedding = mock(Embedding.class);
+        when(embedding.getSysembedScore()).thenReturn(score);
+        when(embedding.getSysembedText()).thenReturn(text);
+        when(embedding.getSysembedDocId()).thenReturn(null);
+        when(embedding.getSysembedId()).thenReturn(id);
+        when(embedding.getSysembedType()).thenReturn("mxbai");
+        when(embedding.getSysembedLocation()).thenReturn(null);
+        return embedding;
+    }
+
+    private static VectorSearchResult vectorResult(Embedding... embeddings) {
+        VectorSearchResult result = mock(VectorSearchResult.class);
+        when(result.getEmbeddings()).thenReturn(List.of(embeddings));
+        when(result.getTotalCount()).thenReturn((long) embeddings.length);
+        return result;
     }
 
     @Test
