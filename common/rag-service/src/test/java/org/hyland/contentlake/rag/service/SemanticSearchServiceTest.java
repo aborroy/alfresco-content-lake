@@ -36,6 +36,7 @@ class SemanticSearchServiceTest {
     @Mock SourceMetadataResolver sourceMetadataResolver;
     @Mock QueryExpansionService queryExpansionService;
     @Mock RagProperties ragProperties;
+    @Mock org.hyland.contentlake.client.NamedQueryService namedQueryService;
 
     @InjectMocks SemanticSearchService service;
 

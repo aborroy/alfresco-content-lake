@@ -3,6 +3,8 @@ package org.hyland.contentlake.rag.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.client.HxprService;
+import org.hyland.contentlake.client.NamedQueryService;
+import org.hyland.contentlake.client.VocabularyService;
 import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
@@ -93,6 +95,8 @@ public class HybridSearchService {
     private final SourceMetadataResolver sourceMetadataResolver;
     private final QueryExpansionService queryExpansionService;
     private final RagProperties ragProperties;
+    private final NamedQueryService namedQueryService;
+    private final VocabularyService vocabularyService;
 
     @Value("${alfresco.source-id:}")
     private String alfrescoSourceId;
@@ -134,17 +138,12 @@ public class HybridSearchService {
         String metadataFilter = buildMetadataFilter(request.getMetadata());
         String additionalFilter = combineFilters(request.getFilter(), metadataFilter);
         additionalFilter = combineFilters(additionalFilter, sourceTypeFilter);
+        // A named query, when supplied, resolves server-side to an HXQL fragment that scopes the
+        // search alongside any inline filter; no-op when absent.
+        additionalFilter = combineFilters(additionalFilter, namedQueryService.resolveFilter(request.getNamedQuery()));
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String logUser = auth != null ? auth.getName() : "anonymous";
-        String permissionFilter;
-        if (auth instanceof DualSourceAuthentication dual) {
-            permissionFilter = buildPermissionFilter(
-                    dual.getAlfrescoUsername(), dual.getNuxeoUsername(),
-                    request.getSourceType(), additionalFilter);
-        } else {
-            String username = securityContextService.getCurrentUsername();
-            permissionFilter = buildPermissionFilter(username, request.getSourceType(), additionalFilter);
-        }
+        String permissionFilter = buildCurrentUserPermissionFilter(request.getSourceType(), additionalFilter);
 
         int candidateCount = resolveCandidateCount(request);
         int maxResults = resolveMaxResults(request);
@@ -248,22 +247,33 @@ public class HybridSearchService {
         }
         List<ScoredChunk> vectorChunks = List.of();
 
+        // #37: when chunk-FTS mode is on, push the keyword terms into the vector call as
+        // VectorQuery.chunkFTS so hxpr filters at the chunk level, and skip the separate
+        // BM25-rescored keyword leg below. Off by default (behaviour-changing, eval-gated).
+        boolean chunkFtsMode = properties.isChunkFtsEnabled() && variant.hasKeywordLeg();
+        String chunkFts = chunkFtsMode ? buildChunkFts(variant.keywordText()) : null;
+
         if (queryVector != null && !queryVector.isEmpty()) {
-            VectorSearchResult vectorResult = hxprService.vectorSearch(
-                    queryVector, request.getEmbeddingType(), permissionFilter, candidateCount);
+            // Default path stays on the 4-arg call; only chunk-FTS mode adds the chunkFTS argument.
+            VectorSearchResult vectorResult = (chunkFts != null)
+                    ? hxprService.vectorSearch(
+                            queryVector, request.getEmbeddingType(), permissionFilter, chunkFts, candidateCount)
+                    : hxprService.vectorSearch(
+                            queryVector, request.getEmbeddingType(), permissionFilter, candidateCount);
             vectorChunks = extractVectorChunks(vectorResult);
         }
 
         // --- Keyword (fulltext) leg ---
         List<ScoredChunk> keywordChunks = List.of();
-        if (variant.hasKeywordLeg()) {
+        if (variant.hasKeywordLeg() && !chunkFtsMode) {
             log.info("Hybrid search keyword leg: query=\"{}\", candidates={}",
                     variant.keywordText(), candidateCount);
             // The query embedding is reused: the keyword leg needs a vector only because the embeddings
             // endpoint is the sole way to read chunk text, and embedding the same query twice per search
             // would double the inference cost of every hybrid request for nothing.
             keywordChunks = executeKeywordSearch(
-                    variant.keywordText(), permissionFilter, candidateCount, queryVector);
+                    variant.keywordText(), permissionFilter, candidateCount, queryVector,
+                    request.getEmbeddingType());
         }
 
         log.info("Hybrid search candidates: vector={}, keyword={}", vectorChunks.size(), keywordChunks.size());
@@ -360,11 +370,16 @@ public class HybridSearchService {
      * when one is available rather than computed again.</p>
      */
     List<ScoredChunk> executeKeywordSearch(String queryText, String permissionFilter, int candidateCount) {
-        return executeKeywordSearch(queryText, permissionFilter, candidateCount, null);
+        return executeKeywordSearch(queryText, permissionFilter, candidateCount, null, null);
     }
 
     List<ScoredChunk> executeKeywordSearch(String queryText, String permissionFilter, int candidateCount,
                                            List<Double> queryVector) {
+        return executeKeywordSearch(queryText, permissionFilter, candidateCount, queryVector, null);
+    }
+
+    List<ScoredChunk> executeKeywordSearch(String queryText, String permissionFilter, int candidateCount,
+                                           List<Double> queryVector, String embeddingType) {
         String fulltextClause = buildFulltextClause(queryText);
         if (fulltextClause == null) {
             // Nothing to match on. Returning empty rather than falling back to the permission
@@ -384,7 +399,7 @@ public class HybridSearchService {
                 return List.of();
             }
 
-            VectorSearchResult result = hxprService.vectorSearch(vector, null, hxql, candidateCount);
+            VectorSearchResult result = hxprService.vectorSearch(vector, embeddingType, hxql, candidateCount);
             if (result == null || result.getEmbeddings() == null) {
                 return List.of();
             }
@@ -489,6 +504,12 @@ public class HybridSearchService {
      * strong term is a useful candidate. Requiring every term would make a long natural-language
      * question match nothing.</p>
      */
+    /** Space-separated keyword terms for {@code VectorQuery.chunkFTS}, or {@code null} if none. */
+    static String buildChunkFts(String queryText) {
+        List<String> terms = keywordTerms(queryText);
+        return terms.isEmpty() ? null : String.join(" ", terms);
+    }
+
     String buildFulltextClause(String queryText) {
         List<String> terms = keywordTerms(queryText);
         if (terms.isEmpty()) {
@@ -845,7 +866,10 @@ public class HybridSearchService {
                 if (key == null || value == null || value.isBlank()) {
                     continue;
                 }
-                clauses.add(INGEST_PROP_PREFIX + key + " = '" + escapeHxqlLiteral(value.trim()) + "'");
+                // Normalize the caller's label to its canonical vocabulary key so the same concept
+                // matches across repos; a no-op when no vocabulary maps the value.
+                String canonical = vocabularyService.resolve(value.trim());
+                clauses.add(INGEST_PROP_PREFIX + key + " = '" + escapeHxqlLiteral(canonical) + "'");
             }
         }
 
@@ -869,6 +893,21 @@ public class HybridSearchService {
     // ---------------------------------------------------------------
     // Permission filter (reuses SemanticSearchService logic)
     // ---------------------------------------------------------------
+
+    /**
+     * Builds an ACL-scoped HXQL permission filter for the currently authenticated user, honouring
+     * dual-source (Alfresco + Nuxeo) authentication. Shared with {@link FacetsService} so facet
+     * counts are scoped to what the caller may read, not the whole corpus.
+     */
+    public String buildCurrentUserPermissionFilter(String sourceType, String additionalFilter) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth instanceof DualSourceAuthentication dual) {
+            return buildPermissionFilter(
+                    dual.getAlfrescoUsername(), dual.getNuxeoUsername(), sourceType, additionalFilter);
+        }
+        String username = securityContextService.getCurrentUsername();
+        return buildPermissionFilter(username, sourceType, additionalFilter);
+    }
 
     String buildPermissionFilter(String username, String additionalFilter) {
         return buildPermissionFilter(username, null, additionalFilter);

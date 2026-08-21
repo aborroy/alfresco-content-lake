@@ -1,9 +1,14 @@
 package org.hyland.contentlake.client;
 
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.hxpr.api.model.AdvancedQuery;
+import org.hyland.contentlake.hxpr.api.model.NamedQuery;
 import org.hyland.contentlake.hxpr.api.model.Query;
+import org.hyland.contentlake.hxpr.api.model.TermsAggregationsQuery;
 import org.hyland.contentlake.hxpr.api.model.VectorQuery;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
+import org.hyland.contentlake.model.HxprNamedQueries;
+import org.hyland.contentlake.model.HxprTermsAggregationResult;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprEmbedding;
 import org.springframework.http.MediaType;
@@ -422,15 +427,16 @@ public class HxprService {
      */
     public HxprDocument findByNodeId(String nodeId, String sourceId) {
         try {
-            String hxql = "SELECT * FROM SysContent WHERE sys_primaryType = '" + SYS_FILE + "' AND cin_id = '"
-                    + escapeHxql(nodeId) + "'";
+            // Each predicate is an independent quick-filter clause AND-ed by hxpr, rather than a
+            // single concatenated HXQL WHERE string.
+            List<String> clauses = new ArrayList<>();
+            clauses.add("sys_primaryType = '" + SYS_FILE + "'");
+            clauses.add("cin_id = '" + escapeHxql(nodeId) + "'");
             if (sourceId != null && !sourceId.isBlank()) {
-                hxql += " AND " + buildSourceIdPredicate(sourceId);
+                clauses.add(buildSourceIdPredicate(sourceId));
             }
 
-            Query query = newQuery(hxql, 2, 0);
-
-            HxprDocument.QueryResult result = queryApi.query(query);
+            HxprDocument.QueryResult result = advancedQuery(DEFAULT_QUERY, clauses, 2, 0);
             if (result != null && result.getDocuments() != null && !result.getDocuments().isEmpty()) {
                 return selectPreferredDocument(result.getDocuments(), sourceId);
             }
@@ -466,12 +472,15 @@ public class HxprService {
                     .map(id -> "cin_id = '" + escapeHxql(id) + "'")
                     .collect(Collectors.joining(" OR ", "(", ")"));
 
-            String hxql = "SELECT * FROM SysContent WHERE sys_primaryType = '" + SYS_FILE + "' AND " + idPredicate;
+            // Independent quick-filter clauses (the id predicate is a single OR-clause).
+            List<String> clauses = new ArrayList<>();
+            clauses.add("sys_primaryType = '" + SYS_FILE + "'");
+            clauses.add(idPredicate);
             if (sourceId != null && !sourceId.isBlank()) {
-                hxql += " AND " + buildSourceIdPredicate(sourceId);
+                clauses.add(buildSourceIdPredicate(sourceId));
             }
 
-            HxprDocument.QueryResult result = query(hxql, sanitizedIds.size() * 2, 0);
+            HxprDocument.QueryResult result = advancedQuery(DEFAULT_QUERY, clauses, sanitizedIds.size() * 2, 0);
             if (result == null || result.getDocuments() == null) {
                 return Map.of();
             }
@@ -516,6 +525,87 @@ public class HxprService {
     }
 
     /**
+     * Executes an advanced query: a base HXQL query plus a list of independent quick-filter
+     * clauses, each of which hxpr AND-s onto the result. Prefer this over string-concatenating
+     * predicates into a single HXQL {@code WHERE}.
+     *
+     * @param baseQuery         base HXQL query, or a default query when {@code null}
+     * @param quickFilterClauses independent filter clauses (each AND-ed), may be empty
+     * @param limit             max results
+     * @param offset            result offset
+     * @return query result
+     */
+    public HxprDocument.QueryResult advancedQuery(String baseQuery, List<String> quickFilterClauses,
+                                                  int limit, int offset) {
+        AdvancedQuery aq = new AdvancedQuery();
+        aq.setQuery(baseQuery != null ? baseQuery : DEFAULT_QUERY);
+        if (quickFilterClauses != null && !quickFilterClauses.isEmpty()) {
+            aq.setQuickFilterClauses(quickFilterClauses);
+        }
+        aq.setLimit((long) limit);
+        aq.setOffset((long) offset);
+        aq.setTrackTotalCount(true);
+        return queryApi.advancedQuery(aq);
+    }
+
+    /**
+     * Executes a pre-registered named query.
+     *
+     * @param queryName            name of a named-query definition registered in hxpr
+     * @param selectedQuickFilters names of the definition's quick filters to apply, may be empty
+     * @param limit                max results
+     * @param offset               result offset
+     * @return query result
+     */
+    public HxprDocument.QueryResult namedQuery(String queryName, List<String> selectedQuickFilters,
+                                               int limit, int offset) {
+        NamedQuery nq = new NamedQuery();
+        nq.setQueryName(queryName);
+        if (selectedQuickFilters != null && !selectedQuickFilters.isEmpty()) {
+            nq.setSelectedQuickFilters(selectedQuickFilters);
+        }
+        nq.setLimit((long) limit);
+        nq.setOffset((long) offset);
+        nq.setTrackTotalCount(true);
+        return queryApi.namedQuery(nq);
+    }
+
+    /** Returns the names of the named-query definitions registered in hxpr. */
+    public List<String> listNamedQueries() {
+        HxprNamedQueries result = queryApi.listNamedQueries();
+        return (result != null && result.getNamedQueries() != null)
+                ? result.getNamedQueries()
+                : List.of();
+    }
+
+    /** Returns the full definition of a named query, or {@code null} if it is not registered. */
+    public org.hyland.contentlake.hxpr.api.model.NamedQueryDefinition getNamedQuery(String queryName) {
+        return queryApi.getNamedQuery(queryName);
+    }
+
+    /**
+     * Terms aggregation: returns the top-N distinct values of {@code property} with their document
+     * counts, scoped by an HXQL query (typically a permission filter).
+     *
+     * @param hxqlQuery  base HXQL scoping query, or a default query when {@code null}
+     * @param property   the property to aggregate on (required by hxpr)
+     * @param searchTerm optional term to filter the aggregated values, may be {@code null}
+     * @param limit      max number of buckets
+     * @return the aggregation buckets
+     */
+    public HxprTermsAggregationResult termsAggregation(String hxqlQuery, String property,
+                                                       String searchTerm, int limit) {
+        TermsAggregationsQuery taq = new TermsAggregationsQuery();
+        taq.setTermsAggregationProperty(property);
+        taq.setQuery(newQuery(hxqlQuery != null ? hxqlQuery : DEFAULT_QUERY, limit, 0));
+        if (searchTerm != null && !searchTerm.isBlank()) {
+            taq.setSearchTerm(searchTerm);
+        }
+        taq.setLimit(limit);
+        return queryApi.termsAggregation(taq);
+    }
+
+    /**
      * Performs a vector similarity search (kNN).
      *
      * @param vector query vector
@@ -525,10 +615,28 @@ public class HxprService {
      * @return vector search result
      */
     public VectorSearchResult vectorSearch(List<Double> vector, String embeddingType, String hxqlFilter, int limit) {
+        return vectorSearch(vector, embeddingType, hxqlFilter, null, limit);
+    }
+
+    /**
+     * Vector similarity search with an optional chunk-level fulltext filter.
+     *
+     * @param vector        query vector
+     * @param embeddingType embedding type, or {@code "*"} when {@code null}
+     * @param hxqlFilter    hxql filter, or a default query when {@code null}
+     * @param chunkFTS      space-separated terms matched against chunk text by hxpr, or {@code null}
+     * @param limit         max results
+     * @return vector search result
+     */
+    public VectorSearchResult vectorSearch(List<Double> vector, String embeddingType, String hxqlFilter,
+                                           String chunkFTS, int limit) {
         VectorQuery vq = new VectorQuery();
         vq.setVector(vector);
         vq.setEmbeddingType(embeddingType != null ? embeddingType : "*");
         vq.setQuery(hxqlFilter != null ? hxqlFilter : DEFAULT_QUERY);
+        if (chunkFTS != null && !chunkFTS.isBlank()) {
+            vq.setChunkFTS(chunkFTS);
+        }
         vq.setLimit((long) limit);
         vq.setOffset(0L);
         vq.setTrackTotalCount(true);

@@ -49,6 +49,12 @@ public class HybridSearchRequest {
     /** Optional HXQL filter appended to the permission filter. */
     private String filter;
 
+    /**
+     * Optional name of a hxpr named query, an alternative to the inline {@link #filter}: its
+     * matching documents scope the search. Null (the default) leaves retrieval unchanged.
+     */
+    private String namedQuery;
+
     /** Optional source type filter (`alfresco` or `nuxeo`). */
     private String sourceType;
 

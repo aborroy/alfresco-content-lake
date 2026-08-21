@@ -5,6 +5,9 @@ import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.client.HxprTokenProvider;
+import org.hyland.contentlake.client.HxprVocabularyApi;
+import org.hyland.contentlake.client.NamedQueryService;
+import org.hyland.contentlake.client.VocabularyService;
 import org.hyland.contentlake.rag.conversation.ConversationMemoryStore;
 import org.hyland.contentlake.rag.conversation.InMemoryConversationMemoryStore;
 import org.hyland.contentlake.service.EmbeddingService;
@@ -70,11 +73,30 @@ public class RagAppConfig {
         return httpProxyFactory(hxprRestClient).createClient(HxprQueryApi.class);
     }
 
+    /**
+     * Vocabulary client. Registered here only — vocabulary normalization is consumed by
+     * rag-service alone, so the ingester configs deliberately do not wire this bean.
+     */
+    @Bean
+    public HxprVocabularyApi hxprVocabularyApi(RestClient hxprRestClient) {
+        return httpProxyFactory(hxprRestClient).createClient(HxprVocabularyApi.class);
+    }
+
+    @Bean
+    public VocabularyService vocabularyService(HxprVocabularyApi hxprVocabularyApi) {
+        return new VocabularyService(hxprVocabularyApi);
+    }
+
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi,
                                    HxprQueryApi queryApi,
                                    RestClient hxprRestClient) {
         return new HxprService(documentApi, queryApi, hxprRestClient);
+    }
+
+    @Bean
+    public NamedQueryService namedQueryService(HxprService hxprService) {
+        return new NamedQueryService(hxprService);
     }
 
     // ----------------------------------------------------------------------
