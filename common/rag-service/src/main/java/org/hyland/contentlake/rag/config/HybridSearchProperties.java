@@ -47,6 +47,13 @@ public class HybridSearchProperties {
     /** Default minimum score threshold for hybrid results. */
     private double defaultMinScore = 0.0;
 
+    /**
+     * When true, the keyword leg is pushed into hxpr as {@code VectorQuery.chunkFTS} on the vector
+     * call instead of running a separate BM25-rescored embeddings query (#37). Default false: a
+     * retrieval-behaviour change that must clear the eval gate before it is enabled.
+     */
+    private boolean chunkFtsEnabled = false;
+
     /** Backward-compatible alias for older naming (`candidate-count`). */
     public int getCandidateCount() {
         return initialCandidates;

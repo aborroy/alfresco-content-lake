@@ -106,9 +106,16 @@
                             <generateModelTests>false</generateModelTests>
                             <generateModelDocumentation>false</generateModelDocumentation>
 
-                            <!-- Only generate the models we actually use -->
+                            <!-- Only generate the models we actually use.
+                                 The advanced-query request bodies (AdvancedQuery, NamedQuery,
+                                 TermsAggregationsQuery) plus their transitive $ref targets
+                                 (WhereClause, Predicate, PredicateParameter, QuickFilter,
+                                 NamedQueryDefinition) and the Vocabulary read models are wired
+                                 in Sprint 3. Deliberately excludes Document/QueryResult: those
+                                 responses are deserialized into the hand-written
+                                 HxprDocument.QueryResult, which types documents as HxprDocument. -->
                             <modelsToGenerate>
-                                ACE,User,Group,Status,Query,VectorQuery,VectorSearchResult,Embedding,LocationModel,TextLocation,ImageLocation,SpreadSheetLocation,VideoLocation
+                                ACE,User,Group,Status,Query,VectorQuery,VectorSearchResult,Embedding,LocationModel,TextLocation,ImageLocation,SpreadSheetLocation,VideoLocation,AdvancedQuery,WhereClause,Predicate,PredicateParameter,NamedQuery,NamedQueryDefinition,QuickFilter,TermsAggregationsQuery,VocabularyId,VocabularyEntry
                             </modelsToGenerate>
 
                             <configOptions>

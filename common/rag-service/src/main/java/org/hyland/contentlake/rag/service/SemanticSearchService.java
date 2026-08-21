@@ -11,6 +11,7 @@ import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.client.HxprService;
+import org.hyland.contentlake.client.NamedQueryService;
 import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
@@ -67,6 +68,7 @@ public class SemanticSearchService {
     private final SourceMetadataResolver sourceMetadataResolver;
     private final QueryExpansionService queryExpansionService;
     private final RagProperties ragProperties;
+    private final NamedQueryService namedQueryService;
 
     private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
     private static final int SOURCE_DISCOVERY_LIMIT = 25;
@@ -171,6 +173,8 @@ public class SemanticSearchService {
     private String buildHxqlFilter(SemanticSearchRequest request, Authentication auth) {
         String sourceTypeFilter = buildSourceTypeFilter(request.getSourceType());
         String additionalFilter = combineFilters(request.getFilter(), sourceTypeFilter);
+        // A named query, when supplied, resolves server-side to an HXQL fragment; no-op when absent.
+        additionalFilter = combineFilters(additionalFilter, namedQueryService.resolveFilter(request.getNamedQuery()));
         if (auth instanceof DualSourceAuthentication dual) {
             return buildPermissionFilter(
                     dual.getAlfrescoUsername(), dual.getNuxeoUsername(),

@@ -43,11 +43,17 @@ class HybridSearchServiceTest {
     @Mock SourceMetadataResolver sourceMetadataResolver;
     @Mock QueryExpansionService queryExpansionService;
     @Mock RagProperties ragProperties;
+    @Mock org.hyland.contentlake.client.NamedQueryService namedQueryService;
+    @Mock org.hyland.contentlake.client.VocabularyService vocabularyService;
 
     @InjectMocks HybridSearchService service;
 
     @BeforeEach
     void setUp() {
+        // Vocabulary resolution defaults to a pass-through; only the vocabulary-specific test overrides it.
+        org.mockito.Mockito.lenient()
+                .when(vocabularyService.resolve(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));
         ReflectionTestUtils.setField(service, "alfrescoSourceId", "test-repo");
         ReflectionTestUtils.setField(service, "permissionSourceIds", "");
         ReflectionTestUtils.setField(service, "nuxeoSourceId", "");
@@ -466,6 +472,20 @@ class HybridSearchServiceTest {
             String filter = service.buildMetadataFilter(metadata);
             assertThat(filter).isNull();
         }
+
+        @Test
+        void buildMetadataFilter_normalizesCustomPropertyValueThroughVocabulary() {
+            // The same concept ("HR Documents") stored under different labels across repos must
+            // filter on the canonical vocabulary key (#39).
+            when(vocabularyService.resolve("HR Documents")).thenReturn("hr");
+            HybridSearchRequest.MetadataFilter metadata = HybridSearchRequest.MetadataFilter.builder()
+                    .properties(Map.of("cm:category", "HR Documents"))
+                    .build();
+
+            String filter = service.buildMetadataFilter(metadata);
+
+            assertThat(filter).contains("cin_ingestProperties.cm:category = 'hr'");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -659,7 +679,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -667,6 +687,34 @@ class HybridSearchServiceTest {
             assertThat(response.getResultCount()).isZero();
             assertThat(response.getStrategy()).isEqualTo("rrf");
             assertThat(response.getQuery()).isEqualTo("test");
+        }
+
+        @Test
+        void search_chunkFtsEnabled_pushesTermsIntoVectorCallAndSkipsKeywordLeg() {
+            when(properties.getStrategy()).thenReturn("rrf");
+            when(properties.getCandidateCount()).thenReturn(20);
+            when(properties.getMaxResults()).thenReturn(5);
+            when(properties.getRrfK()).thenReturn(60);
+            when(properties.getDefaultMinScore()).thenReturn(0.0);
+            when(properties.isChunkFtsEnabled()).thenReturn(true);
+
+            when(securityContextService.getCurrentUsername()).thenReturn("user");
+            when(embeddingService.embedQuery(any())).thenReturn(List.of(0.1d, 0.2d));
+            when(embeddingService.getModelName()).thenReturn("test-model");
+
+            VectorSearchResult vectorResult = mock(VectorSearchResult.class);
+            when(vectorResult.getEmbeddings()).thenReturn(List.of());
+            // Chunk-FTS mode calls the 5-arg vectorSearch (with the chunkFTS term string).
+            when(hxprService.vectorSearch(any(), any(), any(), any(), anyInt())).thenReturn(vectorResult);
+
+            HybridSearchService svc = spy(service);
+
+            svc.search(HybridSearchRequest.builder().query("alfresco").build());
+
+            // Keyword terms travel as chunkFTS on the vector call...
+            verify(hxprService).vectorSearch(any(), any(), any(), eq("alfresco"), anyInt());
+            // ...and the separate BM25 keyword leg is not run.
+            verify(svc, never()).executeKeywordSearch(any(), any(), anyInt(), any(), any());
         }
 
         @Test
@@ -688,7 +736,7 @@ class HybridSearchServiceTest {
             HybridSearchService svc = spy(service);
             ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
             doReturn(List.of("user")).when(svc).getUserAuthorities("user", "nuxeo-demo");
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             svc.search(HybridSearchRequest.builder()
                     .query("test")
@@ -731,7 +779,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -773,7 +821,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder().query("test").build();
             HybridSearchResponse response = svc.search(request);
@@ -798,7 +846,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder()
                     .query("test")
@@ -823,7 +871,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             HybridSearchRequest request = HybridSearchRequest.builder()
                     .query("test")
@@ -868,7 +916,7 @@ class HybridSearchServiceTest {
 
             HybridSearchService svc = spy(service);
             doReturn(List.of("user")).when(svc).getUserAuthorities(anyString(), anyString());
-            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any());
+            doReturn(List.of()).when(svc).executeKeywordSearch(any(), any(), anyInt(), any(), any());
 
             // Set minScore high enough to filter the second result
             // RRF score for rank 1 = 1/61 ≈ 0.0164, rank 2 = 1/62 ≈ 0.0161
@@ -951,6 +999,19 @@ class HybridSearchServiceTest {
                             && filter.contains("sys_fulltext = 'content'")
                             && filter.contains("sys_racl = '__Everyone__'")
             ), anyInt());
+        }
+
+        @Test
+        void executeKeywordSearch_propagatesTheEmbeddingTypeToTheVectorCall() {
+            // The keyword leg reads chunks through the embeddings endpoint; it must target the
+            // same embeddingType as the vector leg, not the "*" wildcard, or kNN candidate
+            // selection would mix incompatible embedding models (#42).
+            stubChunks(List.of());
+
+            service.executeKeywordSearch(
+                    "alfresco", "SELECT * FROM SysContent", 20, List.of(0.1d, 0.2d), "text-embed-v2");
+
+            verify(hxprService).vectorSearch(any(), eq("text-embed-v2"), any(), anyInt());
         }
 
         @Test
