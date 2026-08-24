@@ -1,6 +1,7 @@
 package org.hyland.contentlake.service.chunking;
 
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.service.chunking.strategy.TextSegmenter;
 
 import java.util.Arrays;
 import java.util.List;
@@ -92,10 +93,51 @@ public class NoiseReductionService {
             return text;
         }
 
-        String result = text;
+        // Detected tables are stitched back verbatim: the dot-leader and repeated-character rules
+        // below strip the very characters ('|', '---', aligned dots) that carry table structure, so
+        // cleanup runs only on the prose spans between tables.
+        List<int[]> tables = TextSegmenter.detectTableBlocks(text);
+        String result;
+        if (tables.isEmpty()) {
+            result = cleanSpan(text);
+        } else {
+            StringBuilder sb = new StringBuilder(text.length());
+            int cursor = 0;
+            for (int[] table : tables) {
+                if (table[0] > cursor) {
+                    sb.append(cleanSpan(text.substring(cursor, table[0])));
+                }
+                sb.append(text, table[0], table[1]);
+                cursor = table[1];
+            }
+            if (cursor < text.length()) {
+                sb.append(cleanSpan(text.substring(cursor)));
+            }
+            result = sb.toString();
+        }
 
+        // Final cleanup applies across the stitched result.
+        result = EXCESSIVE_BLANKS.matcher(result).replaceAll("\n\n");
+        result = result.trim();
+
+        if (log.isDebugEnabled()) {
+            int removed = text.length() - result.length();
+            if (removed > 0) {
+                log.debug("Noise reduction removed {} chars ({}% of original)",
+                        removed, String.format("%.1f", 100.0 * removed / text.length()));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Runs the noise-reduction phases on a prose span (everything except the final blank-line
+     * collapse and trim, which {@link #clean(String)} applies once across the stitched result).
+     */
+    private String cleanSpan(String span) {
         // Phase 1: Remove binary/encoding artifacts
-        result = PDF_ARTIFACTS.matcher(result).replaceAll("");
+        String result = PDF_ARTIFACTS.matcher(span).replaceAll("");
         result = REPEATED_CHARS.matcher(result).replaceAll("");
 
         // Phase 2: Normalize whitespace (but preserve paragraph structure)
@@ -109,18 +151,6 @@ public class NoiseReductionService {
         // Phase 4: Remove repetitive boilerplate (lines that repeat across the document)
         if (aggressive) {
             result = removeRepetitiveLines(result);
-        }
-
-        // Phase 5: Final cleanup
-        result = EXCESSIVE_BLANKS.matcher(result).replaceAll("\n\n");
-        result = result.trim();
-
-        if (log.isDebugEnabled()) {
-            int removed = text.length() - result.length();
-            if (removed > 0) {
-                log.debug("Noise reduction removed {} chars ({}% of original)",
-                        removed, String.format("%.1f", 100.0 * removed / text.length()));
-            }
         }
 
         return result;

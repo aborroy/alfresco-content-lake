@@ -70,7 +70,8 @@ class NodeSyncServicePathConflictTest {
                 embeddingService,
                 chunkingService,
                 TARGET_PATH,
-                null
+                null,
+                false
         );
     }
 

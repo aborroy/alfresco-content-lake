@@ -151,7 +151,10 @@ public class LiveIngesterConfig {
             TransformClient transformClient,
             EmbeddingService embeddingService,
             SimpleChunkingService chunkingService,
-            HxprProperties hxprProps
+            HxprProperties hxprProps,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${content-lake.ingest.keyword-context-enrichment-enabled:false}")
+            boolean keywordContextEnrichmentEnabled
     ) {
         return new NodeSyncService(
                 alfrescoClient,    // ContentSourceClient
@@ -161,7 +164,8 @@ public class LiveIngesterConfig {
                 embeddingService,
                 chunkingService,
                 hxprProps.getTargetPath(),
-                hxprProps.getPathRepositoryId()
+                hxprProps.getPathRepositoryId(),
+                keywordContextEnrichmentEnabled
         );
     }
 

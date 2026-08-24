@@ -101,6 +101,10 @@ rag:
     max-history-turns: ${RAG_CONVERSATION_MAX_HISTORY_TURNS:10}
     session-ttl-minutes: ${RAG_CONVERSATION_SESSION_TTL_MINUTES:30}
     query-reformulation: ${RAG_CONVERSATION_QUERY_REFORMULATION:true}
+    # Persistent running summary in hxpr. Off until the sessions folder is provisioned.
+    summary:
+      enabled: ${RAG_CONVERSATION_SUMMARY_ENABLED:false}
+      base-path: ${RAG_CONVERSATION_SUMMARY_BASE_PATH:/_sessions}
   # Query expansion. Shared bounds for multi-query, HyDE and decomposition, all of which append to the
   # same variant list; max-variants is the ceiling on the per-request embedding and hxpr call count.
   # rrf-k here fuses across variants, one level above search.hybrid.rrf-k which fuses the two legs.
@@ -123,6 +127,22 @@ rag:
     min-score: ${RAG_RETRIEVAL_GRADING_MIN_SCORE:0.0}
     min-hits: ${RAG_RETRIEVAL_GRADING_MIN_HITS:1}
     broaden: ${RAG_RETRIEVAL_GRADING_BROADEN:true}
+  # Intent-aware filter inference (opt-in per request via inferFilters). category-property is the
+  # ingest-property key a inferred category maps to; blank disables category inference.
+  filter-inference:
+    category-property: ${RAG_FILTER_INFERENCE_CATEGORY_PROPERTY:}
+  # Post-generation citation faithfulness verification. Off by default (adds an LLM call per answer).
+  citation:
+    verify:
+      enabled: ${RAG_CITATION_VERIFY_ENABLED:false}
+  # Small-to-big (parent-child) retrieval: expand each hit to its parent section for LLM context.
+  retrieval:
+    small-to-big:
+      enabled: ${RAG_RETRIEVAL_SMALL_TO_BIG_ENABLED:false}
+      max-section-chars: ${RAG_RETRIEVAL_SMALL_TO_BIG_MAX_SECTION_CHARS:4000}
+  # In-app evaluation smoke endpoint. Off by default; content-lake-eval is the authoritative gate.
+  evaluation:
+    enabled: ${RAG_EVALUATION_ENABLED:false}
 
 # Semantic Search configuration
 semantic-search:

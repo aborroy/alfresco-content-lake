@@ -52,8 +52,12 @@ class ContentLakeRetrievalAdvisorTest {
         retrievalGrader = mock(RetrievalGrader.class);
         properties = new RagProperties();
         properties.setDefaultTopK(2);
+        // Small-to-big disabled by default: expansion is a pass-through here.
+        SectionExpansionService sectionExpansionService =
+                new SectionExpansionService(mock(org.hyland.contentlake.client.HxprDocumentApi.class), properties);
         advisor = new ContentLakeRetrievalAdvisor(
-                documentRetriever, diversitySelector, rerankService, retrievalGrader, properties);
+                documentRetriever, diversitySelector, rerankService, retrievalGrader, properties,
+                sectionExpansionService);
     }
 
     private static SearchHit hit(String text) {

@@ -31,7 +31,86 @@ public final class TextSegmenter {
                     ")",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
 
+    /**
+     * Markdown-style table separator row, e.g. {@code | --- | :--: |} or {@code ---|---}.
+     * A run of table-like lines that includes a data row is treated as a table.
+     */
+    private static final Pattern TABLE_SEPARATOR_ROW = Pattern.compile(
+            "^\\s*\\|?\\s*:?-{2,}:?\\s*(?:\\|\\s*:?-{2,}:?\\s*)+\\|?\\s*$");
+
+    /** Minimum consecutive table-like lines that constitute a table block. */
+    private static final int MIN_TABLE_LINES = 2;
+
     private TextSegmenter() {}
+
+    /**
+     * A line is table-like if it is a markdown separator row or a pipe-delimited row (two or more
+     * pipes). Pipe-delimited detection is deliberately conservative: it is the one signal common
+     * text extractors emit reliably, and over-detecting would wrongly exempt prose from noise
+     * reduction. Fixed-width column tables are not attempted for the same reason.
+     */
+    static boolean isTableLine(String line) {
+        if (line == null) {
+            return false;
+        }
+        if (TABLE_SEPARATOR_ROW.matcher(line).matches()) {
+            return true;
+        }
+        int pipes = 0;
+        for (int i = 0; i < line.length(); i++) {
+            if (line.charAt(i) == '|') {
+                pipes++;
+            }
+        }
+        return pipes >= 2;
+    }
+
+    /**
+     * Detects table blocks in {@code text}, returned as line-aligned {@code [start, end)} character
+     * ranges in document order. A block is a run of at least {@link #MIN_TABLE_LINES} consecutive
+     * table-like lines. Ranges never overlap and are sorted by start offset.
+     */
+    public static List<int[]> detectTableBlocks(String text) {
+        List<int[]> blocks = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return blocks;
+        }
+
+        int runStart = -1;   // char offset of the first line in the current table run
+        int runLines = 0;    // number of consecutive table-like lines in the current run
+        int runEnd = 0;      // char offset just past the last table-like line's text
+        int lineStart = 0;
+
+        int i = 0;
+        int n = text.length();
+        while (i <= n) {
+            boolean atEnd = (i == n);
+            char c = atEnd ? '\n' : text.charAt(i);
+            if (c == '\n' || atEnd) {
+                String line = text.substring(lineStart, i);
+                if (isTableLine(line)) {
+                    if (runStart < 0) {
+                        runStart = lineStart;
+                        runLines = 0;
+                    }
+                    runLines++;
+                    runEnd = i;
+                } else {
+                    if (runLines >= MIN_TABLE_LINES) {
+                        blocks.add(new int[]{runStart, runEnd});
+                    }
+                    runStart = -1;
+                    runLines = 0;
+                }
+                lineStart = i + 1;
+            }
+            i++;
+        }
+        if (runLines >= MIN_TABLE_LINES) {
+            blocks.add(new int[]{runStart, runEnd});
+        }
+        return blocks;
+    }
 
     /**
      * Splits text into sentences.
@@ -120,6 +199,122 @@ public final class TextSegmenter {
     }
 
     /**
+     * Table-aware top-level segmentation used by adaptive chunking.
+     *
+     * <p>Detected table blocks are emitted as atomic {@code table} segments and never section-split;
+     * the spans between them are split into heading-delimited sections by {@link #splitSections}.
+     * Every emitted segment carries a document-order {@code sectionIndex} so chunks derived from the
+     * same section (or the same table) can be identified downstream.</p>
+     */
+    public static List<TextSegment> splitSectionsAndTables(String text) {
+        List<TextSegment> result = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return result;
+        }
+
+        List<int[]> tables = detectTableBlocks(text);
+        if (tables.isEmpty()) {
+            List<TextSegment> sections = splitSections(text);
+            for (int i = 0; i < sections.size(); i++) {
+                result.add(sections.get(i).withSection(i));
+            }
+            return result;
+        }
+
+        int cursor = 0;
+        int sectionIndex = 0;
+        for (int[] table : tables) {
+            int tableStart = table[0];
+            int tableEnd = table[1];
+
+            // Prose span before this table: section-split it, shifting offsets back to absolute.
+            if (tableStart > cursor) {
+                String prose = text.substring(cursor, tableStart);
+                for (TextSegment section : splitSections(prose)) {
+                    result.add(new TextSegment(section.text(),
+                            cursor + section.startOffset(), cursor + section.endOffset(),
+                            false, sectionIndex++));
+                }
+            }
+
+            String tableText = text.substring(tableStart, tableEnd).strip();
+            if (!tableText.isEmpty()) {
+                result.add(new TextSegment(tableText, tableStart, tableEnd, true, sectionIndex++));
+            }
+            cursor = tableEnd;
+        }
+
+        // Trailing prose after the last table.
+        if (cursor < text.length()) {
+            String prose = text.substring(cursor);
+            for (TextSegment section : splitSections(prose)) {
+                result.add(new TextSegment(section.text(),
+                        cursor + section.startOffset(), cursor + section.endOffset(),
+                        false, sectionIndex++));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Splits an oversized table into row-group segments, repeating the header (and any markdown
+     * separator row) at the top of each group so every resulting chunk stays self-contained.
+     *
+     * <p>Returns the table unchanged (as a single-element list) when it already fits {@code maxSize}
+     * or has too few rows to split.</p>
+     */
+    public static List<TextSegment> splitTableByRowGroups(TextSegment table, int maxSize) {
+        String text = table.text();
+        if (text.length() <= maxSize) {
+            return List.of(table);
+        }
+
+        List<String> lines = text.lines().toList();
+        if (lines.size() <= 1) {
+            return List.of(table);
+        }
+
+        String header = lines.get(0);
+        int firstDataRow = 1;
+        String headerBlock = header;
+        if (lines.size() > 1 && TABLE_SEPARATOR_ROW.matcher(lines.get(1)).matches()) {
+            headerBlock = header + "\n" + lines.get(1);
+            firstDataRow = 2;
+        }
+
+        List<TextSegment> groups = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean hasRow = false;
+        for (int i = firstDataRow; i < lines.size(); i++) {
+            String row = lines.get(i);
+            int projected = headerBlock.length() + 1 + current.length() + row.length() + 1;
+            if (hasRow && projected > maxSize) {
+                groups.add(rowGroupSegment(table, headerBlock, current.toString()));
+                current.setLength(0);
+                hasRow = false;
+            }
+            if (!current.isEmpty()) {
+                current.append('\n');
+            }
+            current.append(row);
+            hasRow = true;
+        }
+        if (hasRow) {
+            groups.add(rowGroupSegment(table, headerBlock, current.toString()));
+        }
+
+        // Degenerate case (e.g. a single header+separator with no data rows): keep the table as-is.
+        return groups.isEmpty() ? List.of(table) : groups;
+    }
+
+    private static TextSegment rowGroupSegment(TextSegment table, String headerBlock, String rows) {
+        String groupText = headerBlock + "\n" + rows;
+        return new TextSegment(groupText, table.startOffset(), table.endOffset(), true,
+                table.sectionIndex());
+    }
+
+    /**
      * Groups consecutive segments into chunks that respect size constraints.
      * Tries to keep chunks between minSize and maxSize characters.
      */
@@ -159,10 +354,25 @@ public final class TextSegmenter {
 
     /**
      * A segment of text with its position in the original document.
+     *
+     * @param table        whether this segment is a detected table (kept atomic during chunking)
+     * @param sectionIndex document-order index of the source section this segment belongs to
      */
-    public record TextSegment(String text, int startOffset, int endOffset) {
+    public record TextSegment(String text, int startOffset, int endOffset, boolean table,
+                              int sectionIndex) {
+
+        /** Convenience constructor for prose segments in the first section. */
+        public TextSegment(String text, int startOffset, int endOffset) {
+            this(text, startOffset, endOffset, false, 0);
+        }
+
         public int length() {
             return text.length();
+        }
+
+        /** Returns a copy of this segment reassigned to {@code sectionIndex}. */
+        public TextSegment withSection(int sectionIndex) {
+            return new TextSegment(text, startOffset, endOffset, table, sectionIndex);
         }
     }
 }

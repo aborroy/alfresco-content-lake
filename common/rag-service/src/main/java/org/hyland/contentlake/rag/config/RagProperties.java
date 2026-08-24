@@ -85,6 +85,18 @@ public class RagProperties {
     /** Pre-generation retrieval relevance gate (disabled by default). */
     private RetrievalGradingProperties retrievalGrading = new RetrievalGradingProperties();
 
+    /** Intent-aware filter inference settings (opt-in per request via inferFilters). */
+    private FilterInferenceProperties filterInference = new FilterInferenceProperties();
+
+    /** Post-generation citation faithfulness verification (disabled by default). */
+    private CitationProperties citation = new CitationProperties();
+
+    /** Retrieval-shaping settings, including small-to-big section expansion. */
+    private RetrievalProperties retrieval = new RetrievalProperties();
+
+    /** In-app evaluation smoke endpoint (disabled by default). */
+    private EvaluationProperties evaluation = new EvaluationProperties();
+
     @Data
     public static class RerankerProperties {
 
@@ -132,6 +144,23 @@ public class RagProperties {
 
         /** Enables/disables conversation-aware query reformulation. */
         private boolean queryReformulation = true;
+
+        /** Persistent running-summary settings (disabled by default). */
+        private SummaryProperties summary = new SummaryProperties();
+    }
+
+    @Data
+    public static class SummaryProperties {
+
+        /**
+         * Enables an LLM-maintained running summary persisted in hxpr, preserving key facts and
+         * intent beyond the sliding window and across restarts. Off by default until the hxpr
+         * sessions folder is provisioned.
+         */
+        private boolean enabled = false;
+
+        /** hxpr folder under which per-session summary documents are stored. */
+        private String basePath = "/_sessions";
     }
 
     @Data
@@ -197,6 +226,68 @@ public class RagProperties {
 
         /** Upper bound on the sub-questions accepted from the LLM. */
         private int maxSubQuestions = 4;
+    }
+
+    @Data
+    public static class EvaluationProperties {
+
+        /**
+         * Enables the in-app {@code POST /api/rag/evaluate} smoke endpoint. Off by default: this is a
+         * lightweight CI/smoke check, not the authoritative quality gate (that is the external
+         * content-lake-eval harness). Operators enable it deliberately.
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
+    public static class RetrievalProperties {
+
+        /** Small-to-big (parent-child) expansion of retrieved chunks to their parent section. */
+        private SmallToBigProperties smallToBig = new SmallToBigProperties();
+
+        @Data
+        public static class SmallToBigProperties {
+
+            /**
+             * When true, each retrieved chunk is expanded to its full parent section (from the
+             * per-document section map) before the context is assembled for the LLM. Off by default;
+             * only chunks whose document carries a section map are expanded, others pass through.
+             */
+            private boolean enabled = false;
+
+            /** Upper bound on an expanded section's text; longer sections are truncated. */
+            private int maxSectionChars = 4000;
+        }
+    }
+
+    @Data
+    public static class CitationProperties {
+
+        /** Post-generation faithfulness verification of the answer against its cited sources. */
+        private VerifyProperties verify = new VerifyProperties();
+
+        @Data
+        public static class VerifyProperties {
+
+            /**
+             * When true, after generation an NLI-style LLM check flags answer claims not supported by
+             * the retrieved context, populating {@code verified} and {@code unsupportedClaims} on the
+             * response. Off by default (adds an LLM call per answer).
+             */
+            private boolean enabled = false;
+        }
+    }
+
+    @Data
+    public static class FilterInferenceProperties {
+
+        /**
+         * Ingest-property key that holds a document's category, used when the LLM infers a category
+         * for a query. Blank (the default) disables category inference: without a known property key
+         * the service would be guessing where to file the value, so only date/mime/path filters are
+         * inferred until a deployment sets this.
+         */
+        private String categoryProperty = "";
     }
 
     @Data

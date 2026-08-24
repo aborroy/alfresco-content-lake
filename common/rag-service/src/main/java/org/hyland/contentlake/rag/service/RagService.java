@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.hyland.contentlake.rag.conversation.ConversationMemoryService;
 import org.hyland.contentlake.rag.conversation.ConversationTurn;
+import org.hyland.contentlake.rag.conversation.SessionSummaryService;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
 import org.hyland.contentlake.rag.model.RagPromptResponse.ContextChunk;
@@ -57,6 +59,9 @@ public class RagService {
     private final ConversationMemoryService conversationMemoryService;
     private final QueryReformulationService queryReformulationService;
     private final SecurityContextService securityContextService;
+    private final FilterInferenceService filterInferenceService;
+    private final SessionSummaryService sessionSummaryService;
+    private final CitationVerifier citationVerifier;
 
     /**
      * Executes the full RAG pipeline for a given question.
@@ -231,6 +236,9 @@ public class RagService {
         ConversationState conversation = prepareConversationState(request);
         String retrievalQuery = resolveRetrievalQuery(request.getQuestion(), conversation.history());
         String historyBlock = assembleConversationHistory(conversation.history());
+        // Long-term memory: prepend the persisted running summary so facts and intent from before the
+        // sliding window (or before a restart) still reach the model. No-op when the feature is off.
+        historyBlock = prependSessionSummary(conversation, historyBlock);
         String systemPrompt = resolveSystemPrompt(request);
 
         int topK = request.getTopK() > 0 ? request.getTopK() : ragProperties.getDefaultTopK();
@@ -238,6 +246,12 @@ public class RagService {
         double minScore = request.getMinScore() != null
                 ? request.getMinScore()
                 : ragProperties.getDefaultMinScore();
+
+        // Intent-aware filter inference (opt-in). Additive to any caller-supplied filter; the
+        // service returns null on failure so retrieval simply proceeds unfiltered.
+        HybridSearchRequest.MetadataFilter inferredFilter = request.isInferFilters()
+                ? filterInferenceService.infer(request.getQuestion())
+                : null;
 
         return new PromptContext(
                 conversation,
@@ -250,6 +264,7 @@ public class RagService {
                 request.getFilter(),
                 request.getSourceType(),
                 request.getEmbeddingType(),
+                inferredFilter,
                 new RetrievalTrace()
         );
     }
@@ -290,6 +305,10 @@ public class RagService {
                 ? promptContext.trace().retrievalQuery()
                 : promptContext.retrievalQuery();
 
+        // Post-generation faithfulness check (opt-in). Null result leaves both fields absent.
+        CitationVerifier.VerificationResult verification =
+                citationVerifier.verify(generation.answer(), rerankedHits);
+
         return RagPromptResponse.builder()
                 .answer(generation.answer())
                 .question(request.getQuestion())
@@ -306,6 +325,8 @@ public class RagService {
                 .sourcesUsed(sources.size())
                 .sources(sources)
                 .context(contextChunks)
+                .verified(verification != null ? verification.verified() : null)
+                .unsupportedClaims(verification != null ? verification.unsupportedClaims() : null)
                 .build();
     }
 
@@ -460,6 +481,21 @@ public class RagService {
         return ragProperties.getDefaultSystemPrompt();
     }
 
+    private String prependSessionSummary(ConversationState conversation, String historyBlock) {
+        if (!conversation.enabled() || conversation.sessionId() == null
+                || !sessionSummaryService.isEnabled()) {
+            return historyBlock;
+        }
+        String summary = sessionSummaryService.loadSummary(conversation.sessionId());
+        if (summary == null || summary.isBlank()) {
+            return historyBlock;
+        }
+        String summaryBlock = "Conversation summary so far:\n" + summary.trim();
+        return (historyBlock == null || historyBlock.isBlank())
+                ? summaryBlock
+                : summaryBlock + "\n\n" + historyBlock;
+    }
+
     private String assembleConversationHistory(List<ConversationTurn> turns) {
         if (turns == null || turns.isEmpty()) {
             return "";
@@ -517,9 +553,10 @@ public class RagService {
                                  String filter,
                                  String sourceType,
                                  String embeddingType,
+                                 HybridSearchRequest.MetadataFilter metadataFilter,
                                  RetrievalTrace trace) {
 
-        /** Non-null optional retrieval params for the advisor context (filter/sourceType/embeddingType). */
+        /** Non-null optional retrieval params for the advisor context (filter/sourceType/embeddingType/metadata). */
         Map<String, Object> optionalRetrievalParams() {
             java.util.Map<String, Object> params = new java.util.HashMap<>();
             if (filter != null) {
@@ -530,6 +567,9 @@ public class RagService {
             }
             if (embeddingType != null) {
                 params.put(HxprDocumentRetriever.CTX_EMBEDDING_TYPE, embeddingType);
+            }
+            if (metadataFilter != null) {
+                params.put(HxprDocumentRetriever.CTX_METADATA_FILTER, metadataFilter);
             }
             return params;
         }

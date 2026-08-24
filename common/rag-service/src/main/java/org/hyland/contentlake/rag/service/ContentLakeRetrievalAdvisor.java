@@ -71,17 +71,20 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     private final RerankService rerankService;
     private final RetrievalGrader retrievalGrader;
     private final RagProperties ragProperties;
+    private final SectionExpansionService sectionExpansionService;
 
     public ContentLakeRetrievalAdvisor(DocumentRetriever documentRetriever,
                                        DiversitySelector diversitySelector,
                                        RerankService rerankService,
                                        RetrievalGrader retrievalGrader,
-                                       RagProperties ragProperties) {
+                                       RagProperties ragProperties,
+                                       SectionExpansionService sectionExpansionService) {
         this.documentRetriever = documentRetriever;
         this.diversitySelector = diversitySelector;
         this.rerankService = rerankService;
         this.retrievalGrader = retrievalGrader;
         this.ragProperties = ragProperties;
+        this.sectionExpansionService = sectionExpansionService;
     }
 
     @Override
@@ -221,7 +224,10 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     private ChatClientRequest augmentRequest(ChatClientRequest request, Retrieval retrieval) {
         String question = userText(request);
         String historyBlock = stringParam(request.context().get(PARAM_HISTORY_BLOCK), "");
-        String contextBlock = assembleContext(retrieval.hits());
+        // Small-to-big: expand each hit to its parent section for context assembly only. The trace
+        // (and thus the response's source citations) keeps the original per-chunk hits.
+        List<SearchHit> contextHits = sectionExpansionService.expandForContext(retrieval.hits());
+        String contextBlock = assembleContext(contextHits);
         String augmentedUserText = buildUserPrompt(question, historyBlock, contextBlock);
 
         Prompt augmentedPrompt = request.prompt().augmentUserMessage(

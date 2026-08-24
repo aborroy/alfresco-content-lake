@@ -59,6 +59,10 @@ class RagServiceConversationTest {
     @Mock RerankService rerankService;
     @Mock DiversitySelector diversitySelector;
     @Mock SecurityContextService securityContextService;
+    @Mock FilterInferenceService filterInferenceService;
+    @Mock org.hyland.contentlake.rag.conversation.SessionSummaryService sessionSummaryService;
+    @Mock CitationVerifier citationVerifier;
+    @Mock org.hyland.contentlake.client.HxprDocumentApi hxprDocumentApi;
 
     private RagProperties properties;
     private RagService ragService;
@@ -86,8 +90,11 @@ class RagServiceConversationTest {
 
         HxprDocumentRetriever retriever =
                 new HxprDocumentRetriever(semanticSearchService, hybridSearchService, properties);
+        SectionExpansionService sectionExpansionService =
+                new SectionExpansionService(hxprDocumentApi, properties);
         ContentLakeRetrievalAdvisor advisor = new ContentLakeRetrievalAdvisor(
-                retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties);
+                retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties,
+                sectionExpansionService);
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();
@@ -97,7 +104,10 @@ class RagServiceConversationTest {
                 properties,
                 conversationMemoryService,
                 queryReformulationService,
-                securityContextService
+                securityContextService,
+                filterInferenceService,
+                sessionSummaryService,
+                citationVerifier
         );
     }
 

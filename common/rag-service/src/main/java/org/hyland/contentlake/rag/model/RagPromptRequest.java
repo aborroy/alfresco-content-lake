@@ -57,4 +57,12 @@ public class RagPromptRequest {
     /** Whether to include retrieved chunks in the response for debugging. */
     @Builder.Default
     private boolean includeContext = false;
+
+    /**
+     * When true, an LLM step infers structured metadata filters (date range, mime, path, category)
+     * from the question before retrieval and applies them additively to any caller-supplied filter.
+     * Off by default; only effective on the hybrid search path.
+     */
+    @Builder.Default
+    private boolean inferFilters = false;
 }

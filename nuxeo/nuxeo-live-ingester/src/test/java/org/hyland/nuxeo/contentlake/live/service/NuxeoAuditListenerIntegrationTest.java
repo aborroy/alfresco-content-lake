@@ -289,7 +289,8 @@ class NuxeoAuditListenerIntegrationTest {
                 embeddingService,
                 chunkingService,
                 "/nuxeo-sync",
-                null
+                null,
+                false
         );
 
         NuxeoLiveProperties props = new NuxeoLiveProperties();

@@ -60,6 +60,18 @@ public class RagPromptResponse {
     /** Full retrieved context (only when includeContext=true in request). */
     private List<ContextChunk> context;
 
+    /**
+     * Whether every factual claim in the answer was found supported by the cited context.
+     * Present only when citation verification is enabled (see {@code rag.citation.verify.enabled}).
+     */
+    private Boolean verified;
+
+    /**
+     * Claims in the answer not supported by the cited context. Present (possibly empty) only when
+     * citation verification is enabled.
+     */
+    private List<String> unsupportedClaims;
+
     @Data
     @Builder
     @NoArgsConstructor

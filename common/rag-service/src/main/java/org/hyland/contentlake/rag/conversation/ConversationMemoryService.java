@@ -23,6 +23,7 @@ public class ConversationMemoryService {
     private final ConversationMemoryStore store;
     private final RagProperties ragProperties;
     private final Clock clock;
+    private final SessionSummaryService sessionSummaryService;
     private final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
     public ConversationSession getOrCreateSession(String sessionId) {
@@ -43,7 +44,14 @@ public class ConversationMemoryService {
     }
 
     public ConversationSession appendAssistantTurn(String sessionId, String content) {
-        return appendTurn(sessionId, ConversationTurn.Role.ASSISTANT, content);
+        ConversationSession session = appendTurn(sessionId, ConversationTurn.Role.ASSISTANT, content);
+        // Update the persistent running summary after the turn is stored, outside the session lock so
+        // the LLM/hxpr round-trip does not serialize concurrent turns. Guarded so the disabled default
+        // path (sessionSummaryService may be null in tests) never touches it.
+        if (sessionSummaryService != null && sessionSummaryService.isEnabled()) {
+            sessionSummaryService.updateAfterTurn(session.getSessionId(), session.getTurns());
+        }
+        return session;
     }
 
     public void resetSession(String sessionId) {

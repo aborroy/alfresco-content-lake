@@ -56,7 +56,8 @@ class NodeSyncServiceTextExtractionTest {
                 embeddingService,
                 chunkingService,
                 "/nuxeo-sync",
-                null
+                null,
+                false
         );
     }
 

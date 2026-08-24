@@ -2,6 +2,7 @@ package org.hyland.contentlake.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.hxpr.api.model.ACE;
@@ -12,6 +13,7 @@ import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.ContentLakeNodeStatus;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprEmbedding;
+import org.hyland.contentlake.model.SectionMap;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
 import org.hyland.contentlake.spi.ContentSourceClient;
 import org.hyland.contentlake.spi.SourceNode;
@@ -62,6 +64,16 @@ public class NodeSyncService {
     private static final String P_CL_SYNC_STATUS    = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_STATUS;
     private static final String P_CL_SYNC_ERROR     = ContentLakeIngestProperties.CONTENT_LAKE_SYNC_ERROR;
     private static final String P_CL_EXTRACTED_TEXT = ContentLakeIngestProperties.CONTENT_LAKE_EXTRACTED_TEXT;
+    private static final String P_CL_SECTION_MAP    = ContentLakeIngestProperties.CONTENT_LAKE_SECTION_MAP;
+
+    /**
+     * Upper bound on the serialized section map stored per document. The map duplicates section text
+     * to make small-to-big expansion a single property read; beyond this size the duplication is not
+     * worth it, so the map is skipped and expansion falls back to the raw chunk for that document.
+     */
+    private static final int MAX_SECTION_MAP_CHARS = 96_000;
+
+    private static final ObjectMapper SECTION_MAP_MAPPER = new ObjectMapper();
 
     /**
      * Cap on the extracted text copied into {@code cin_ingestProperties} for keyword search.
@@ -99,6 +111,14 @@ public class NodeSyncService {
     /* ---- hxpr path configuration ---- */
     private final String hxprTargetPath;
     private final String hxprPathRepositoryId;
+
+    /**
+     * When true, the document-context prefix is also prepended to the keyword-leg extracted-text
+     * mirror (#66). Off by default and eval-gated: the vector leg is always enriched
+     * ({@link EmbeddingService#embedChunks(List, String)}), but the keyword-leg enrichment changes
+     * what {@code sys_fulltext} indexes, so it ships behind a flag until a sweep shows its delta.
+     */
+    private final boolean keywordContextEnrichmentEnabled;
 
     // ──────────────────────────────────────────────────────────────────────
     // Public pipeline entry-points
@@ -206,8 +226,14 @@ public class NodeSyncService {
             hxprService.updateEmbeddings(hxprDocId, hxprEmbeddings);
             log.info("Successfully updated embeddings for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
 
+            String sectionMapJson = buildSectionMapJson(chunks);
+
+            // Vector leg is always enriched (docContext above); the keyword leg is enriched only when
+            // the flag is on (#66, eval-gated). When off, the extracted-text mirror stays the raw body.
+            String keywordContext = keywordContextEnrichmentEnabled ? docContext : null;
+
             log.info("About to update fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
-            updateFulltextWithStatus(hxprDocId, text, baseIngestProps, nodeId);
+            updateFulltextWithStatus(hxprDocId, text, keywordContext, sectionMapJson, baseIngestProps, nodeId);
             log.info("Successfully updated fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
 
             log.info("Completed sync for node {}: {} embeddings", nodeId, hxprEmbeddings.size());
@@ -498,7 +524,8 @@ public class NodeSyncService {
         return loc;
     }
 
-    private void updateFulltextWithStatus(String hxprDocId, String text, Map<String, Object> baseIngestProps,
+    private void updateFulltextWithStatus(String hxprDocId, String text, String docContext,
+                                          String sectionMapJson, Map<String, Object> baseIngestProps,
                                           String nodeId) {
         log.info("updateFulltextWithStatus called for hxprDocId: {}, textLength: {}, baseIngestProps: {}",
                 hxprDocId, text != null ? text.length() : 0, baseIngestProps);
@@ -507,7 +534,8 @@ public class NodeSyncService {
         // field to HXQL, so a query against it matches nothing. Mirroring the text into an ingest
         // property is what makes term matching work at all, and hxpr also folds ingest properties
         // into sys_fulltext.
-        putExtractedText(props, text);
+        putExtractedText(props, text, docContext);
+        putSectionMap(props, sectionMapJson);
         // Logged by key rather than by value: the extracted text is now one of the values.
         log.info("Built statused props for hxprDocId: {}, propertyNames: {}", hxprDocId, props.keySet());
         HxprDocument update = new HxprDocument();
@@ -542,25 +570,94 @@ public class NodeSyncService {
      * Copies extracted text into the ingest properties for the keyword leg, truncated to
      * {@link #MAX_EXTRACTED_TEXT_CHARS}.
      *
+     * <p>The document-context prefix ({@code Document: <name> | Path: <path>}) is prepended so the
+     * keyword leg gets the same contextual-retrieval disambiguation the vector leg already gets from
+     * {@link EmbeddingService#embedChunks(List, String)}: acronym- and term-heavy queries that lean
+     * on the keyword leg can then match the document name/path, not just the raw body. This is
+     * additive - the entire extracted body still follows the prefix - and the per-chunk text stored
+     * in embeddings is left untouched.</p>
+     *
      * <p>Blank text removes the key rather than storing an empty string, so a document whose
      * extraction produced nothing does not advertise a searchable-but-empty body.</p>
      *
      * <p>Stored as extracted, not case-folded: hxpr's {@code sys_fulltext} index analyses this text
      * and matches it case-insensitively, so folding it here would lose information for nothing.</p>
      */
-    private void putExtractedText(Map<String, Object> props, String text) {
+    private void putExtractedText(Map<String, Object> props, String text, String docContext) {
         if (text == null || text.isBlank()) {
             props.remove(P_CL_EXTRACTED_TEXT);
             return;
         }
-        String value = text.length() > MAX_EXTRACTED_TEXT_CHARS
-                ? text.substring(0, MAX_EXTRACTED_TEXT_CHARS)
+        String enriched = (docContext != null && !docContext.isBlank())
+                ? docContext + "\n\n" + text
                 : text;
-        if (value.length() < text.length()) {
+        String value = enriched.length() > MAX_EXTRACTED_TEXT_CHARS
+                ? enriched.substring(0, MAX_EXTRACTED_TEXT_CHARS)
+                : enriched;
+        if (value.length() < enriched.length()) {
             log.debug("Truncated extracted text for keyword search from {} to {} chars",
-                    text.length(), value.length());
+                    enriched.length(), value.length());
         }
         props.put(P_CL_EXTRACTED_TEXT, value);
+    }
+
+    /**
+     * Builds the JSON section map for small-to-big retrieval from the produced chunks, or returns
+     * {@code null} when there is nothing to store or the map would exceed
+     * {@link #MAX_SECTION_MAP_CHARS}. Section text is the concatenation of that section's chunk text,
+     * so a matched chunk can be expanded to its parent section by a single property read.
+     */
+    private String buildSectionMapJson(List<Chunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return null;
+        }
+
+        List<Integer> chunkSections = new ArrayList<>(chunks.size());
+        // Preserve first-seen section order; a section is homogeneous in type (tables are their own).
+        LinkedHashMap<Integer, StringBuilder> sectionText = new LinkedHashMap<>();
+        LinkedHashMap<Integer, String> sectionType = new LinkedHashMap<>();
+
+        for (Chunk chunk : chunks) {
+            int section = chunk.getSectionIndex();
+            chunkSections.add(section);
+            sectionText.computeIfAbsent(section, k -> new StringBuilder());
+            StringBuilder sb = sectionText.get(section);
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(chunk.getText() != null ? chunk.getText() : "");
+            sectionType.putIfAbsent(section,
+                    chunk.getChunkType() != null ? chunk.getChunkType().name() : "PROSE");
+        }
+
+        List<SectionMap.Section> sections = new ArrayList<>(sectionText.size());
+        for (Map.Entry<Integer, StringBuilder> entry : sectionText.entrySet()) {
+            sections.add(new SectionMap.Section(
+                    entry.getKey(),
+                    sectionType.getOrDefault(entry.getKey(), "PROSE"),
+                    entry.getValue().toString()));
+        }
+
+        try {
+            String json = SECTION_MAP_MAPPER.writeValueAsString(new SectionMap(chunkSections, sections));
+            if (json.length() > MAX_SECTION_MAP_CHARS) {
+                log.debug("Section map for small-to-big retrieval skipped: {} chars exceeds cap {}",
+                        json.length(), MAX_SECTION_MAP_CHARS);
+                return null;
+            }
+            return json;
+        } catch (Exception e) {
+            log.warn("Failed to serialize section map: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private void putSectionMap(Map<String, Object> props, String sectionMapJson) {
+        if (sectionMapJson == null || sectionMapJson.isBlank()) {
+            props.remove(P_CL_SECTION_MAP);
+            return;
+        }
+        props.put(P_CL_SECTION_MAP, sectionMapJson);
     }
 
     private Map<String, Object> buildStatusedProps(Map<String, Object> baseProps,

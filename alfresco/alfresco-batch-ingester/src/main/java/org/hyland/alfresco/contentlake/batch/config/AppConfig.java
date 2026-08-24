@@ -161,7 +161,10 @@ public class AppConfig {
             TransformClient transformClient,
             EmbeddingService embeddingService,
             SimpleChunkingService chunkingService,
-            HxprProperties props
+            HxprProperties props,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${content-lake.ingest.keyword-context-enrichment-enabled:false}")
+            boolean keywordContextEnrichmentEnabled
     ) {
         return new NodeSyncService(
                 alfrescoClient,    // ContentSourceClient
@@ -171,7 +174,8 @@ public class AppConfig {
                 embeddingService,
                 chunkingService,
                 props.getTargetPath(),
-                props.getPathRepositoryId()
+                props.getPathRepositoryId(),
+                keywordContextEnrichmentEnabled
         );
     }
 

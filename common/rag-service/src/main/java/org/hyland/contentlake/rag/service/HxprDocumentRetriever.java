@@ -46,6 +46,11 @@ public class HxprDocumentRetriever implements DocumentRetriever {
     public static final String CTX_SOURCE_TYPE = "cl.sourceType";
     /** {@link Query#context()} key: {@link String} optional embedding type. */
     public static final String CTX_EMBEDDING_TYPE = "cl.embeddingType";
+    /**
+     * {@link Query#context()} key: optional {@link HybridSearchRequest.MetadataFilter} inferred from
+     * the question. Applied on the hybrid path only (semantic requests carry no metadata layer).
+     */
+    public static final String CTX_METADATA_FILTER = "cl.metadataFilter";
 
     /** {@link Document#getMetadata()} key holding the original {@link SearchHit}. */
     public static final String HIT_METADATA_KEY = "cl.searchHit";
@@ -62,6 +67,7 @@ public class HxprDocumentRetriever implements DocumentRetriever {
         String filter = stringValue(ctx.get(CTX_FILTER));
         String sourceType = stringValue(ctx.get(CTX_SOURCE_TYPE));
         String embeddingType = stringValue(ctx.get(CTX_EMBEDDING_TYPE));
+        HybridSearchRequest.MetadataFilter metadataFilter = metadataFilterValue(ctx.get(CTX_METADATA_FILTER));
         boolean useHybrid = ragProperties.isUseHybridSearch();
 
         // When MMR is enabled, over-retrieve a larger candidate pool; the advisor's diversity
@@ -85,10 +91,14 @@ public class HxprDocumentRetriever implements DocumentRetriever {
                     .filter(filter)
                     .sourceType(sourceType)
                     .embeddingType(embeddingType)
+                    .metadata(metadataFilter)
                     .build();
             HybridSearchResponse response = hybridSearchService.search(hybridRequest);
             hits = mapHybridHits(response.getResults());
         } else {
+            if (metadataFilter != null) {
+                log.warn("Inferred metadata filter ignored: semantic (non-hybrid) search has no metadata layer");
+            }
             SemanticSearchRequest searchRequest = SemanticSearchRequest.builder()
                     .query(query.text())
                     .topK(retrievalSize)
@@ -146,5 +156,9 @@ public class HxprDocumentRetriever implements DocumentRetriever {
 
     private static String stringValue(Object value) {
         return value instanceof String s ? s : null;
+    }
+
+    private static HybridSearchRequest.MetadataFilter metadataFilterValue(Object value) {
+        return value instanceof HybridSearchRequest.MetadataFilter mf ? mf : null;
     }
 }

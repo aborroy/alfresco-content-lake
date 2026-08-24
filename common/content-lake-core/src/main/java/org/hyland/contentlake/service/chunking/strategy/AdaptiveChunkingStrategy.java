@@ -2,6 +2,7 @@ package org.hyland.contentlake.service.chunking.strategy;
 
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.model.Chunk;
+import org.hyland.contentlake.model.ChunkType;
 import org.hyland.contentlake.service.chunking.strategy.TextSegmenter.TextSegment;
 
 import java.util.ArrayList;
@@ -36,10 +37,10 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
             return List.of();
         }
 
-        // Step 1: Try section-level (headings)
-        List<TextSegment> segments = TextSegmenter.splitSections(text);
+        // Step 1: Try section-level (headings), keeping detected tables as atomic segments
+        List<TextSegment> segments = TextSegmenter.splitSectionsAndTables(text);
 
-        // Step 2: If sections are too large or too few, try paragraphs
+        // Step 2: If sections are too large or too few, try paragraphs (tables are passed through)
         if (hasOversizedSegments(segments, config.maxChunkSize())) {
             segments = splitRecursive(segments, config.maxChunkSize(), config.overlapSize());
         }
@@ -59,32 +60,48 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
         List<TextSegment> result = new ArrayList<>();
 
         for (TextSegment segment : segments) {
+            // Tables are atomic: never paragraph/sentence/hard split. Oversized tables are handled
+            // by row-group splitting in groupWithHardLimit so the header row is repeated.
+            if (segment.table()) {
+                result.add(segment);
+                continue;
+            }
+
             if (segment.length() <= maxSize) {
                 result.add(segment);
                 continue;
             }
 
+            int section = segment.sectionIndex();
+
             // Try splitting by paragraphs
             List<TextSegment> paragraphs = TextSegmenter.splitParagraphs(segment.text());
             if (paragraphs.size() > 1 && !hasOversizedSegments(paragraphs, maxSize)) {
-                result.addAll(paragraphs);
+                addAllWithSection(result, paragraphs, section);
                 continue;
             }
 
             // Try splitting by sentences
             List<TextSegment> sentences = TextSegmenter.splitSentences(segment.text());
             if (sentences.size() > 1 && !hasOversizedSegments(sentences, maxSize)) {
-                result.addAll(sentences);
+                addAllWithSection(result, sentences, section);
                 continue;
             }
 
             // Last resort: hard split by character count (with overlap)
             log.warn("Oversized segment ({} chars) requires hard splitting at {} char boundary",
                     segment.length(), maxSize);
-            result.addAll(hardSplit(segment.text(), maxSize, overlapSize));
+            addAllWithSection(result, hardSplit(segment.text(), maxSize, overlapSize), section);
         }
 
         return result;
+    }
+
+    /** Adds sub-segments to {@code result}, reassigning each to the parent segment's section. */
+    private void addAllWithSection(List<TextSegment> result, List<TextSegment> parts, int sectionIndex) {
+        for (TextSegment part : parts) {
+            result.add(part.withSection(sectionIndex));
+        }
     }
 
     /**
@@ -103,18 +120,37 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
         StringBuilder current = new StringBuilder();
         int currentStart = -1;
         int currentEnd = 0;
+        int currentSection = 0;
+        // A group's section is that of its first non-overlap segment. Overlap carried across a flush
+        // does not count, so a chunk that is mostly the next section is labelled with that section.
+        boolean hasRealSegment = false;
 
         int overlapSize = config.overlapSize();
 
         for (TextSegment segment : segments) {
             String text = segment.text();
 
+            // Tables never merge with surrounding prose and are never mid-row split: flush any
+            // pending prose (no overlap carry across a table boundary), then emit the table as its
+            // own chunk(s), row-group splitting with a repeated header when it exceeds maxChunkSize.
+            if (segment.table()) {
+                if (!current.isEmpty()) {
+                    grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd,
+                            false, currentSection));
+                    current.setLength(0);
+                    currentStart = -1;
+                    hasRealSegment = false;
+                }
+                grouped.addAll(TextSegmenter.splitTableByRowGroups(segment, config.maxChunkSize()));
+                continue;
+            }
+
             // CRITICAL FIX: If this single segment is already too large, split it
             if (text.length() > config.maxChunkSize()) {
                 // Flush current accumulated content (with overlap carry)
                 if (!current.isEmpty()) {
                     String flushed = current.toString().strip();
-                    grouped.add(new TextSegment(flushed, currentStart, currentEnd));
+                    grouped.add(new TextSegment(flushed, currentStart, currentEnd, false, currentSection));
 
                     // Carry overlap tail into the next chunk
                     String overlapText = extractOverlapTail(flushed, overlapSize);
@@ -136,6 +172,7 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
                 // last split segment will be handled naturally on the next flush)
                 current.setLength(0);
                 currentStart = -1;
+                hasRealSegment = false;
                 continue;
             }
 
@@ -144,7 +181,7 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
                     && current.length() >= config.minChunkSize()) {
                 // Flush current group
                 String flushed = current.toString().strip();
-                grouped.add(new TextSegment(flushed, currentStart, currentEnd));
+                grouped.add(new TextSegment(flushed, currentStart, currentEnd, false, currentSection));
 
                 // Carry overlap tail into the next chunk
                 String overlapText = extractOverlapTail(flushed, overlapSize);
@@ -155,10 +192,15 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
                 } else {
                     currentStart = -1;
                 }
+                hasRealSegment = false;
             }
 
             if (currentStart < 0) {
                 currentStart = segment.startOffset();
+            }
+            if (!hasRealSegment) {
+                currentSection = segment.sectionIndex();
+                hasRealSegment = true;
             }
 
             if (!current.isEmpty()) {
@@ -170,7 +212,8 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
 
         // Flush remaining (no overlap needed for the last chunk)
         if (!current.isEmpty()) {
-            grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd));
+            grouped.add(new TextSegment(current.toString().strip(), currentStart, currentEnd,
+                    false, currentSection));
         }
 
         return grouped;
@@ -258,14 +301,16 @@ public class AdaptiveChunkingStrategy implements ChunkingStrategy {
         List<Chunk> chunks = new ArrayList<>(segments.size());
         for (int i = 0; i < segments.size(); i++) {
             TextSegment seg = segments.get(i);
-            chunks.add(new Chunk(
+            Chunk chunk = new Chunk(
                     nodeId,
                     seg.text(),
                     i,
                     seg.startOffset(),
                     seg.endOffset(),
-                    strategyName()  // Only strategy name, no ContentType
-            ));
+                    strategyName());
+            chunk.setChunkType(seg.table() ? ChunkType.TABLE : ChunkType.PROSE);
+            chunk.setSectionIndex(seg.sectionIndex());
+            chunks.add(chunk);
         }
         return chunks;
     }

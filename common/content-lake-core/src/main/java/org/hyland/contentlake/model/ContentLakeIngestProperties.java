@@ -43,6 +43,16 @@ public final class ContentLakeIngestProperties {
      */
     public static final String CONTENT_LAKE_EXTRACTED_TEXT = "contentLake_extractedText";
 
+    /**
+     * Per-document section map (JSON) supporting small-to-big / parent-child retrieval.
+     *
+     * <p>Chunks are stored flat as rows in a single Parquet embeddings child, with no section-level
+     * hxpr node. This property records, per chunk index, the section it came from and that section's
+     * text, so retrieval can expand a matched small chunk back out to its parent section in-process
+     * without walking an ancestors API or re-reading the Parquet file.</p>
+     */
+    public static final String CONTENT_LAKE_SECTION_MAP = "contentLake_sectionMap";
+
     private ContentLakeIngestProperties() {
     }
 }

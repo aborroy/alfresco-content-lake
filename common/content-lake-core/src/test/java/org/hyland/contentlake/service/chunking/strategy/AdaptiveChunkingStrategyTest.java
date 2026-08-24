@@ -1,6 +1,7 @@
 package org.hyland.contentlake.service.chunking.strategy;
 
 import org.hyland.contentlake.model.Chunk;
+import org.hyland.contentlake.model.ChunkType;
 import org.hyland.contentlake.service.chunking.strategy.ChunkingStrategy.ChunkingConfig;
 import org.junit.jupiter.api.Test;
 
@@ -129,6 +130,75 @@ class AdaptiveChunkingStrategyTest {
     @Test
     void strategyName_isAdaptive() {
         assertThat(strategy.strategyName()).isEqualTo("adaptive");
+    }
+
+    @Test
+    void proseChunks_areMarkedProse() {
+        List<Chunk> chunks = strategy.chunk("A plain sentence with no table.", NODE_ID, config);
+
+        assertThat(chunks).allSatisfy(c -> assertThat(c.getChunkType()).isEqualTo(ChunkType.PROSE));
+    }
+
+    @Test
+    void smallTable_keptAtomicAndMarkedTable() {
+        String text = """
+                Intro paragraph before the table with enough words to read naturally.
+
+                | Region | Revenue | Growth |
+                | ------ | ------- | ------ |
+                | North  | 100     | 5%     |
+                | South  | 200     | 8%     |
+
+                Closing paragraph after the table wraps up the discussion nicely.
+                """;
+
+        List<Chunk> chunks = strategy.chunk(text, NODE_ID, config);
+
+        Chunk table = chunks.stream()
+                .filter(c -> c.getChunkType() == ChunkType.TABLE)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("expected a TABLE chunk"));
+        // The whole table stays in one chunk: every data row is present, rows intact.
+        assertThat(table.getText()).contains("| Region | Revenue | Growth |");
+        assertThat(table.getText()).contains("| North  | 100");
+        assertThat(table.getText()).contains("| South  | 200");
+    }
+
+    @Test
+    void oversizedTable_splitsByRowGroups_repeatingHeader() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("| ID | Description |\n");
+        sb.append("| -- | ----------- |\n");
+        for (int i = 0; i < 60; i++) {
+            sb.append("| ").append(i).append(" | ")
+              .append("a fairly long description cell that pads the row out ").append(i)
+              .append(" |\n");
+        }
+
+        List<Chunk> chunks = strategy.chunk(sb.toString(), NODE_ID, config);
+
+        List<Chunk> tableChunks = chunks.stream()
+                .filter(c -> c.getChunkType() == ChunkType.TABLE)
+                .toList();
+        assertThat(tableChunks).hasSizeGreaterThan(1);
+        // Header row is repeated in every resulting table chunk so each is self-contained.
+        assertThat(tableChunks).allSatisfy(c ->
+                assertThat(c.getText()).contains("| ID | Description |"));
+    }
+
+    @Test
+    void sectionIndex_isAssignedPerSourceSection() {
+        // Each body exceeds minChunkSize so the two sections flush as separate chunks rather than
+        // merging, letting us observe distinct section indices.
+        String body = ("Content that is deliberately long enough to exceed the minimum chunk size "
+                + "so that this section is flushed on its own rather than merged with the next one. ")
+                .repeat(2);
+        String text = "# Alpha\n" + body + "\n\n# Beta\n" + body + "\n";
+
+        List<Chunk> chunks = strategy.chunk(text, NODE_ID, config);
+
+        assertThat(chunks.stream().map(Chunk::getSectionIndex).distinct().count())
+                .isGreaterThanOrEqualTo(2);
     }
 
     // Helper to avoid unused variable warnings in overlap test

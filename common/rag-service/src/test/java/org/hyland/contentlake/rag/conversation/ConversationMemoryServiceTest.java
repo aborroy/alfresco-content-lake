@@ -35,10 +35,12 @@ class ConversationMemoryServiceTest {
         properties.setConversation(conversation);
 
         clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+        // Summary disabled by default; pass null to exercise the guarded no-op hook.
         service = new ConversationMemoryService(
                 new InMemoryConversationMemoryStore(),
                 properties,
-                clock
+                clock,
+                null
         );
     }
 
