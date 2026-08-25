@@ -35,6 +35,9 @@ public class HxprProperties {
 
     private IdpConfig idp = new IdpConfig();
 
+    /** Knowledge-graph provisioning (hxpr Graph API). Disabled by default. */
+    private GraphConfig graph = new GraphConfig();
+
     @Data
     public static class IdpConfig {
         private String tokenUrl;
@@ -42,5 +45,56 @@ public class HxprProperties {
         private String clientSecret;
         private String username;
         private String password;
+    }
+
+    /**
+     * GraphRAG foundation: ensures a graphDB, a base ontology, and an ontology route exist in
+     * hxpr at startup. Bound from {@code hxpr.graph.*}.
+     */
+    @Data
+    public static class GraphConfig {
+
+        /** Master switch. When false, no graph beans are created and provisioning never runs. */
+        private boolean enabled = false;
+
+        /**
+         * Resolved graphDB id. Usually left empty and resolved by name at startup; set it to pin a
+         * pre-existing graphDB.
+         */
+        private String graphdbId;
+
+        /** Name of the content-lake graphDB. */
+        private String graphdbName = "content-lake";
+
+        /** hxpr schema version label. {@code v2} selects the ACL-aware Dgraph schema. */
+        private String version = "v2";
+
+        /** Name of the base ontology registered in hxpr. */
+        private String ontologyName = "content-lake-base";
+
+        /** Description stored with the base ontology. */
+        private String ontologyDescription =
+                "Content Lake base ontology: Document, Person, Organization, Location, Concept.";
+
+        /** Classpath (or file) location of the YAML ontology uploaded when none is registered. */
+        private String ontologyResource = "classpath:graph/content-lake-ontology.yaml";
+
+        /**
+         * hxpr {@code ExpressionVisitor} condition selecting which content is routed to the base
+         * ontology. Defaults to all file content.
+         */
+        private String routeCondition = "content.sys_primaryType == \"SysFile\"";
+
+        /**
+         * Entity extraction at ingestion (#54). When {@code true} (and {@link #enabled} is true),
+         * ingesters extract entities from document text and populate the graph.
+         */
+        private boolean extractionEnabled = true;
+
+        /** Maximum number of entities upserted per document (caps LLM noise and graph writes). */
+        private int maxEntitiesPerDocument = 30;
+
+        /** Maximum characters of document text sent to the extraction LLM. */
+        private int maxExtractionChars = 12000;
     }
 }

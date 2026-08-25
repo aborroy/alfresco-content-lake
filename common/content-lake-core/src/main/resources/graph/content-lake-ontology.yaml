@@ -1,0 +1,38 @@
+# Content Lake base ontology
+#
+# Registered in hxpr via POST /api/graph/ontologies (multipart YAML upload) by
+# GraphProvisioningService. Declares the base entity vocabulary and relationships used by the
+# GraphRAG pipeline. Entity kinds map to the free-form entity_type field on the hxpr graph nodes
+# (GlobalEntity / LocalEntity); the graph schema itself is owned by hxpr (schema version v2).
+
+name: content-lake-base
+version: 1
+description: >-
+  Base vocabulary for Content Lake knowledge-graph extraction. Covers the common entity types
+  found across Alfresco and Nuxeo content and the relationships that connect documents to them.
+
+entities:
+  - type: Document
+    description: An ingested content item (corresponds to the hxpr Document node).
+  - type: Person
+    description: A named individual mentioned in document content.
+  - type: Organization
+    description: A company, agency, department, or other organized body.
+  - type: Location
+    description: A geographic place such as a city, country, region, or address.
+  - type: Concept
+    description: A topic, theme, product, project, or other abstract subject.
+
+relationships:
+  - type: mentions
+    source: Document
+    target: [Person, Organization, Location, Concept]
+    description: The document references the entity.
+  - type: created_by
+    source: Document
+    target: Person
+    description: The document was authored or created by the person.
+  - type: related_to
+    source: [Person, Organization, Location, Concept]
+    target: [Person, Organization, Location, Concept]
+    description: Two entities are associated within the corpus.

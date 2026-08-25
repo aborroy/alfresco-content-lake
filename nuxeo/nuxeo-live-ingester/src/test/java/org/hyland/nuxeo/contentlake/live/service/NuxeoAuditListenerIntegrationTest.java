@@ -290,7 +290,8 @@ class NuxeoAuditListenerIntegrationTest {
                 chunkingService,
                 "/nuxeo-sync",
                 null,
-                false
+                false,
+                null   // no graph extraction in this test
         );
 
         NuxeoLiveProperties props = new NuxeoLiveProperties();

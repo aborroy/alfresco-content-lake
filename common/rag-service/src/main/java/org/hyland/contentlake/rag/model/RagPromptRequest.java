@@ -65,4 +65,20 @@ public class RagPromptRequest {
      */
     @Builder.Default
     private boolean inferFilters = false;
+
+    /**
+     * GraphRAG (#55): when true, after vector/hybrid retrieval the pipeline traverses the knowledge
+     * graph from the retrieved documents to include related documents. Forced on by the
+     * {@code /api/rag/graph-prompt} endpoint. No effect unless {@code rag.graph.enabled=true}.
+     */
+    @Builder.Default
+    private boolean useGraphExpansion = false;
+
+    /** GraphRAG: maximum traversal depth for entity expansion (currently single-hop). */
+    @Builder.Default
+    private int graphHops = 1;
+
+    /** GraphRAG: include community summaries in context (#56; accepted now, no-op until implemented). */
+    @Builder.Default
+    private boolean includeCommunities = false;
 }

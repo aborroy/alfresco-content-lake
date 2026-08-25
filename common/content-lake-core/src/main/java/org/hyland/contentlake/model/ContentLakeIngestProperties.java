@@ -53,6 +53,19 @@ public final class ContentLakeIngestProperties {
      */
     public static final String CONTENT_LAKE_SECTION_MAP = "contentLake_sectionMap";
 
+    /**
+     * Comma-separated canonical names of the entities extracted from this document and linked to it in
+     * the knowledge graph (#54). Diagnostic/back-reference only; the authoritative link is the graph
+     * {@code Document -has_global_entity-> GlobalEntity} edge.
+     */
+    public static final String HXPR_ENTITY_IDS = "hxpr_entityIds";
+
+    /**
+     * Marks a document as a graph community summary (#56). Its value is the canonical name of the
+     * entity the community is built around. Present only on generated community-summary documents.
+     */
+    public static final String GRAPH_COMMUNITY = "graph_community";
+
     private ContentLakeIngestProperties() {
     }
 }

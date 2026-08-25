@@ -67,6 +67,11 @@ spring:
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+      # Chat model for GraphRAG entity extraction (#54). Only used when hxpr.graph.enabled=true.
+      chat:
+        options:
+          model: ${LLM_MODEL:ai/gpt-oss}
+          temperature: ${LLM_TEMPERATURE:0.1}
 
 # Alfresco SDK configuration
 # Service account for internal batch operations (discovery, sync, etc.)
@@ -104,6 +109,14 @@ hxpr:
     bootstrap:
       enabled: true
     fragments: classpath:model-fragments.json
+  # GraphRAG foundation (issue #53). Disabled by default; when enabled, an idempotent startup step
+  # ensures the content-lake graphDB, base ontology, and ontology route exist in hxpr.
+  graph:
+    enabled: ${HXPR_GRAPH_ENABLED:false}
+    graphdb-name: ${HXPR_GRAPH_DB_NAME:content-lake}
+    graphdb-id: ${HXPR_GRAPH_DB_ID:}
+    version: ${HXPR_GRAPH_VERSION:v2}
+    ontology-name: ${HXPR_GRAPH_ONTOLOGY_NAME:content-lake-base}
 
 # Alfresco Transform Core AIO (Local Transform) for text extraction
 transform:

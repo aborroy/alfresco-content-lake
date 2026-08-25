@@ -120,6 +120,12 @@ public class NodeSyncService {
      */
     private final boolean keywordContextEnrichmentEnabled;
 
+    /**
+     * Optional GraphRAG entity extraction (#54). Non-null only when {@code hxpr.graph.enabled} (and
+     * extraction) is on; when null, ingestion runs exactly as before. Best-effort: it never throws.
+     */
+    private final GraphIngestionService graphIngestionService;
+
     // ──────────────────────────────────────────────────────────────────────
     // Public pipeline entry-points
     // ──────────────────────────────────────────────────────────────────────
@@ -208,6 +214,17 @@ public class NodeSyncService {
                 return;
             }
 
+            // GraphRAG (#54): extract entities from the text and link them into the knowledge graph.
+            // Best-effort; the returned canonical names are stored as a back-reference on the document.
+            Map<String, Object> ingestProps = baseIngestProps;
+            if (graphIngestionService != null) {
+                List<String> entityIds = graphIngestionService.ingest(hxprDocId, text, documentName);
+                if (!entityIds.isEmpty()) {
+                    ingestProps = new LinkedHashMap<>(baseIngestProps);
+                    ingestProps.put(ContentLakeIngestProperties.HXPR_ENTITY_IDS, String.join(",", entityIds));
+                }
+            }
+
             List<Chunk> chunks = chunkingService.chunk(text, nodeId, mimeType);
             if (chunks.isEmpty()) {
                 log.warn("No chunks for node {}", nodeId);
@@ -233,7 +250,7 @@ public class NodeSyncService {
             String keywordContext = keywordContextEnrichmentEnabled ? docContext : null;
 
             log.info("About to update fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
-            updateFulltextWithStatus(hxprDocId, text, keywordContext, sectionMapJson, baseIngestProps, nodeId);
+            updateFulltextWithStatus(hxprDocId, text, keywordContext, sectionMapJson, ingestProps, nodeId);
             log.info("Successfully updated fulltext and status for hxprDocId: {}, nodeId: {}", hxprDocId, nodeId);
 
             log.info("Completed sync for node {}: {} embeddings", nodeId, hxprEmbeddings.size());

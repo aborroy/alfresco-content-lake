@@ -57,7 +57,7 @@ class ContentLakeRetrievalAdvisorTest {
                 new SectionExpansionService(mock(org.hyland.contentlake.client.HxprDocumentApi.class), properties);
         advisor = new ContentLakeRetrievalAdvisor(
                 documentRetriever, diversitySelector, rerankService, retrievalGrader, properties,
-                sectionExpansionService);
+                sectionExpansionService, null);
     }
 
     private static SearchHit hit(String text) {

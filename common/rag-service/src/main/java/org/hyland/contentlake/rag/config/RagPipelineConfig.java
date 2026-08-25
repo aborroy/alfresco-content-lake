@@ -2,6 +2,7 @@ package org.hyland.contentlake.rag.config;
 
 import org.hyland.contentlake.rag.service.ContentLakeRetrievalAdvisor;
 import org.hyland.contentlake.rag.service.DiversitySelector;
+import org.hyland.contentlake.rag.service.GraphAugmentationService;
 import org.hyland.contentlake.rag.service.HxprDocumentRetriever;
 import org.hyland.contentlake.rag.service.HybridSearchService;
 import org.hyland.contentlake.rag.service.RerankService;
@@ -11,6 +12,7 @@ import org.hyland.contentlake.rag.service.SemanticSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -39,10 +41,11 @@ public class RagPipelineConfig {
                                                                    RerankService rerankService,
                                                                    RetrievalGrader retrievalGrader,
                                                                    RagProperties ragProperties,
-                                                                   SectionExpansionService sectionExpansionService) {
+                                                                   SectionExpansionService sectionExpansionService,
+                                                                   ObjectProvider<GraphAugmentationService> graphAugmentationServiceProvider) {
         return new ContentLakeRetrievalAdvisor(
                 hxprDocumentRetriever, diversitySelector, rerankService, retrievalGrader, ragProperties,
-                sectionExpansionService);
+                sectionExpansionService, graphAugmentationServiceProvider.getIfAvailable());
     }
 
     /**
