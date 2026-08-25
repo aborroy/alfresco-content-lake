@@ -214,6 +214,22 @@ Source adapters add extra properties via `SourceNode.sourceProperties()` using t
 `User` or a `Group`. User/group names are namespaced per source instance by appending
 `_#_<repositoryId>`. `GROUP_EVERYONE` maps to the special principal `__Everyone__`.
 
+### `Chunk` -- unit of embedding
+
+Text is split into `Chunk` records before embedding. Beyond the text and offsets, each chunk carries
+structural metadata used by retrieval:
+
+| Field | Purpose |
+|---|---|
+| `index` / `startOffset` / `endOffset` | position of the chunk within the extracted text |
+| `chunkingStrategy` | name of the strategy that produced it |
+| `chunkType` | `PROSE` or `TABLE` (see below) |
+| `sectionIndex` | parent-section id, enabling small-to-big (parent-section) retrieval at query time |
+
+`ChunkType.TABLE` marks detected tables (markdown/pipe-delimited) so the noise-reduction and chunking
+stages keep them as an atomic unit rather than hard-splitting them mid-row or discarding them as
+prose noise.
+
 ---
 
 ## Design Decisions
@@ -235,3 +251,15 @@ Source adapters add extra properties via `SourceNode.sourceProperties()` using t
   (`DiversitySelector`), expansion (`QueryExpansionService`) and the pre-generation relevance gate
   (`RetrievalGrader`) each register one bean chosen by a single `@Configuration`, defaulting to the
   behaviour that predates them, so a build with every flag off retrieves exactly as before
+- **hxpr AdvancedQuery integration** -- structured metadata filters, named queries, facet aggregation
+  (`FacetsService`), vocabulary lookup and chunk full-text search are expressed through hxpr's
+  AdvancedQuery API rather than hand-built query strings, which is what powers the metadata filters on
+  hybrid search and the `/search/facets` endpoint
+- **GraphRAG is a gated overlay** (`rag.graph.enabled`, default off) -- when enabled, ingestion
+  extracts entities and provisions a knowledge graph, and `/api/rag/graph-prompt` augments normal
+  vector/hybrid retrieval by traversing that graph (bounded by `graphHops`, seed and expansion
+  document limits). Graph-expanded documents are re-filtered against `sys_acl` so traversal never
+  widens what a user may see. `CommunitySummaryService` clusters the graph by shared entity and writes
+  one permission-filtered summary document per community, rebuilt idempotently via
+  `/api/rag/graph/communities/rebuild`. With the flag off, none of these beans load and retrieval is
+  unchanged.

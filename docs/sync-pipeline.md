@@ -30,6 +30,13 @@ SourceNode (from ContentSourceClient)
        documentApi.updateById(hxprDocId, fulltext + INDEXED status)
 ```
 
+Chunking is structure-aware: detected tables are kept as atomic `ChunkType.TABLE` chunks (never
+hard-split mid-row or dropped as noise), and every chunk records a `sectionIndex`. That section id is
+what lets retrieval later expand a matched chunk back to its parent section (small-to-big retrieval,
+`rag.retrieval.small-to-big.enabled`). When keyword-context enrichment is enabled
+(`content-lake.ingest.keyword-context-enrichment-enabled`), document-level context is prepended to
+each chunk's keyword-search text so short chunks stay findable by the keyword leg of hybrid search.
+
 ---
 
 ## Metadata-Only Flow (`ContentSyncService.ingestMetadata`)

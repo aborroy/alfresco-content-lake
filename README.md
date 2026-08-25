@@ -242,12 +242,14 @@ export EMBEDDING_MODEL=ai/mxbai-embed-large
 # LLM (rag-service only)
 export LLM_MODEL=ai/gpt-oss
 export LLM_TEMPERATURE=0.3
-export LLM_MAX_TOKENS=1024
+export LLM_MAX_TOKENS=2048
 
 # RAG defaults (rag-service only)
-export RAG_DEFAULT_TOP_K=5
-export RAG_DEFAULT_MIN_SCORE=0.5
-export RAG_MAX_CONTEXT_LENGTH=12000
+export RAG_DEFAULT_TOP_K=15
+export RAG_DEFAULT_MIN_SCORE=0.01
+export RAG_MAX_CONTEXT_LENGTH=20000
+# Optional retrieval/generation features are off by default; see the Configuration
+# section for the full set of RAG_* / SEARCH_HYBRID_* feature flags.
 
 # Performance (batch-ingester only)
 export TRANSFORM_WORKERS=4
@@ -526,12 +528,17 @@ Response:
 | `question` | String | *required* | Natural-language question |
 | `sessionId` | String | user-scoped default | Conversation session id for multi-turn context |
 | `resetSession` | boolean | false | Clear conversation history for the target session before this prompt |
-| `topK` | int | 5 | Number of chunks to retrieve for context |
-| `minScore` | double | 0.5 | Minimum similarity threshold |
+| `topK` | int | server default (`rag.default-top-k`, 15) | Number of chunks to retrieve for context |
+| `minScore` | double | server default (`rag.default-min-score`, 0.01) | Minimum similarity threshold |
 | `filter` | String | -- | Additional HXQL filter |
 | `sourceType` | String | -- | Optional source filter: `alfresco` or `nuxeo` |
+| `embeddingType` | String | model default | Embedding type to match |
 | `systemPrompt` | String | -- | Override the default LLM system prompt |
 | `includeContext` | boolean | false | Include retrieved chunks in response |
+| `inferFilters` | boolean | false | Let the service infer metadata filters from the question intent |
+| `useGraphExpansion` | boolean | false | Expand retrieval through the knowledge graph (forced true by `/graph-prompt`) |
+| `graphHops` | int | 1 | Graph traversal depth when graph expansion is on |
+| `includeCommunities` | boolean | false | Include graph community summaries in the context |
 
 | Response Field | Type | Description |
 |---------------|------|-------------|
@@ -541,6 +548,10 @@ Response:
 | `tokenCount` | Integer | Total token usage (prompt + completion) when provider reports it |
 | `sources[].sourceType` | String | Source type for each cited document |
 | `sources[].openInSourceUrl` | String | Native-source deep link (Share for Alfresco, Web UI for Nuxeo) |
+| `verified` | Boolean | Citation-faithfulness result when `rag.citation.verify.enabled=true`; otherwise null |
+| `unsupportedClaims` | String[] | Answer claims not grounded in the cited sources (citation verification only) |
+| `graphEntities` | String[] | Knowledge-graph entities traversed (graph-augmented requests only) |
+| `graphSources` | Source[] | Documents pulled in via graph expansion (graph-augmented requests only) |
 
 #### Chat Stream (SSE)
 
@@ -673,7 +684,7 @@ Results can include both Alfresco and Nuxeo hits in the same response. Each hit 
 }
 ```
 
-* Default value: `0.5`
+* Default value: `0.2` (`semantic-search.default-min-score`)
 * Applied server-side after vector retrieval
 * Can be overridden per request
 
@@ -802,6 +813,74 @@ curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
   -d '{"query":"budget approval process","strategy":"weighted","normalization":"minmax","vectorWeight":0.7,"textWeight":0.3}'
 ```
 
+#### GraphRAG Prompt
+
+Same contract as `/api/rag/prompt`, but graph-augmented retrieval is forced on: after vector/hybrid
+retrieval the pipeline traverses the knowledge graph to pull in related documents, and the response
+adds `graphEntities` and `graphSources`. Requires `rag.graph.enabled=true` (otherwise it behaves like
+`/prompt`). `graphHops` and `includeCommunities` are honoured on the request.
+
+```bash
+curl -X POST http://localhost:9091/api/rag/graph-prompt -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "How are the Q4 report and the budget proposal related?",
+    "graphHops": 2,
+    "includeCommunities": true
+  }'
+```
+
+Rebuild the graph community summaries (clusters documents by shared entity, generates one
+permission-filtered summary document per community). Corpus-level and idempotent; run after
+ingestion has populated the graph. Also requires `rag.graph.enabled=true`.
+
+```bash
+curl -X POST http://localhost:9091/api/rag/graph/communities/rebuild -u admin:admin
+# -> {"communities": 7}   (409 when the graph is disabled)
+```
+
+#### Faceted Search
+
+Discover the indexed values of a property (with counts) so clients can build informed filters.
+Buckets are scoped to the caller's document permissions.
+
+```bash
+curl -X POST http://localhost:9091/api/rag/search/facets -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{ "property": "source_mimeType", "topN": 10, "sourceType": "alfresco" }'
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `property` | String | *required* | Property to aggregate on (400 when blank) |
+| `filter` | String | -- | Additional raw HXQL filter |
+| `sourceType` | String | -- | Optional source filter: `alfresco` or `nuxeo` |
+| `searchTerm` | String | -- | Restrict buckets to values matching a term |
+| `topN` | int | service default | Maximum number of buckets to return |
+
+The response is `{ "property": "...", "buckets": [ { "value": "...", "count": N }, ... ] }`.
+
+#### In-App Evaluation (smoke)
+
+Runs a small caller-supplied sample set through the live pipeline and returns coarse retrieval-hit
+and faithfulness signals - a quick sanity check, not the authoritative quality gate
+(`content-lake-eval` remains that). Disabled by default; enable with `rag.evaluation.enabled=true`
+(returns 403 when disabled).
+
+```bash
+curl -X POST http://localhost:9091/api/rag/evaluate -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "question": "What are the key findings in the Q4 report?",
+      "expectedAnswer": "Revenue grew 12%.",
+      "expectedSourceIds": ["nuxeo:nuxeo-demo"]
+    }
+  ]'
+```
+
+The response reports `totalSamples`, `retrievalHits`, and `retrievalHitRate` across the sample set.
+
 ### Health Checks
 
 ```bash
@@ -925,44 +1004,106 @@ spring:
         options:
           model: ${LLM_MODEL:ai/gpt-oss}
           temperature: ${LLM_TEMPERATURE:0.3}
-          maxTokens: ${LLM_MAX_TOKENS:1024}
+          maxTokens: ${LLM_MAX_TOKENS:2048}
 
 rag:
-  default-top-k: 5
-  default-min-score: 0.5
-  max-context-length: 12000
+  default-top-k: ${RAG_DEFAULT_TOP_K:15}
+  default-min-score: ${RAG_DEFAULT_MIN_SCORE:0.01}
+  max-context-length: ${RAG_MAX_CONTEXT_LENGTH:20000}
+  use-hybrid-search: ${RAG_USE_HYBRID_SEARCH:true}
   default-system-prompt: >
     You are a document assistant that answers questions based strictly on
-    the provided context.
-
-    RULES:
-    1. Use ONLY information from the DOCUMENT CONTEXT below. Do not use prior knowledge.
-    2. When referencing information, cite the source using its label (e.g. "According to Source 1...").
-    3. If multiple sources contain relevant information, synthesize them and cite each.
-    4. If the context does not contain enough information to fully answer the question,
-    clearly state what you can answer and what is missing.
-    5. Be concise and direct. Do not repeat the question or add unnecessary preamble.
+    the provided context. (See application.yml for the full prompt text.)
   conversation:
-    enabled: true
-    max-history-turns: 10
-    session-ttl-minutes: 30
-    query-reformulation: true
+    enabled: ${RAG_CONVERSATION_ENABLED:true}
+    max-history-turns: ${RAG_CONVERSATION_MAX_HISTORY_TURNS:10}
+    session-ttl-minutes: ${RAG_CONVERSATION_SESSION_TTL_MINUTES:30}
+    query-reformulation: ${RAG_CONVERSATION_QUERY_REFORMULATION:true}
+    # Persistent running summary stored in hxpr. Off until the sessions folder is provisioned.
+    summary:
+      enabled: ${RAG_CONVERSATION_SUMMARY_ENABLED:false}
+      base-path: ${RAG_CONVERSATION_SUMMARY_BASE_PATH:/_sessions}
 
 semantic-search:
-  default-min-score: 0.5
+  default-min-score: ${SEMANTIC_SEARCH_MIN_SCORE:0.2}
 
 search:
   hybrid:
-    enabled: true
-    strategy: rrf       # or weighted
-    normalization: max  # max or minmax (weighted strategy)
-    vector-weight: 0.7
-    text-weight: 0.3
-    initial-candidates: 20
-    final-results: 5
-    rrf-k: 60
-    default-min-score: 0.0
+    enabled: ${SEARCH_HYBRID_ENABLED:true}
+    strategy: ${SEARCH_HYBRID_STRATEGY:rrf}            # rrf or weighted
+    normalization: ${SEARCH_HYBRID_NORMALIZATION:max}  # max or minmax (weighted strategy)
+    vector-weight: ${SEARCH_HYBRID_VECTOR_WEIGHT:0.7}
+    text-weight: ${SEARCH_HYBRID_TEXT_WEIGHT:0.3}
+    initial-candidates: ${SEARCH_HYBRID_INITIAL_CANDIDATES:75}
+    final-results: ${SEARCH_HYBRID_FINAL_RESULTS:20}
+    rrf-k: ${SEARCH_HYBRID_RRF_K:60}
+    default-min-score: ${SEARCH_HYBRID_MIN_SCORE:0.01}
 ```
+
+#### Optional Retrieval and Generation Features
+
+These stages are **off by default**: with every flag unset, retrieval and generation behave as the
+baseline pipeline. Enable them individually to trade latency or extra LLM calls for quality. They are
+configured under `rag.*` in `common/rag-service/src/main/resources/application.yml`.
+
+```yaml
+rag:
+  # Cross-encoder / LLM re-ranking of retrieved candidates
+  reranker:
+    enabled: ${RAG_RERANKER_ENABLED:false}
+    url: ${RAG_RERANKER_URL:}
+    top-n: ${RAG_RERANKER_TOP_N:8}
+  # Maximal Marginal Relevance diversification
+  mmr:
+    enabled: ${RAG_MMR_ENABLED:false}
+    lambda: ${RAG_MMR_LAMBDA:0.5}
+    pool-size: ${RAG_MMR_POOL_SIZE:30}
+  # Query expansion (shared variant budget for multi-query, HyDE and decomposition)
+  query-expansion:
+    max-variants: ${RAG_QUERY_EXPANSION_MAX_VARIANTS:6}
+    rrf-k: ${RAG_QUERY_EXPANSION_RRF_K:60}
+  multi-query:
+    enabled: ${RAG_MULTI_QUERY_ENABLED:false}
+    variants: ${RAG_MULTI_QUERY_VARIANTS:3}
+  hyde:
+    enabled: ${RAG_HYDE_ENABLED:false}
+    max-chars: ${RAG_HYDE_MAX_CHARS:1000}
+  query-decomposition:
+    enabled: ${RAG_QUERY_DECOMPOSITION_ENABLED:false}
+    max-sub-questions: ${RAG_QUERY_DECOMPOSITION_MAX_SUB_QUESTIONS:4}
+  # Self-RAG relevance gate applied before generation
+  retrieval-grading:
+    enabled: ${RAG_RETRIEVAL_GRADING_ENABLED:false}
+    min-score: ${RAG_RETRIEVAL_GRADING_MIN_SCORE:0.0}
+    min-hits: ${RAG_RETRIEVAL_GRADING_MIN_HITS:1}
+    broaden: ${RAG_RETRIEVAL_GRADING_BROADEN:true}
+  # Intent-aware filter inference (opt in per request via inferFilters)
+  filter-inference:
+    category-property: ${RAG_FILTER_INFERENCE_CATEGORY_PROPERTY:}
+  # Post-generation citation faithfulness check (adds one LLM call per answer)
+  citation:
+    verify:
+      enabled: ${RAG_CITATION_VERIFY_ENABLED:false}
+  # Small-to-big retrieval: expand each hit to its parent section for LLM context
+  retrieval:
+    small-to-big:
+      enabled: ${RAG_RETRIEVAL_SMALL_TO_BIG_ENABLED:false}
+      max-section-chars: ${RAG_RETRIEVAL_SMALL_TO_BIG_MAX_SECTION_CHARS:4000}
+  # In-app evaluation smoke endpoint (content-lake-eval remains the authoritative gate)
+  evaluation:
+    enabled: ${RAG_EVALUATION_ENABLED:false}
+  # Graph-augmented retrieval; enable to wire the hxpr graph client for /api/rag/graph-prompt
+  graph:
+    enabled: ${RAG_GRAPH_ENABLED:false}
+    graphdb-name: ${HXPR_GRAPH_DB_NAME:content-lake}
+    graphdb-id: ${HXPR_GRAPH_DB_ID:}
+    max-hops: ${RAG_GRAPH_MAX_HOPS:1}
+    seed-documents: ${RAG_GRAPH_SEED_DOCUMENTS:5}
+    max-expanded-documents: ${RAG_GRAPH_MAX_EXPANDED_DOCUMENTS:20}
+```
+
+Ingestion has a matching opt-in flag, `content-lake.ingest.keyword-context-enrichment-enabled`
+(default `false`), which prepends document-level context to each chunk's keyword-search text.
 
 Conversation memory storage:
 
@@ -970,6 +1111,17 @@ Conversation memory storage:
 - To use Redis or a database, provide a custom Spring bean implementing `ConversationMemoryStore`; the default in-memory store is only created when no other `ConversationMemoryStore` bean exists.
 
 ## Roadmap
+
+### Shipped
+
+- [x] Multi-turn chat sessions with conversation memory and query reformulation
+- [x] Hybrid search (vector + keyword) with RRF and weighted fusion
+- [x] Advanced retrieval: multi-query, HyDE, query decomposition, and a self-RAG relevance gate
+- [x] Re-ranking (LLM/cross-encoder) and MMR diversification
+- [x] Per-request embedding-type selection
+- [x] Table-aware chunking and small-to-big (parent-section) retrieval
+- [x] Citation-faithfulness verification
+- [x] GraphRAG: entity extraction, graph-augmented retrieval, and community summaries
 
 ### Next (Q2 2026 - Open Source Release)
 
@@ -980,9 +1132,6 @@ Conversation memory storage:
 
 ### Future
 
-- [ ] Conversation history / multi-turn chat sessions
-- [ ] Re-ranking with cross-encoder models
-- [ ] Multiple embedding models per document
 - [ ] Document versioning support
 - [ ] DocFilters integration (better text extraction)
 - [ ] Multilingual embeddings
