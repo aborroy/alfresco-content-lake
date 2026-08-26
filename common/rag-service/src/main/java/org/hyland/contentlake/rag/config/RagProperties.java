@@ -100,6 +100,18 @@ public class RagProperties {
     /** Graph-augmented retrieval (GraphRAG, #55). Disabled by default. */
     private GraphProperties graph = new GraphProperties();
 
+    /** Prompt-injection defense on retrieved document content (#71). Disabled by default. */
+    private PromptInjectionProperties promptInjection = new PromptInjectionProperties();
+
+    /** Per-principal rate limiting on RAG/search endpoints (#75). Disabled by default. */
+    private RateLimitProperties rateLimit = new RateLimitProperties();
+
+    /** Agentic tool-calling during generation (#65). Disabled by default. */
+    private AgenticToolsProperties agenticTools = new AgenticToolsProperties();
+
+    /** MCP server exposing rag-service tools to external LLM agents (#61). Enabled by default. */
+    private McpProperties mcp = new McpProperties();
+
     @Data
     public static class RerankerProperties {
 
@@ -366,5 +378,64 @@ public class RagProperties {
             /** hxpr folder under which community-summary documents are stored. */
             private String basePath = "/_graph/communities";
         }
+    }
+
+    @Data
+    public static class PromptInjectionProperties {
+
+        /**
+         * When true, wraps each retrieved chunk in explicit delimiters and frames it as untrusted
+         * document data (not instructions) in the LLM prompt. Off by default so the eval baseline is
+         * preserved until the generation delta is characterized.
+         */
+        private boolean defenseEnabled = false;
+
+        /**
+         * When true, runs the heuristic {@code PromptInjectionScanner} over each retrieved chunk and
+         * logs matches for audit. Chunks are not dropped (evidence the user needs may match a
+         * pattern). Off by default until validated against a real-corpus false-positive rate.
+         */
+        private boolean scanEnabled = false;
+    }
+
+    @Data
+    public static class RateLimitProperties {
+
+        /** Enables per-principal rate limiting. Off by default. */
+        private boolean enabled = false;
+
+        /**
+         * Requests per minute for generation endpoints ({@code /api/rag/prompt},
+         * {@code /api/rag/graph-prompt}, {@code /api/rag/chat/stream}). Tighter than search given the
+         * per-request LLM cost.
+         */
+        private int generateRequestsPerMinute = 20;
+
+        /** Requests per minute for search endpoints ({@code /api/rag/search/**}). */
+        private int searchRequestsPerMinute = 60;
+    }
+
+    @Data
+    public static class AgenticToolsProperties {
+
+        /**
+         * Enables agentic tool-calling: the RAG LLM may invoke re-search / get-document / list-sources
+         * tools mid-generation. Off by default (increased LLM round-trips and blast radius).
+         */
+        private boolean enabled = false;
+
+        /** Maximum additional retrieval rounds the model may trigger via {@code researchAgain}. */
+        private int maxIterations = 2;
+    }
+
+    @Data
+    public static class McpProperties {
+
+        /**
+         * Enables the MCP server endpoint exposing search/retrieval/listing tools to external LLM
+         * agents. Enabled by default; the endpoint sits behind the existing authentication chain
+         * (HTTP Basic / Alfresco ticket), so it is never anonymously accessible.
+         */
+        private boolean enabled = true;
     }
 }

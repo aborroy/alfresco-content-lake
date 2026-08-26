@@ -135,6 +135,26 @@ rag:
   citation:
     verify:
       enabled: ${RAG_CITATION_VERIFY_ENABLED:false}
+  # Prompt-injection defense on retrieved document content (#71). Both flags off by default so the
+  # eval baseline is preserved until the generation delta / false-positive rate are characterized.
+  prompt-injection:
+    defense-enabled: ${RAG_PROMPT_INJECTION_DEFENSE_ENABLED:false}
+    scan-enabled: ${RAG_PROMPT_INJECTION_SCAN_ENABLED:false}
+  # Per-principal rate limiting (#75). Off by default. Generation endpoints get a tighter budget than
+  # search given the per-request LLM cost. Buckets are in-memory (per-instance).
+  rate-limit:
+    enabled: ${RAG_RATE_LIMIT_ENABLED:false}
+    generate-requests-per-minute: ${RAG_RATE_LIMIT_GENERATE_RPM:20}
+    search-requests-per-minute: ${RAG_RATE_LIMIT_SEARCH_RPM:60}
+  # Agentic tool-calling during generation (#65). Off by default (extra LLM round-trips). All
+  # tool-invoked retrieval is ACL-scoped to the request principal.
+  agentic-tools:
+    enabled: ${RAG_AGENTIC_TOOLS_ENABLED:false}
+    max-iterations: ${RAG_AGENTIC_TOOLS_MAX_ITERATIONS:2}
+  # MCP server (#61). Enabled by default; gated together with spring.ai.mcp.server.enabled by the same
+  # env var so the tools and the transport switch on/off together.
+  mcp:
+    enabled: ${RAG_MCP_ENABLED:true}
   # Small-to-big (parent-child) retrieval: expand each hit to its parent section for LLM context.
   retrieval:
     small-to-big:
