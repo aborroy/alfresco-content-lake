@@ -42,6 +42,19 @@
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Bucket4j: per-principal token-bucket rate limiting (#75). Not managed by any BOM,
+             so pin an explicit version. -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>${bucket4j.version}</version>
+        </dependency>
+        <!-- Spring AI MCP server (WebMVC/synchronous) exposing rag-service tools over the Model
+             Context Protocol (#61). Version managed by spring-ai-bom. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

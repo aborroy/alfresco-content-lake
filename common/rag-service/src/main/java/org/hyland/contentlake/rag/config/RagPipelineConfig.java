@@ -5,6 +5,7 @@ import org.hyland.contentlake.rag.service.DiversitySelector;
 import org.hyland.contentlake.rag.service.GraphAugmentationService;
 import org.hyland.contentlake.rag.service.HxprDocumentRetriever;
 import org.hyland.contentlake.rag.service.HybridSearchService;
+import org.hyland.contentlake.rag.service.PromptInjectionScanner;
 import org.hyland.contentlake.rag.service.RerankService;
 import org.hyland.contentlake.rag.service.RetrievalGrader;
 import org.hyland.contentlake.rag.service.SectionExpansionService;
@@ -42,10 +43,12 @@ public class RagPipelineConfig {
                                                                    RetrievalGrader retrievalGrader,
                                                                    RagProperties ragProperties,
                                                                    SectionExpansionService sectionExpansionService,
-                                                                   ObjectProvider<GraphAugmentationService> graphAugmentationServiceProvider) {
+                                                                   ObjectProvider<GraphAugmentationService> graphAugmentationServiceProvider,
+                                                                   PromptInjectionScanner promptInjectionScanner) {
         return new ContentLakeRetrievalAdvisor(
                 hxprDocumentRetriever, diversitySelector, rerankService, retrievalGrader, ragProperties,
-                sectionExpansionService, graphAugmentationServiceProvider.getIfAvailable());
+                sectionExpansionService, graphAugmentationServiceProvider.getIfAvailable(),
+                promptInjectionScanner);
     }
 
     /**

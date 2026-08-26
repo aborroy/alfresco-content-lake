@@ -21,6 +21,7 @@
         <module>common</module>
         <module>alfresco</module>
         <module>nuxeo</module>
+        <module>filesystem</module>
     </modules>
 
     <properties>
@@ -28,6 +29,8 @@
         <alfresco.sdk.version>7.2.0</alfresco.sdk.version>
         <alfresco.events.sdk.version>6.2.0</alfresco.events.sdk.version>
         <spring-ai.version>2.0.0</spring-ai.version>
+        <tika.version>2.9.2</tika.version>
+        <bucket4j.version>8.10.1</bucket4j.version>
     </properties>
 
     <dependencyManagement>

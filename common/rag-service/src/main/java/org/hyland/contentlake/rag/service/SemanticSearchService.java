@@ -184,6 +184,21 @@ public class SemanticSearchService {
         return buildPermissionFilter(username, request.getSourceType(), additionalFilter);
     }
 
+    /**
+     * Builds the ACL permission filter for the <em>current</em> authenticated principal, combined with
+     * an optional additional HXQL predicate. Resolves identity from the {@link SecurityContextHolder}
+     * exactly as {@link #search} does, so ACL-scoped tool/MCP operations (#65, #61) cannot bypass
+     * {@code sys_racl}. Returns a complete HXQL query ({@code SELECT ... WHERE ...}).
+     */
+    public String currentUserPermissionFilter(String sourceType, String additionalFilter) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth instanceof DualSourceAuthentication dual) {
+            return buildPermissionFilter(dual.getAlfrescoUsername(), dual.getNuxeoUsername(),
+                    sourceType, additionalFilter);
+        }
+        return buildPermissionFilter(securityContextService.getCurrentUsername(), sourceType, additionalFilter);
+    }
+
     /** Single-threaded memoization; each search resolves its filter at most once. */
     private static <T> Supplier<T> memoize(Supplier<T> delegate) {
         return new Supplier<>() {

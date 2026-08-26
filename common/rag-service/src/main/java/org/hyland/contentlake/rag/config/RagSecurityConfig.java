@@ -6,6 +6,7 @@ import org.hyland.contentlake.rag.security.DualSourceAuthenticationFilter;
 import org.hyland.contentlake.rag.security.MultiSourceAuthenticationProvider;
 import org.hyland.contentlake.rag.security.NuxeoTokenAuthenticationFilter;
 import org.hyland.contentlake.rag.security.RagAuthenticationEntryPoint;
+import org.hyland.contentlake.rag.security.RateLimitFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -31,7 +32,8 @@ public class RagSecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                             AuthenticationManager authenticationManager,
-                                            MultiSourceAuthenticationProvider provider) throws Exception {
+                                            MultiSourceAuthenticationProvider provider,
+                                            RagProperties ragProperties) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session
@@ -43,11 +45,16 @@ public class RagSecurityConfig {
                         BasicAuthenticationFilter.class)
                 .addFilterBefore(new NuxeoTokenAuthenticationFilter(authenticationManager),
                         BasicAuthenticationFilter.class)
+                // Rate limiting runs AFTER authentication so it keys on the resolved principal (#75).
+                .addFilterAfter(new RateLimitFilter(ragProperties), BasicAuthenticationFilter.class)
                 .httpBasic(httpBasic -> httpBasic.authenticationEntryPoint(new RagAuthenticationEntryPoint()))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/rag/health").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
+                        // INVARIANT: the MCP endpoint (#61) and every other route stay authenticated.
+                        // MCP tools derive the ACL identity from the authenticated request thread, so
+                        // the endpoint must NEVER be added to the permit-all list above.
                         .anyRequest().authenticated()
                 )
                 .build();

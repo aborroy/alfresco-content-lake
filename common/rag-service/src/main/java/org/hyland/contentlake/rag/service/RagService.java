@@ -10,6 +10,8 @@ import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
+import org.hyland.contentlake.rag.model.ResponseFormat;
+import org.hyland.contentlake.rag.model.StructuredAnswer;
 import org.hyland.contentlake.rag.model.RagPromptResponse.ContextChunk;
 import org.hyland.contentlake.rag.model.RagPromptResponse.Source;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
@@ -17,13 +19,17 @@ import org.hyland.contentlake.security.SecurityContextService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClient.ChatClientRequestSpec;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
@@ -62,6 +68,8 @@ public class RagService {
     private final FilterInferenceService filterInferenceService;
     private final SessionSummaryService sessionSummaryService;
     private final CitationVerifier citationVerifier;
+    private final StructuredAnswerService structuredAnswerService;
+    private final RagToolset ragToolset;
 
     /**
      * Executes the full RAG pipeline for a given question.
@@ -169,7 +177,7 @@ public class RagService {
      * that the advisor fills during retrieval.
      */
     private ChatClientRequestSpec requestSpec(PromptContext promptContext) {
-        return ragChatClient.prompt()
+        ChatClientRequestSpec spec = ragChatClient.prompt()
                 .system(promptContext.systemPrompt())
                 .user(promptContext.question())
                 .advisors(advisor -> advisor
@@ -179,6 +187,20 @@ public class RagService {
                         .param(HxprDocumentRetriever.CTX_TOP_K, promptContext.topK())
                         .param(HxprDocumentRetriever.CTX_MIN_SCORE, promptContext.minScore())
                         .params(promptContext.optionalRetrievalParams()));
+
+        // Agentic tool-calling (#65): register the toolset and capture the request-thread
+        // Authentication so tools apply the same ACL filtering even when executed on a Reactor
+        // (streaming) thread. Off by default; identity is never taken from tool arguments.
+        if (ragProperties.getAgenticTools().isEnabled()) {
+            Map<String, Object> toolContext = new HashMap<>();
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null) {
+                toolContext.put(RagToolset.CTX_AUTH, auth);
+            }
+            toolContext.put(RagToolset.CTX_ITERATIONS, new AtomicInteger(0));
+            spec = spec.tools(ragToolset).toolContext(toolContext);
+        }
+        return spec;
     }
 
     private GenerationResult generateAnswer(PromptContext promptContext) {
@@ -317,6 +339,13 @@ public class RagService {
         List<String> graphEntities = promptContext.trace().graphEntities().isEmpty()
                 ? null : promptContext.trace().graphEntities();
 
+        // Structured/typed output (#70). Opt-in second pass; skipped when no context was retrieved.
+        StructuredAnswer structured = null;
+        if (request.getResponseFormat() == ResponseFormat.STRUCTURED && !rerankedHits.isEmpty()) {
+            structured = structuredAnswerService.summarize(
+                    request.getQuestion(), generation.answer(), rerankedHits);
+        }
+
         return RagPromptResponse.builder()
                 .answer(generation.answer())
                 .question(request.getQuestion())
@@ -337,6 +366,7 @@ public class RagService {
                 .unsupportedClaims(verification != null ? verification.unsupportedClaims() : null)
                 .graphSources(graphSources)
                 .graphEntities(graphEntities)
+                .structured(structured)
                 .build();
     }
 

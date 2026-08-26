@@ -81,4 +81,12 @@ public class RagPromptRequest {
     /** GraphRAG: include community summaries in context (#56; accepted now, no-op until implemented). */
     @Builder.Default
     private boolean includeCommunities = false;
+
+    /**
+     * Requested answer shape (#70). {@link ResponseFormat#TEXT} (default) returns free text only;
+     * {@link ResponseFormat#STRUCTURED} additionally returns a typed {@code structured} object in the
+     * response, derived in a second pass so the free-text {@code answer} is unaffected.
+     */
+    @Builder.Default
+    private ResponseFormat responseFormat = ResponseFormat.TEXT;
 }

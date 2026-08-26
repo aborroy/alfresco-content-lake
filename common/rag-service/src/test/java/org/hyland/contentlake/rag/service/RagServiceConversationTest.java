@@ -94,7 +94,7 @@ class RagServiceConversationTest {
                 new SectionExpansionService(hxprDocumentApi, properties);
         ContentLakeRetrievalAdvisor advisor = new ContentLakeRetrievalAdvisor(
                 retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties,
-                sectionExpansionService, null);
+                sectionExpansionService, null, new PromptInjectionScanner());
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();
@@ -107,7 +107,10 @@ class RagServiceConversationTest {
                 securityContextService,
                 filterInferenceService,
                 sessionSummaryService,
-                citationVerifier
+                citationVerifier,
+                new StructuredAnswerService(new StructuredLlmCaller(chatModel)),
+                // Agentic tools are disabled by default in these tests, so the toolset is never invoked.
+                null
         );
     }
 

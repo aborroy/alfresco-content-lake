@@ -84,6 +84,12 @@ public class RagPromptResponse {
      */
     private List<Source> graphSources;
 
+    /**
+     * Typed answer (#70), present only when the request asked for {@link ResponseFormat#STRUCTURED}.
+     * Derived from {@link #answer} in a second pass; the free-text {@code answer} is always present.
+     */
+    private StructuredAnswer structured;
+
     @Data
     @Builder
     @NoArgsConstructor
