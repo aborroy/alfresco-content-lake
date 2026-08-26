@@ -1,6 +1,7 @@
 package org.hyland.nuxeo.contentlake.adapter;
 
 import org.hyland.nuxeo.contentlake.model.NuxeoDocument;
+import org.hyland.contentlake.spi.PermissionRule;
 import org.hyland.contentlake.spi.SourceNode;
 import org.junit.jupiter.api.Test;
 
@@ -74,5 +75,30 @@ class NuxeoSourceNodeAdapterTest {
         assertThat(node.sourceProperties())
                 .containsEntry("nuxeo_path", "/default-domain/workspaces/finance")
                 .containsEntry("nuxeo_documentType", "Workspace");
+    }
+
+    @Test
+    void toSourceNode_populatesStructuredSecurityConfigFromReadAndDenyPrincipals() {
+        NuxeoDocument document = new NuxeoDocument();
+        document.setUid("doc-123");
+        document.setType("File");
+        document.setTitle("Quarterly Report");
+        document.setPath("/default-domain/workspaces/finance/q1-report.pdf");
+
+        SourceNode node = NuxeoSourceNodeAdapter.toSourceNode(
+                document,
+                "nuxeo-dev",
+                "file:content",
+                Set.of("Administrator", "GROUP_members"),
+                Set.of("GROUP_archived")
+        );
+
+        assertThat(node.security()).isNotNull();
+        assertThat(node.security().inheritanceEnabled()).isTrue();
+        assertThat(node.security().permissions())
+                .containsExactlyInAnyOrder(
+                        new PermissionRule("Administrator", "user", "Administrator", "READ"),
+                        new PermissionRule("GROUP_members", "group", "GROUP_members", "READ"),
+                        new PermissionRule("GROUP_archived", "group", "GROUP_archived", "READ_DENY"));
     }
 }

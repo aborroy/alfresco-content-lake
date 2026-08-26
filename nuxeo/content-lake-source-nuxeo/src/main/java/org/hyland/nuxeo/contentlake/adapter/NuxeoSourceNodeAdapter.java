@@ -2,14 +2,18 @@ package org.hyland.nuxeo.contentlake.adapter;
 
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.nuxeo.contentlake.model.NuxeoDocument;
+import org.hyland.contentlake.spi.PermissionRule;
+import org.hyland.contentlake.spi.SecurityConfig;
 import org.hyland.contentlake.spi.SourceNode;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Converts a Nuxeo REST document payload into a source-agnostic {@link SourceNode}.
@@ -71,11 +75,40 @@ public final class NuxeoSourceNodeAdapter {
                 folder,
                 new LinkedHashSet<>(readPrincipals),
                 new LinkedHashSet<>(denyPrincipals),
-                props
+                props,
+                buildSecurityConfig(readPrincipals, denyPrincipals)
         );
     }
 
     public static boolean isContainerType(String type) {
         return type != null && CONTAINER_TYPES.contains(type);
+    }
+
+    /**
+     * Builds the vendor-neutral {@link SecurityConfig} from the effective read grants and explicit
+     * denies. By the time principals reach this adapter, {@code NuxeoClient} has normalized group
+     * authorities to the {@code GROUP_} prefix (matching the Alfresco convention), so identity type is
+     * derived from that prefix. Nuxeo effective ACLs already fold in inherited entries, so inheritance
+     * is reported as enabled.
+     */
+    private static SecurityConfig buildSecurityConfig(Set<String> readPrincipals, Set<String> denyPrincipals) {
+        List<PermissionRule> rules = new ArrayList<>();
+        appendRules(rules, readPrincipals, "READ");
+        appendRules(rules, denyPrincipals, "READ_DENY");
+        return new SecurityConfig(true, rules);
+    }
+
+    private static void appendRules(List<PermissionRule> rules, Set<String> principals, String access) {
+        if (principals == null) {
+            return;
+        }
+        // Sort for stable, reproducible output.
+        for (String principal : new TreeSet<>(principals)) {
+            if (principal == null || principal.isBlank()) {
+                continue;
+            }
+            String identityType = principal.startsWith("GROUP_") ? "group" : "user";
+            rules.add(new PermissionRule(principal, identityType, principal, access));
+        }
     }
 }

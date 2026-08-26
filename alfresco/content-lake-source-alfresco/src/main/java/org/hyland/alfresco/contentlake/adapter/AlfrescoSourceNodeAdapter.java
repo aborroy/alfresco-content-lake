@@ -1,13 +1,18 @@
 package org.hyland.alfresco.contentlake.adapter;
 
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
+import org.hyland.contentlake.spi.PermissionRule;
+import org.hyland.contentlake.spi.SecurityConfig;
 import org.hyland.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Converts an Alfresco SDK {@link Node} into a {@link SourceNode}.
@@ -44,8 +49,35 @@ public final class AlfrescoSourceNodeAdapter {
                 Boolean.TRUE.equals(node.isIsFolder()),
                 readPrincipals,
                 Set.of(),
-                buildSourceProperties(node, sourceId)
+                buildSourceProperties(node, sourceId),
+                buildSecurityConfig(node, readPrincipals)
         );
+    }
+
+    /**
+     * Builds the vendor-neutral {@link SecurityConfig} from the effective read authorities.
+     *
+     * <p>Alfresco group authorities are prefixed {@code GROUP_}; everything else is a user. Inheritance
+     * is read from the node's permission block (treating {@code null} as enabled, matching
+     * {@code AlfrescoClient.extractReadAuthorities}). Only ALLOW/READ rules are represented because
+     * Alfresco never populates deny principals in this pipeline.</p>
+     */
+    private static SecurityConfig buildSecurityConfig(Node node, Set<String> readPrincipals) {
+        boolean inheritanceEnabled = node.getPermissions() == null
+                || !Boolean.FALSE.equals(node.getPermissions().isIsInheritanceEnabled());
+
+        List<PermissionRule> rules = new ArrayList<>();
+        if (readPrincipals != null) {
+            // Sort for stable, reproducible output.
+            for (String authority : new TreeSet<>(readPrincipals)) {
+                if (authority == null || authority.isBlank()) {
+                    continue;
+                }
+                String identityType = authority.startsWith("GROUP_") ? "group" : "user";
+                rules.add(new PermissionRule(authority, identityType, authority, "READ"));
+            }
+        }
+        return new SecurityConfig(inheritanceEnabled, rules);
     }
 
     private static Map<String, Object> buildSourceProperties(Node node, String sourceId) {

@@ -26,6 +26,10 @@ import java.util.Set;
  * @param sourceProperties source-specific metadata stored in {@code cin_ingestProperties}
  *                         alongside the generic keys; keyed by adapter-owned namespaces
  *                         such as {@code alfresco_*} or {@code nuxeo_*}
+ * @param security         structured, vendor-neutral view of the node's ACL; {@code null} when the
+ *                         adapter has not populated it. The hxpr pipeline continues to use
+ *                         {@code readPrincipals} / {@code denyPrincipals}; {@code security} is carried
+ *                         for future non-hxpr output connectors
  */
 public record SourceNode(
         String nodeId,
@@ -38,5 +42,27 @@ public record SourceNode(
         boolean folder,
         Set<String> readPrincipals,
         Set<String> denyPrincipals,
-        Map<String, Object> sourceProperties
-) {}
+        Map<String, Object> sourceProperties,
+        SecurityConfig security
+) {
+    /**
+     * Backward-compatible constructor for callers that predate the structured {@link SecurityConfig}
+     * field. Defaults {@code security} to {@code null}.
+     */
+    public SourceNode(
+            String nodeId,
+            String sourceId,
+            String sourceType,
+            String name,
+            String path,
+            String mimeType,
+            OffsetDateTime modifiedAt,
+            boolean folder,
+            Set<String> readPrincipals,
+            Set<String> denyPrincipals,
+            Map<String, Object> sourceProperties
+    ) {
+        this(nodeId, sourceId, sourceType, name, path, mimeType, modifiedAt, folder,
+                readPrincipals, denyPrincipals, sourceProperties, null);
+    }
+}
