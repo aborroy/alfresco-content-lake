@@ -93,15 +93,17 @@ Leverages **hxpr** as a Content Lake to enable high-quality AI search while:
 | Module | Group | Port | Description |
 |--------|-------|------|-------------|
 | `content-lake-repo-model` | `common/` | -- | Alfresco repository JAR that bootstraps the `cl:indexed` content model for scope control |
-| `content-lake-spi` | `common/` | -- | Source Provider Interface: `SourceNode`, `ContentSourceClient`, `TextExtractor`, `ScopeResolver` |
-| `content-lake-core` | `common/` | -- | Shared ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency |
-| `rag-service` | `common/` | 9091 | Semantic search, hybrid search, and RAG question answering |
+| `content-lake-spi` | `common/` | -- | Source Provider Interface: `SourceNode`, `ContentSourceClient`, `TextExtractor`, `ScopeResolver`, and the OIS-aligned `SecurityConfig` / `PermissionRule` |
+| `content-lake-core` | `common/` | -- | Shared ingestion pipeline: metadata sync, transform, chunking, embedding, ACL updates, idempotency; includes a source-agnostic Apache Tika text extractor |
+| `rag-service` | `common/` | 9091 | Semantic search, hybrid search, RAG question answering, operational status (`/api/status`), an MCP server, agentic tool-calling, structured output, prompt-injection defense, and rate limiting |
 | `content-lake-source-alfresco` | `alfresco/` | -- | Alfresco REST clients, scope resolver, and ACL expansion |
 | `alfresco-batch-ingester` | `alfresco/` | 9090 | Alfresco folder discovery, batch scheduling, and `/api/sync/*` controllers |
 | `alfresco-live-ingester` | `alfresco/` | 9092 | Alfresco Event2 listener over ActiveMQ using Alfresco Java SDK handlers |
 | `content-lake-source-nuxeo` | `nuxeo/` | -- | Nuxeo REST clients, scope resolver, auth abstraction, and text extraction |
 | `nuxeo-batch-ingester` | `nuxeo/` | 9093 | Nuxeo full-batch discovery and one-shot sync using NXQL |
 | `nuxeo-live-ingester` | `nuxeo/` | 9094 | Nuxeo audit-stream listener using a persisted watermark |
+| `content-lake-source-filesystem` | `filesystem/` | -- | Filesystem source: local/mounted directory client, scope resolver (glob/extension filters); uses the Tika extractor |
+| `filesystem-batch-ingester` | `filesystem/` | 9095 | Filesystem directory discovery and one-shot sync via `/api/sync/configured` |
 
 ## Quick Start
 

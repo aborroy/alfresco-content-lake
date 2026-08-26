@@ -31,6 +31,14 @@ spring:
           maxTokens: ${LLM_MAX_TOKENS:2048}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+    # MCP server (#61): exposes rag-service tools (secureSearch/getDocument/listSources) over the
+    # Model Context Protocol. Synchronous WebMVC transport; tools run on the authenticated request
+    # thread. Endpoint is behind the existing auth chain (HTTP Basic / Alfresco ticket).
+    mcp:
+      server:
+        enabled: ${RAG_MCP_ENABLED:true}
+        name: content-lake-mcp
+        version: 1.0.0
 
 # Alfresco SDK configuration
 # Service account for internal operations (group resolution, metadata enrichment)

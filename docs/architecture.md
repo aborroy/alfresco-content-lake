@@ -24,11 +24,13 @@ content-lake-app/
 │   │       ├── ContentSourceClient
 │   │       ├── ScopeResolver
 │   │       ├── SourceNode
+│   │       ├── SecurityConfig / PermissionRule   (OIS-aligned structured ACL)
 │   │       └── TextExtractor
 │   ├── content-lake-core/         Shared pipeline -- no source-specific SDK imports
 │   │   └── org.hyland.contentlake
 │   │       ├── client/            HxprService, HxprDocumentApi, HxprQueryApi, HxprTokenProvider
 │   │       ├── config/            HxprProperties
+│   │       ├── extractor/         TikaTextExtractor (source-agnostic, Tika-based)
 │   │       ├── model/             HxprDocument, HxprEmbedding, Chunk, ContentLakeNodeStatus
 │   │       └── service/           ContentSyncService, EmbeddingService, Chunker, chunking strategies
 │   └── rag-service/               Semantic search + RAG Spring Boot app
@@ -60,6 +62,15 @@ content-lake-app/
     │   └── org.hyland.nuxeo.contentlake.batch
     └── nuxeo-live-ingester/        Spring Boot app: audit-driven Nuxeo sync
         └── org.hyland.nuxeo.contentlake.live
+
+filesystem/
+    ├── content-lake-source-filesystem/  Filesystem adapter
+    │   └── org.hyland.filesystem.contentlake
+    │       ├── client/            FileSystemSourceClient (impl ContentSourceClient)
+    │       ├── config/            FileSystemProperties
+    │       └── service/           FileSystemScopeResolver (impl ScopeResolver)
+    └── filesystem-batch-ingester/  Spring Boot app: directory walk + one-shot sync (uses TikaTextExtractor)
+        └── org.hyland.filesystem.contentlake.batch
 ```
 
 Sibling runtime projects:
