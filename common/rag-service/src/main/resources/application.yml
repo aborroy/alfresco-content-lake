@@ -176,6 +176,11 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  endpoint:
+    health:
+      # Surface the custom hxpr / modelRunner health contributors on /actuator/health.
+      show-components: always
+      show-details: when-authorized
 
 logging:
   level:
