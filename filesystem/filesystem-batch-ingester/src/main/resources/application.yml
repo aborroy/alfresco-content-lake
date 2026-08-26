@@ -1,0 +1,69 @@
+server:
+  port: 9095
+
+spring:
+  application:
+    name: filesystem-batch-ingester
+
+  ai:
+    openai:
+      # Spring AI 2.0 treats base-url as the FULL API base and appends `/embeddings` directly (no
+      # `/v1`). MODEL_RUNNER_URL is a bare scheme://host:port, so `/v1` must be appended here.
+      base-url: ${MODEL_RUNNER_URL:http://localhost:12434}/v1
+      api-key: ${MODEL_RUNNER_API_KEY:not-needed}
+      embedding:
+        model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
+      chat:
+        options:
+          model: ${LLM_MODEL:ai/gpt-oss}
+          temperature: ${LLM_TEMPERATURE:0.1}
+
+# Filesystem source connector
+filesystem:
+  root-path: ${FILESYSTEM_ROOT_PATH:/data/filesystem}
+  source-id: ${FILESYSTEM_SOURCE_ID:filesystem}
+  read-principals:
+    - ${FILESYSTEM_READ_PRINCIPAL:__Everyone__}
+  # Empty include-extensions means all files; set to restrict (e.g. pdf, docx, txt, md, html).
+  include-extensions: ${FILESYSTEM_INCLUDE_EXTENSIONS:}
+  exclude-patterns:
+    - .git
+    - node_modules
+  page-size: ${FILESYSTEM_PAGE_SIZE:100}
+  batch:
+    executor:
+      core-size: ${FILESYSTEM_BATCH_CORE_SIZE:1}
+      max-size: ${FILESYSTEM_BATCH_MAX_SIZE:1}
+      queue-capacity: ${FILESYSTEM_BATCH_QUEUE_CAPACITY:1000}
+      await-termination-seconds: ${FILESYSTEM_BATCH_AWAIT_TERMINATION_SECONDS:30}
+    embedding:
+      min-chunk-size: ${EMBEDDING_MIN_CHUNK_SIZE:200}
+      chunk-size: ${EMBEDDING_CHUNK_SIZE:1024}
+      chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:256}
+      similarity-threshold: ${EMBEDDING_SIMILARITY_THRESHOLD:0.75}
+      model-name: ${EMBEDDING_MODEL_NAME:default}
+      noise-reduction:
+        enabled: ${NOISE_REDUCTION_ENABLED:true}
+        aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}
+
+hxpr:
+  url: ${HXPR_URL:http://localhost:8080}
+  repository-id: ${HXPR_REPOSITORY_ID:default}
+  target-path: ${HXPR_TARGET_PATH:/filesystem-sync}
+  path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
+  idp:
+    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
+    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
+    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
+    username: ${HXPR_IDP_USERNAME:testuser}
+    password: ${HXPR_IDP_PASSWORD:password}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    org.alfresco.contentlake: ${LOG_LEVEL:INFO}

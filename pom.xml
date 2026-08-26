@@ -21,6 +21,7 @@
         <module>common</module>
         <module>alfresco</module>
         <module>nuxeo</module>
+        <module>filesystem</module>
     </modules>
 
     <properties>
