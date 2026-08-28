@@ -10,6 +10,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
@@ -62,8 +63,16 @@ public class TransformClient implements TextExtractor {
         this.configCacheTtl = configCacheTtl;
 
         // RestClient baseUrl accepts both with and without trailing slash; keep as-is.
+        // Apply timeoutMs to the HTTP client itself: without a configured request
+        // factory the default total timeout is 10s, which is fine for small text
+        // files but aborts any content whose extraction runs longer (e.g. large
+        // PDFs take tens of seconds via PdfBox). timeoutMs was only ever sent as a
+        // query param to the transform service, never enforced on the client side.
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory();
+        requestFactory.setReadTimeout(Duration.ofMillis(timeoutMs));
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
                 .build();
 
         log.info("TransformClient initialized: baseUrl={}, timeout={}ms, configCacheTtl={}",
