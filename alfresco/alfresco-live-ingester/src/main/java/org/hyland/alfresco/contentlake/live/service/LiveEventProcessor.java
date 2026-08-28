@@ -61,7 +61,10 @@ public class LiveEventProcessor {
                     log.warn("Node {} not found for event {}", nodeId, event.getId());
                     return;
                 }
-            } else if (scopeResolver.isInScope(node)) {
+            } else if (scopeResolver.isInScopeViaRest(node)) {
+                // REST-based scope check: a create/update event fires the instant the node is
+                // written, before the OpenSearch batch indexer has indexed it or its ancestors.
+                // The AFTS-based isInScope would race that commit and drop the file (issue #88).
                 SourceNode sourceNode = toSourceNode(node);
                 nodeSyncService.syncNode(sourceNode);
             } else {
@@ -150,7 +153,10 @@ public class LiveEventProcessor {
                 return;
             }
 
-            if (!scopeResolver.isInScope(node)) {
+            if (!scopeResolver.isInScopeViaRest(node)) {
+                // REST-based scope check (issue #88): a permission event can arrive while the
+                // OpenSearch batch indexer is still re-indexing the node, so the AFTS-based
+                // isInScope would race and wrongly delete an in-scope document.
                 nodeSyncService.deleteNode(node.getId(), resolveEventTimestamp(event, node));
                 metrics.recordFiltered();
                 log.debug("Node {} is out of scope during permission event {}", node.getId(), event.getId());

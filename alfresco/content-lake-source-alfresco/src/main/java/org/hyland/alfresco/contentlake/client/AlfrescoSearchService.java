@@ -74,6 +74,54 @@ public class AlfrescoSearchService {
     }
 
     /**
+     * Like {@link #findDescendantFiles} but retries while the AFTS {@code ANCESTOR:} query
+     * returns no files, to absorb search-index commit lag. The Solr backend committed
+     * near-real-time; the OpenSearch batch indexer (ACS 26.2+) picks up new content on a
+     * polling interval, so a descendant query issued in the same instant as the triggering
+     * event (a folder scope/permission change, or freshly uploaded children) can momentarily
+     * return empty. Returns as soon as a non-empty result appears, or the (empty) result after
+     * the final attempt. See issues #78 and #88.
+     *
+     * @param maxAttempts     total attempts (clamped to a minimum of 1)
+     * @param retryIntervalMs wait between attempts in milliseconds (skipped when {@code <= 0})
+     */
+    public List<Node> findDescendantFilesWithRetry(String folderId,
+                                                   Collection<String> excludedAspects,
+                                                   int maxAttempts,
+                                                   long retryIntervalMs) {
+        int attempts = Math.max(1, maxAttempts);
+        List<Node> nodes = List.of();
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            nodes = findDescendantFiles(folderId, excludedAspects);
+            if (!nodes.isEmpty()) {
+                if (attempt > 1) {
+                    log.info("Descendant discovery for folder {} returned {} file(s) on attempt {}/{}",
+                            folderId, nodes.size(), attempt, attempts);
+                }
+                return nodes;
+            }
+            if (attempt < attempts) {
+                log.info("Descendant discovery for folder {} found 0 file(s) (attempt {}/{}); retrying in {}ms",
+                        folderId, attempt, attempts, retryIntervalMs);
+                sleep(retryIntervalMs);
+            }
+        }
+        log.debug("Descendant discovery for folder {} found 0 file(s) after {} attempt(s)", folderId, attempts);
+        return nodes;
+    }
+
+    private static void sleep(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
      * Returns aggregate sync-status counts for all in-scope files under the folder.
      *
      * <p>Issues a single AFTS query with a facet on {@code cl:syncStatusValue}

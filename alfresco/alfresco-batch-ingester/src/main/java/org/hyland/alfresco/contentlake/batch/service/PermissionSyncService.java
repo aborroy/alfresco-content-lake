@@ -11,6 +11,7 @@ import org.hyland.alfresco.contentlake.client.AlfrescoSearchService;
 import org.hyland.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.spi.SourceNode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
@@ -28,6 +29,14 @@ public class PermissionSyncService {
     private final AlfrescoSearchService searchService;
     private final ContentLakeScopeResolver scopeResolver;
     private final NodeSyncService nodeSyncService;
+
+    // Same discovery-retry knobs as batch ingestion (issue #88): the AFTS ANCESTOR descendant
+    // query can momentarily return empty while the OpenSearch batch indexer catches up.
+    @Value("${ingestion.discovery.max-attempts:${INGESTION_DISCOVERY_MAX_ATTEMPTS:10}}")
+    private int discoveryMaxAttempts;
+
+    @Value("${ingestion.discovery.retry-interval-ms:${INGESTION_DISCOVERY_RETRY_INTERVAL_MS:3000}}")
+    private long discoveryRetryIntervalMs;
 
     public PermissionSyncResult syncPermissions(PermissionSyncRequest request) {
         MutableResult result = new MutableResult();
@@ -79,7 +88,9 @@ public class PermissionSyncService {
             return;
         }
 
-        for (Node child : searchService.findDescendantFiles(folder.getId(), scopeResolver.getExcludedAspects())) {
+        for (Node child : searchService.findDescendantFilesWithRetry(
+                folder.getId(), scopeResolver.getExcludedAspects(),
+                discoveryMaxAttempts, discoveryRetryIntervalMs)) {
             try {
                 reconcileFile(child, result);
             } catch (Exception e) {
@@ -90,7 +101,10 @@ public class PermissionSyncService {
     }
 
     private void reconcileFile(Node file, MutableResult result) {
-        if (!scopeResolver.isInScope(file)) {
+        // REST-based scope check: an ACL change fires this reconciliation immediately, while the
+        // OpenSearch batch indexer may still be re-indexing the affected subtree. The AFTS-based
+        // isInScope would race that and wrongly delete an in-scope document (issue #88).
+        if (!scopeResolver.isInScopeViaRest(file)) {
             nodeSyncService.deleteNode(file.getId(), file.getModifiedAt());
             result.deleted++;
             return;

@@ -85,7 +85,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("file-1");
         when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("file-1")).thenReturn(file);
-        when(scopeResolver.isInScope(file)).thenReturn(true);
+        when(scopeResolver.isInScopeViaRest(file)).thenReturn(true);
         when(alfrescoClient.extractReadAuthorities(file)).thenReturn(Set.of("user-a"));
         when(alfrescoClient.getSourceId()).thenReturn("repo-main");
 
@@ -121,6 +121,54 @@ class LiveEventProcessorTest {
 
         verify(folderSubtreeReconciler).reconcilePermissions(folder, modifiedAt);
         verify(nodeSyncService, never()).updatePermissions(any());
+        verify(nodeSyncService, never()).syncNode(any());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // processNodeStateChange — REST-based scope check (issue #88)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    void processNodeStateChange_inScopeViaRest_syncsNode() {
+        Node file = new Node()
+                .id("file-1")
+                .name("live-test.txt")
+                .isFile(true)
+                .isFolder(false)
+                .modifiedAt(OffsetDateTime.parse("2026-03-30T09:00:00Z"));
+
+        when(resource.getId()).thenReturn("file-1");
+        when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
+        when(alfrescoClient.getAlfrescoNode("file-1")).thenReturn(file);
+        when(scopeResolver.isInScopeViaRest(file)).thenReturn(true);
+        when(alfrescoClient.extractReadAuthorities(file)).thenReturn(Set.of("user-a"));
+        when(alfrescoClient.getSourceId()).thenReturn("repo-main");
+
+        processor.processNodeStateChange(event);
+
+        verify(nodeSyncService).syncNode(any());
+        verify(nodeSyncService, never()).deleteNode(any(), any());
+        // The AFTS-racing variant must not be consulted on the live create/update path.
+        verify(scopeResolver, never()).isInScope(any(Node.class));
+    }
+
+    @Test
+    void processNodeStateChange_outOfScopeViaRest_deletesNode() {
+        Node file = new Node()
+                .id("file-2")
+                .name("out-of-scope.txt")
+                .isFile(true)
+                .isFolder(false)
+                .modifiedAt(OffsetDateTime.parse("2026-03-30T09:01:00Z"));
+
+        when(resource.getId()).thenReturn("file-2");
+        when(deduplicator.shouldSkip(event, "file-2")).thenReturn(false);
+        when(alfrescoClient.getAlfrescoNode("file-2")).thenReturn(file);
+        when(scopeResolver.isInScopeViaRest(file)).thenReturn(false);
+
+        processor.processNodeStateChange(event);
+
+        verify(nodeSyncService).deleteNode(eq("file-2"), any());
         verify(nodeSyncService, never()).syncNode(any());
     }
 

@@ -123,6 +123,31 @@ public class ContentLakeScopeResolver implements ScopeResolver {
     }
 
     /**
+     * REST-based variant of {@link #isInScope(Node)} that does not race the search-index
+     * commit. Resolves ancestor {@code cl:indexed} / {@code cl:excludeFromLake} state by
+     * reading each path element via {@code GET /nodes/{id}} (DB-consistent) instead of the
+     * AFTS {@code hasIndexedAncestor} / {@code hasExcludedAncestor} queries.
+     *
+     * <p>Used by the live create/update path, where the node fires its event the instant it
+     * is created -- before the OpenSearch batch indexer (ACS 26.2+) has indexed it or its
+     * ancestors, so an AFTS ancestor check would return a stale {@code false} and wrongly drop
+     * an in-scope file. See issue #88.</p>
+     */
+    public boolean isInScopeViaRest(Node node) {
+        if (node == null || Boolean.TRUE.equals(node.isIsFolder())) {
+            return false;
+        }
+        if (!shouldTraverse(node)) {
+            return false;
+        }
+        if (isExcludedBySelfOrAncestorViaRest(node)) {
+            return false;
+        }
+
+        return hasIndexedAspect(node.getAspectNames()) || hasIndexedAncestorViaRest(node);
+    }
+
+    /**
      * Returns {@code true} when a folder itself belongs to an indexed subtree and
      * is not excluded by a folder-level override.
      */

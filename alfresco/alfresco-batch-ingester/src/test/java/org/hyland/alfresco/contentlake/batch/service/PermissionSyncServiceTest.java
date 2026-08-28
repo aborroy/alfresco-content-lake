@@ -60,7 +60,7 @@ class PermissionSyncServiceTest {
                         .addLocallySetItem(allowed("user-a", "Consumer")));
 
         alfrescoClient.nodesById.put("file-1", file);
-        when(scopeResolver.isInScope(file)).thenReturn(true);
+        when(scopeResolver.isInScopeViaRest(file)).thenReturn(true);
 
         PermissionSyncResult result = permissionSyncService.syncPermissions(request("file-1"));
 
@@ -89,8 +89,8 @@ class PermissionSyncServiceTest {
         searchService.descendantsByFolderId.put("folder-1", List.of(childA, childB));
 
         when(scopeResolver.shouldTraverse(folder)).thenReturn(true);
-        when(scopeResolver.isInScope(childA)).thenReturn(true);
-        when(scopeResolver.isInScope(childB)).thenReturn(true);
+        when(scopeResolver.isInScopeViaRest(childA)).thenReturn(true);
+        when(scopeResolver.isInScopeViaRest(childB)).thenReturn(true);
 
         PermissionSyncResult result = permissionSyncService.syncPermissions(request("folder-1"));
 
@@ -112,7 +112,7 @@ class PermissionSyncServiceTest {
         searchService.descendantsByFolderId.put("folder-1", List.of(child));
 
         when(scopeResolver.shouldTraverse(folder)).thenReturn(true);
-        when(scopeResolver.isInScope(child)).thenReturn(false);
+        when(scopeResolver.isInScopeViaRest(child)).thenReturn(false);
 
         PermissionSyncResult result = permissionSyncService.syncPermissions(request("folder-1"));
 

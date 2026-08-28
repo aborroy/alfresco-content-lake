@@ -9,6 +9,7 @@ import org.hyland.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -36,6 +37,15 @@ public class FolderSubtreeReconciler {
     private final AlfrescoSearchService searchService;
     private final ContentLakeScopeResolver scopeResolver;
     private final NodeSyncService nodeSyncService;
+
+    // Descendant discovery retries while the AFTS ANCESTOR query returns empty, absorbing the
+    // OpenSearch batch indexer's polling lag (issue #88). Shares the batch ingester's env-var
+    // names so a single override tunes both ingesters; defaults match the batch discovery loop.
+    @Value("${live-ingester.reconcile.discovery.max-attempts:${INGESTION_DISCOVERY_MAX_ATTEMPTS:10}}")
+    private int discoveryMaxAttempts;
+
+    @Value("${live-ingester.reconcile.discovery.retry-interval-ms:${INGESTION_DISCOVERY_RETRY_INTERVAL_MS:3000}}")
+    private long discoveryRetryIntervalMs;
 
     public ReconciliationResult reconcile(Node folder, OffsetDateTime eventTimestamp) {
         return reconcile(folder, eventTimestamp, ReconciliationMode.SCOPE);
@@ -108,7 +118,8 @@ public class FolderSubtreeReconciler {
         // (on an ancestor folder) just before this event would otherwise be re-synced.
         // isExcludedBySelfOrAncestorViaRest reads from the DB and does not race Solr.
         Set<String> excludedAspects = scopeResolver.getExcludedAspects();
-        for (Node child : searchService.findDescendantFiles(folderId, excludedAspects)) {
+        for (Node child : searchService.findDescendantFilesWithRetry(
+                folderId, excludedAspects, discoveryMaxAttempts, discoveryRetryIntervalMs)) {
             try {
                 if (matchesTechnicalPathExclusion(child)) {
                     result.skipped++;

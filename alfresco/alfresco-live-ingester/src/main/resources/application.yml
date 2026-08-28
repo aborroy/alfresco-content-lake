@@ -128,6 +128,14 @@ live-ingester:
   dedup:
     window: ${LIVE_INGESTER_DEDUP_WINDOW:PT2M}
     max-entries: ${LIVE_INGESTER_DEDUP_MAX_ENTRIES:10000}
+  reconcile:
+    # Folder subtree reconciliation retries the AFTS ANCESTOR descendant query while it returns
+    # empty, to absorb the search backend's index-commit lag (near-real-time with Solr; a polling
+    # interval with the OpenSearch batch indexer on ACS 26.2+). Shares the batch ingester's env-var
+    # names so one override tunes both. See issue #88.
+    discovery:
+      max-attempts: ${INGESTION_DISCOVERY_MAX_ATTEMPTS:10}
+      retry-interval-ms: ${INGESTION_DISCOVERY_RETRY_INTERVAL_MS:3000}
 
 management:
   endpoints:
