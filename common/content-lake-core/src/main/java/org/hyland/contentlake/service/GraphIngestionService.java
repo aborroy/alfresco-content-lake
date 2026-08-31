@@ -2,6 +2,7 @@ package org.hyland.contentlake.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * GraphRAG population at ingestion time (#54): extracts named entities from a document's text with the
@@ -70,10 +77,76 @@ public class GraphIngestionService {
     /** In-process {@code lowercased-canonical-name -> uid} cache; avoids Dgraph read-after-write lag. */
     private final Map<String, String> entityUidCache = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Bounded executor that runs extraction off the ingest hot path (#83); null when
+     * {@code hxpr.graph.extraction-async=false} (extraction then runs inline). Daemon threads so a
+     * unit test or short-lived process never hangs on shutdown.
+     */
+    private final ExecutorService extractionExecutor;
+
     public GraphIngestionService(ChatModel chatModel, HxprGraphService graphService, HxprProperties properties) {
         this.chatModel = chatModel;
         this.graphService = graphService;
         this.properties = properties;
+        this.extractionExecutor = buildExtractionExecutor(properties.getGraph());
+    }
+
+    private static ExecutorService buildExtractionExecutor(GraphConfig cfg) {
+        if (!cfg.isExtractionAsync()) {
+            return null;
+        }
+        int threads = Math.max(1, cfg.getExtractionWorkerThreads());
+        int capacity = Math.max(1, cfg.getExtractionQueueCapacity());
+        AtomicLong counter = new AtomicLong();
+        // CallerRunsPolicy: on queue saturation the submitting ingest thread runs the task, applying
+        // backpressure instead of silently dropping extraction (best-effort, never fatal either way).
+        return new ThreadPoolExecutor(
+                threads, threads, 30L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(capacity),
+                runnable -> {
+                    Thread t = new Thread(runnable, "graph-extraction-" + counter.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (extractionExecutor == null) {
+            return;
+        }
+        extractionExecutor.shutdown();
+        try {
+            if (!extractionExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                extractionExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            extractionExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Fire-and-forget entry point used by the ingest pipeline (#83): submits extraction to the bounded
+     * executor and returns immediately, so document ingestion latency is not dominated by the
+     * extraction LLM call. When async is disabled (or the executor rejects, e.g. during shutdown),
+     * extraction runs inline. Always best-effort: {@link #ingest} swallows its own failures.
+     */
+    public void ingestAsync(String hxprDocId, String text, String documentName) {
+        if (!properties.getGraph().isExtractionEnabled()) {
+            return;
+        }
+        if (extractionExecutor == null) {
+            ingest(hxprDocId, text, documentName);
+            return;
+        }
+        try {
+            extractionExecutor.execute(() -> ingest(hxprDocId, text, documentName));
+        } catch (RejectedExecutionException e) {
+            log.debug("Graph extraction task rejected ({}); running inline.", e.getMessage());
+            ingest(hxprDocId, text, documentName);
+        }
     }
 
     /**
@@ -211,8 +284,29 @@ public class GraphIngestionService {
         if (out == null || out.isBlank()) {
             return List.of();
         }
-        ExtractedEntities parsed = converter.convert(out.trim());
-        return parsed != null && parsed.getEntities() != null ? parsed.getEntities() : List.of();
+        return parseEntities(converter, out.trim());
+    }
+
+    /**
+     * Parses the extractor output tolerantly. The structured-output format asks for the wrapped object
+     * {@code {"entities":[...]}}, but local models frequently return a bare array {@code [{...}]}
+     * instead - which the {@link BeanOutputConverter} rejects, losing every entity for that document.
+     * A bare array is unwrapped directly; any parse failure degrades to no entities rather than
+     * throwing.
+     */
+    private List<ExtractedEntity> parseEntities(BeanOutputConverter<ExtractedEntities> converter, String out) {
+        try {
+            if (out.startsWith("[")) {
+                List<ExtractedEntity> list = objectMapper.readValue(out,
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, ExtractedEntity.class));
+                return list != null ? list : List.of();
+            }
+            ExtractedEntities parsed = converter.convert(out);
+            return parsed != null && parsed.getEntities() != null ? parsed.getEntities() : List.of();
+        } catch (Exception e) {
+            log.debug("Entity extraction parse failed ({}); no entities for this document.", e.getMessage());
+            return List.of();
+        }
     }
 
     /**

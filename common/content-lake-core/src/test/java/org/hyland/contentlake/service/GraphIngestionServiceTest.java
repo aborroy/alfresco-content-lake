@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +86,21 @@ class GraphIngestionServiceTest {
     }
 
     @Test
+    void extractsEntities_whenLlmReturnsBareArray() {
+        when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn("gdb-1");
+        // Local models frequently return a bare array instead of the wrapped {"entities":[...]} object.
+        chatReturns("[{\"name\":\"Acme Corp\",\"type\":\"Organization\",\"aliases\":[]}]");
+        when(graphService.upsertEntities(eq("gdb-1"), anyList())).thenReturn(Map.of("doc", "0xdoc", "e0", "0xe0"));
+
+        List<String> names = service.ingest("sys-1", "Acme Corp.", "n.txt");
+
+        // The bare array is unwrapped rather than lost, so the entity is still linked.
+        assertThat(names).containsExactly("Acme Corp");
+        verify(graphService).upsertEntities(eq("gdb-1"), anyList());
+        verify(graphService).upsertRelationships(eq("gdb-1"), anyList());
+    }
+
+    @Test
     void reusesExistingEntity_insteadOfCreatingDuplicate() {
         when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn("gdb-1");
         chatReturns("{\"entities\":[{\"name\":\"Acme Corp\",\"type\":\"Organization\",\"aliases\":[]}]}");
@@ -137,6 +153,46 @@ class GraphIngestionServiceTest {
         List<String> names = service.ingest("sys-1", "Acme.", "n.txt");
 
         assertThat(names).isEmpty();  // failure degrades to no-op, does not throw
+    }
+
+    @Test
+    void ingestAsync_inline_whenAsyncDisabled_linksSynchronously() {
+        // extraction-async=false -> ingestAsync runs inline on the calling thread (no executor).
+        properties.getGraph().setExtractionAsync(false);
+        GraphIngestionService inlineService = new GraphIngestionService(chatModel, graphService, properties);
+        when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn("gdb-1");
+        chatReturns("{\"entities\":[{\"name\":\"Acme Corp\",\"type\":\"Organization\",\"aliases\":[]}]}");
+        when(graphService.upsertEntities(eq("gdb-1"), anyList())).thenReturn(Map.of("doc", "0xdoc", "e0", "0xe0"));
+
+        inlineService.ingestAsync("sys-1", "Acme Corp.", "n.txt");
+
+        // Linked synchronously: verifiable immediately, no waiting.
+        verify(graphService).upsertEntities(eq("gdb-1"), anyList());
+        verify(graphService).upsertRelationships(eq("gdb-1"), anyList());
+    }
+
+    @Test
+    void ingestAsync_default_runsExtractionOffThread() {
+        // The setUp service has extraction-async=true (default): ingestAsync returns immediately and
+        // the extract -> link work completes on the executor shortly after.
+        when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn("gdb-1");
+        chatReturns("{\"entities\":[{\"name\":\"Acme Corp\",\"type\":\"Organization\",\"aliases\":[]}]}");
+        when(graphService.upsertEntities(eq("gdb-1"), anyList())).thenReturn(Map.of("doc", "0xdoc", "e0", "0xe0"));
+
+        service.ingestAsync("sys-1", "Acme Corp.", "n.txt");
+
+        // Eventually linked on the async worker (Mockito waits up to the timeout).
+        verify(graphService, timeout(5000)).upsertEntities(eq("gdb-1"), anyList());
+        verify(graphService, timeout(5000)).upsertRelationships(eq("gdb-1"), anyList());
+    }
+
+    @Test
+    void ingestAsync_skips_whenExtractionDisabled() {
+        properties.getGraph().setExtractionEnabled(false);
+
+        service.ingestAsync("sys-1", "text", "n.txt");
+
+        verify(graphService, never()).resolveGraphDbId(any(), any());
     }
 
     private void chatReturns(String json) {

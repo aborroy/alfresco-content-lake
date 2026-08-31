@@ -96,5 +96,23 @@ public class HxprProperties {
 
         /** Maximum characters of document text sent to the extraction LLM. */
         private int maxExtractionChars = 12000;
+
+        /**
+         * Runs entity extraction off the ingest hot path (#83). When {@code true} (default),
+         * {@code GraphIngestionService.ingestAsync} submits the extract -> link work to a bounded
+         * executor and returns immediately, so document ingestion latency is not dominated by the
+         * extraction LLM call and graph population becomes eventually consistent. Set {@code false}
+         * to run extraction inline on the ingest thread (deterministic; used by tests).
+         */
+        private boolean extractionAsync = true;
+
+        /** Worker threads for the async extraction executor. */
+        private int extractionWorkerThreads = 2;
+
+        /**
+         * Bounded queue capacity for pending async extraction tasks. On saturation the submitting
+         * ingest thread runs the task inline (CallerRuns backpressure) rather than dropping it.
+         */
+        private int extractionQueueCapacity = 500;
     }
 }

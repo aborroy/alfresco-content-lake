@@ -84,6 +84,13 @@ public class GraphAugmentationService {
             Set<String> entities = new LinkedHashSet<>();
             parseTraversal(json, seedSet, relatedIds, entities, cfg.getMaxExpandedDocuments());
 
+            // #84: the v2 GlobalEntity has no @id, so concurrent ingester JVMs create duplicate entity
+            // nodes for the same canonical name, each holding only a subset of mentioned_in edges. The
+            // seed traversal above reaches only the node a seed doc happens to link to. Merge by
+            // canonical name at read time: pull every GlobalEntity sharing a traversed name and union
+            // their mentioned_in documents, so expansion is not starved by write-side duplicates.
+            mergeDuplicateEntityMentions(graphDbId, entities, seedSet, relatedIds, cfg.getMaxExpandedDocuments());
+
             List<SearchHit> graphHits = relatedIds.isEmpty()
                     ? new ArrayList<>()
                     : fetchPermittedDocuments(relatedIds, seedSet, sourceType, cfg);
@@ -209,6 +216,41 @@ public class GraphAugmentationService {
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse graph traversal result", e);
+        }
+    }
+
+    /**
+     * Read-side entity-resolution merge (#84). Queries every {@code GlobalEntity} whose
+     * {@code canonical_name} is one of the traversed entity names and unions their {@code mentioned_in}
+     * document ids into {@code relatedIds}, so duplicate entity nodes created across ingester JVMs do
+     * not fragment the related-document set. Best-effort: on any failure the seed-linked mentions
+     * already collected are used unchanged.
+     */
+    private void mergeDuplicateEntityMentions(String graphDbId, Set<String> entities, Set<String> seedSet,
+                                              Set<String> relatedIds, int maxDocs) {
+        if (entities.isEmpty() || relatedIds.size() >= maxDocs) {
+            return;
+        }
+        try {
+            // JSON array of names (e.g. ["Acme","Jane Roe"]) is exactly the shape Dgraph's `in:` expects.
+            String inArray = objectMapper.writeValueAsString(new ArrayList<>(entities));
+            String query = "query { queryGlobalEntity(filter: {canonical_name: {in: " + inArray + "}}) "
+                    + "{ canonical_name mentioned_in { documentId } } }";
+            String json = graphService.query(graphDbId, query, null);
+            if (json == null || json.isBlank()) {
+                return;
+            }
+            JsonNode arr = objectMapper.readTree(json).path("queryGlobalEntity");
+            for (JsonNode entity : arr) {
+                for (JsonNode mentioned : entity.path("mentioned_in")) {
+                    String id = mentioned.path("documentId").asText(null);
+                    if (id != null && !seedSet.contains(id) && relatedIds.size() < maxDocs) {
+                        relatedIds.add(id);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Entity-merge lookup failed ({}); using seed-linked mentions only.", e.getMessage());
         }
     }
 

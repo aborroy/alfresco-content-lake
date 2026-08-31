@@ -103,20 +103,29 @@ public class CommunitySummaryService {
             if (json == null || json.isBlank()) {
                 return communities;
             }
+            // #84: duplicate GlobalEntity nodes (one per ingester JVM, since v2 GlobalEntity has no @id)
+            // each carry a subset of mentioned_in edges. Merge by canonical name so a community is
+            // counted over the union of its members, not split/undercounted across duplicates.
+            Map<String, String> displayName = new LinkedHashMap<>();      // key -> first-seen original name
+            Map<String, Set<String>> docsByName = new LinkedHashMap<>();  // key -> union of member doc ids
             for (JsonNode entity : objectMapper.readTree(json).path("queryGlobalEntity")) {
                 String name = entity.path("canonical_name").asText(null);
                 if (name == null || name.isBlank()) {
                     continue;
                 }
-                Set<String> docIds = new LinkedHashSet<>();
+                String key = name.trim().toLowerCase(Locale.ROOT);
+                displayName.putIfAbsent(key, name);
+                Set<String> docIds = docsByName.computeIfAbsent(key, k -> new LinkedHashSet<>());
                 for (JsonNode m : entity.path("mentioned_in")) {
                     String id = m.path("documentId").asText(null);
                     if (id != null) {
                         docIds.add(id);
                     }
                 }
-                if (docIds.size() >= cfg.getCommunities().getMinSize()) {
-                    communities.add(new Community(name, new ArrayList<>(docIds)));
+            }
+            for (Map.Entry<String, Set<String>> e : docsByName.entrySet()) {
+                if (e.getValue().size() >= cfg.getCommunities().getMinSize()) {
+                    communities.add(new Community(displayName.get(e.getKey()), new ArrayList<>(e.getValue())));
                 }
             }
         } catch (Exception e) {

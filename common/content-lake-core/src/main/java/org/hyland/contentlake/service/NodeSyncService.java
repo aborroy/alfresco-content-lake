@@ -215,14 +215,13 @@ public class NodeSyncService {
             }
 
             // GraphRAG (#54): extract entities from the text and link them into the knowledge graph.
-            // Best-effort; the returned canonical names are stored as a back-reference on the document.
+            // Best-effort and asynchronous (#83): submitted off the ingest hot path so extraction's LLM
+            // latency does not stall ingestion. Graph population is therefore eventually consistent with
+            // the document; the Document -has_global_entity-> GlobalEntity edges are the source of truth
+            // for the graph read path, so no back-reference property is written on the document.
             Map<String, Object> ingestProps = baseIngestProps;
             if (graphIngestionService != null) {
-                List<String> entityIds = graphIngestionService.ingest(hxprDocId, text, documentName);
-                if (!entityIds.isEmpty()) {
-                    ingestProps = new LinkedHashMap<>(baseIngestProps);
-                    ingestProps.put(ContentLakeIngestProperties.HXPR_ENTITY_IDS, String.join(",", entityIds));
-                }
+                graphIngestionService.ingestAsync(hxprDocId, text, documentName);
             }
 
             List<Chunk> chunks = chunkingService.chunk(text, nodeId, mimeType);

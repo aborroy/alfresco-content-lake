@@ -103,6 +103,46 @@ class GraphAugmentationServiceTest {
     }
 
     @Test
+    void mergesDuplicateEntityNodes_acrossCanonicalName() {
+        // #84: seed sys-1's linked "Acme Corp" node mentions only sys-2, but a duplicate "Acme Corp"
+        // node (created by another ingester JVM) mentions sys-3. The read-side merge must union both,
+        // so expansion returns sys-2 AND sys-3.
+        when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn("gdb-1");
+        when(graphService.query(eq("gdb-1"), any(), any())).thenAnswer(inv -> {
+            String q = inv.getArgument(1);
+            if (q.contains("queryGlobalEntity")) {
+                // the entity-merge query: two duplicate nodes for the same canonical name
+                return "{\"queryGlobalEntity\":["
+                        + "{\"canonical_name\":\"Acme Corp\",\"mentioned_in\":[{\"documentId\":\"sys-2\"}]},"
+                        + "{\"canonical_name\":\"Acme Corp\",\"mentioned_in\":[{\"documentId\":\"sys-3\"}]}]}";
+            }
+            // the seed traversal: sys-1's node only knows sys-1 + sys-2
+            return "{\"queryDocument\":[{\"documentId\":\"sys-1\",\"has_global_entity\":[{"
+                    + "\"canonical_name\":\"Acme Corp\",\"mentioned_in\":[{\"documentId\":\"sys-1\"},"
+                    + "{\"documentId\":\"sys-2\"}]}]}]}";
+        });
+        when(hybridSearchService.buildCurrentUserPermissionFilter(any(), any()))
+                .thenReturn("SELECT * FROM SysContent WHERE (acl)");
+        when(hxprService.query(any(), anyInt(), eq(0))).thenReturn(queryResult(doc("sys-2"), doc("sys-3")));
+        when(sourceMetadataResolver.resolveSourceDocument(eq("sys-2"), any()))
+                .thenReturn(SourceDocument.builder().documentId("sys-2").name("Two.txt").build());
+        when(sourceMetadataResolver.resolveSourceDocument(eq("sys-3"), any()))
+                .thenReturn(SourceDocument.builder().documentId("sys-3").name("Three.txt").build());
+
+        GraphAugmentationService.Expansion exp = service.expand(List.of(seedHit("sys-1")), null, false);
+
+        assertThat(exp.graphHits()).hasSize(2);
+        assertThat(exp.graphHits())
+                .extracting(h -> h.getSourceDocument().getDocumentId())
+                .containsExactlyInAnyOrder("sys-2", "sys-3");
+
+        // The permission filter (and thus the id clause) must cover the merged id sys-3, not just sys-2.
+        ArgumentCaptor<String> clause = ArgumentCaptor.forClass(String.class);
+        verify(hybridSearchService).buildCurrentUserPermissionFilter(any(), clause.capture());
+        assertThat(clause.getValue()).contains("sys-3");
+    }
+
+    @Test
     void returnsEmpty_whenGraphDbUnresolved() {
         when(graphService.resolveGraphDbId(any(), eq("content-lake"))).thenReturn(null);
 
