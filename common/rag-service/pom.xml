@@ -55,6 +55,29 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
         </dependency>
+        <!-- Semantic query-result caching (#72): bounded, short-TTL Caffeine caches for query
+             embeddings and full retrieval results. Both versions are managed by the Spring Boot BOM
+             (spring-boot-starter-parent), so no explicit version is pinned. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <!-- Distributed tracing (#73): Micrometer Tracing bridged to OpenTelemetry plus the OTLP
+             span exporter. Versions managed by the Spring Boot BOM. The OTLP exporter endpoint is
+             unset by default (management.otlp.tracing.endpoint), so no spans leave the process and
+             no collector is required until one is configured. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

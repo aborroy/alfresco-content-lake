@@ -2,7 +2,9 @@ package org.hyland.contentlake.rag.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.rag.cache.RagQueryCache;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.rag.security.DualSourceAuthentication;
@@ -69,6 +71,10 @@ public class SemanticSearchService {
     private final QueryExpansionService queryExpansionService;
     private final RagProperties ragProperties;
     private final NamedQueryService namedQueryService;
+    /** Optional (#72): null in unit tests that construct this service without the cache collaborator. */
+    private final RagQueryCache queryCache;
+    /** Optional (#73): null in unit tests that construct this service without the tracing collaborator. */
+    private final RagObservations observations;
 
     private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
     private static final int SOURCE_DISCOVERY_LIMIT = 25;
@@ -105,7 +111,45 @@ public class SemanticSearchService {
 
     private volatile List<String> cachedAlfrescoSourceIds;
 
+    /**
+     * Permission-aware semantic search. When the query cache (#72) is enabled, an identical
+     * query+filter+principal combination seen within the TTL window returns the cached response
+     * without re-embedding or re-querying hxpr. The cache key includes the caller's principal scope,
+     * so results are never shared across ACL contexts.
+     */
     public SemanticSearchResponse search(SemanticSearchRequest request) {
+        boolean cacheOn = queryCache != null && queryCache.isEnabled();
+        String cacheKey = cacheOn ? buildCacheKey(request) : null;
+        if (cacheKey != null) {
+            SemanticSearchResponse cached = queryCache.getResult(cacheKey);
+            if (cached != null) {
+                log.debug("Semantic search cache hit for query \"{}\"", request.getQuery());
+                return cached;
+            }
+        }
+
+        SemanticSearchResponse response = executeSearch(request);
+
+        if (cacheKey != null) {
+            queryCache.putResult(cacheKey, response);
+        }
+        return response;
+    }
+
+    /** Builds the ACL-scoped, filter-aware cache key for a request (see {@link RagQueryCache}). */
+    private String buildCacheKey(SemanticSearchRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return "sem" + ' ' + RagQueryCache.principalScope(auth)
+                + ' ' + RagQueryCache.normalize(request.getQuery())
+                + ' ' + request.getTopK()
+                + ' ' + request.getMinScore()
+                + ' ' + request.getFilter()
+                + ' ' + request.getSourceType()
+                + ' ' + request.getEmbeddingType()
+                + ' ' + request.getNamedQuery();
+    }
+
+    private SemanticSearchResponse executeSearch(SemanticSearchRequest request) {
         long startTime = System.currentTimeMillis();
 
         int topK = Math.min(Math.max(request.getTopK(), 1), MAX_TOP_K);
@@ -156,6 +200,20 @@ public class SemanticSearchService {
                 hits.size(), searchTimeMs, request.getQuery(), minScore, variants.size(), perVariant.size());
 
         return response(request, hits, vectorDimension, totalCount, searchTimeMs);
+    }
+
+    /** Embeds a query, caching the vector (#72) and spanning the embedding call (#73) when enabled. */
+    private List<Double> embedQueryCached(String text, String embeddingType) {
+        Supplier<List<Double>> loader = () -> traced("rag.embed.query", () -> embeddingService.embedQuery(text));
+        if (queryCache != null && queryCache.isEnabled()) {
+            return queryCache.embedQuery(text, embeddingType, loader);
+        }
+        return loader.get();
+    }
+
+    /** Runs {@code work} inside a named tracing span when observation is wired; otherwise inline. */
+    private <T> T traced(String name, Supplier<T> work) {
+        return observations != null ? observations.observe(name, work) : work.get();
     }
 
     /** Expansion is best-effort: a failure here must never fail the search. */
@@ -230,7 +288,7 @@ public class SemanticSearchService {
         if (queryVector == null) {
             log.info("Embedding query: \"{}\" (variant={}, topK={}, minScore={}, user={})",
                     variant.vectorText(), variant.label(), topK, minScore, logUser);
-            queryVector = embeddingService.embedQuery(variant.vectorText());
+            queryVector = embedQueryCached(variant.vectorText(), request.getEmbeddingType());
         }
 
         if (queryVector == null || queryVector.isEmpty()) {
@@ -240,12 +298,13 @@ public class SemanticSearchService {
 
         String filter = hxqlFilter.get();
         log.debug("Executing vector search with filter: {}", filter);
-        VectorSearchResult vectorResult = hxprService.vectorSearch(
-                queryVector,
+        final List<Double> vector = queryVector;
+        VectorSearchResult vectorResult = traced("rag.search.vector", () -> hxprService.vectorSearch(
+                vector,
                 request.getEmbeddingType(),
                 filter,
                 topK
-        );
+        ));
 
         if (vectorResult == null || vectorResult.getEmbeddings() == null || vectorResult.getEmbeddings().isEmpty()) {
             log.info("No results for query: \"{}\"", variant.vectorText());

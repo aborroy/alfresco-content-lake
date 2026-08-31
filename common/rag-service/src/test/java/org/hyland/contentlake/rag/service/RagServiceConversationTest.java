@@ -110,6 +110,8 @@ class RagServiceConversationTest {
                 citationVerifier,
                 new StructuredAnswerService(new StructuredLlmCaller(chatModel)),
                 // Agentic tools are disabled by default in these tests, so the toolset is never invoked.
+                null,
+                // Tracing collaborator (#73) is optional; null falls back to running steps untraced.
                 null
         );
     }
@@ -188,6 +190,8 @@ class RagServiceConversationTest {
         assertThat(response.getRetrievalQuery()).isEqualTo("What is new?");
         assertThat(response.getSessionId()).isNull();
         assertThat(response.getHistoryTurnsUsed()).isNull();
+        // Every answer carries a correlation id for feedback (#74).
+        assertThat(response.getRequestId()).isNotBlank();
 
         verify(rerankService).rerank(eq("What is new?"), anyList());
         verifyNoInteractions(conversationMemoryService, queryReformulationService, securityContextService);

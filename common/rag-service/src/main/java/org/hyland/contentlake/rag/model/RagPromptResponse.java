@@ -24,6 +24,12 @@ public class RagPromptResponse {
     /** The LLM-generated answer. */
     private String answer;
 
+    /**
+     * Unique id for this request/answer, echoed to the caller so feedback (#74) can be correlated
+     * back to the exact answer, its retrieved sources, and its session.
+     */
+    private String requestId;
+
     /** The question that was asked. */
     private String question;
 

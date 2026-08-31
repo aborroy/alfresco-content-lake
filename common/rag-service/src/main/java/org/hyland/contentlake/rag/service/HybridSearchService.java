@@ -9,8 +9,10 @@ import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
+import org.hyland.contentlake.rag.cache.RagQueryCache;
 import org.hyland.contentlake.rag.config.HybridSearchProperties;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.security.DualSourceAuthentication;
 import org.hyland.contentlake.rag.model.HybridSearchResponse;
@@ -97,6 +99,10 @@ public class HybridSearchService {
     private final RagProperties ragProperties;
     private final NamedQueryService namedQueryService;
     private final VocabularyService vocabularyService;
+    /** Optional (#72): null in unit tests that construct this service without the cache collaborator. */
+    private final RagQueryCache queryCache;
+    /** Optional (#73): null in unit tests that construct this service without the tracing collaborator. */
+    private final RagObservations observations;
 
     @Value("${alfresco.source-id:}")
     private String alfrescoSourceId;
@@ -128,10 +134,52 @@ public class HybridSearchService {
     private volatile List<String> cachedAlfrescoSourceIds;
 
     /**
-     * Executes a hybrid search: runs vector and keyword legs in sequence,
-     * then fuses the results using the configured (or overridden) strategy.
+     * Executes a hybrid search: runs vector and keyword legs in sequence, then fuses the results
+     * using the configured (or overridden) strategy.
+     *
+     * <p>When the query cache (#72) is enabled, an identical query+filters+principal combination seen
+     * within the TTL window returns the cached response without re-embedding or re-querying hxpr. The
+     * cache key includes the caller's principal scope, so results never cross ACL contexts.</p>
      */
     public HybridSearchResponse search(HybridSearchRequest request) {
+        boolean cacheOn = queryCache != null && queryCache.isEnabled();
+        String cacheKey = cacheOn ? buildCacheKey(request) : null;
+        if (cacheKey != null) {
+            HybridSearchResponse cached = queryCache.getResult(cacheKey);
+            if (cached != null) {
+                log.debug("Hybrid search cache hit for query \"{}\"", request.getQuery());
+                return cached;
+            }
+        }
+
+        HybridSearchResponse response = executeSearch(request);
+
+        if (cacheKey != null) {
+            queryCache.putResult(cacheKey, response);
+        }
+        return response;
+    }
+
+    /** Builds the ACL-scoped, filter-aware cache key for a request (see {@link RagQueryCache}). */
+    private String buildCacheKey(HybridSearchRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return "hyb" + ' ' + RagQueryCache.principalScope(auth)
+                + ' ' + RagQueryCache.normalize(request.getQuery())
+                + ' ' + request.getFilter()
+                + ' ' + request.getSourceType()
+                + ' ' + request.getEmbeddingType()
+                + ' ' + request.getNamedQuery()
+                + ' ' + request.getStrategy()
+                + ' ' + request.getNormalization()
+                + ' ' + request.getVectorWeight()
+                + ' ' + request.getTextWeight()
+                + ' ' + request.getCandidateCount()
+                + ' ' + request.getMaxResults()
+                + ' ' + request.getMinScore()
+                + ' ' + buildMetadataFilter(request.getMetadata());
+    }
+
+    private HybridSearchResponse executeSearch(HybridSearchRequest request) {
         long startTime = System.currentTimeMillis();
 
         String sourceTypeFilter = buildSourceTypeFilter(request.getSourceType());
@@ -210,6 +258,21 @@ public class HybridSearchService {
                 .build();
     }
 
+    /** Embeds a query, caching the vector (#72) and spanning the embedding call (#73) when enabled. */
+    private List<Double> embedQueryCached(String text, String embeddingType) {
+        java.util.function.Supplier<List<Double>> loader =
+                () -> traced("rag.embed.query", () -> embeddingService.embedQuery(text));
+        if (queryCache != null && queryCache.isEnabled()) {
+            return queryCache.embedQuery(text, embeddingType, loader);
+        }
+        return loader.get();
+    }
+
+    /** Runs {@code work} inside a named tracing span when observation is wired; otherwise inline. */
+    private <T> T traced(String name, java.util.function.Supplier<T> work) {
+        return observations != null ? observations.observe(name, work) : work.get();
+    }
+
     /** Expansion is best-effort: a failure here must never fail the search. */
     private List<QueryVariant> expand(String query) {
         try {
@@ -243,8 +306,9 @@ public class HybridSearchService {
         // query instruction prefix, because the passage is answer-shaped rather than question-shaped.
         List<Double> queryVector = variant.vectorVector();
         if (queryVector == null) {
-            queryVector = embeddingService.embedQuery(variant.vectorText());
+            queryVector = embedQueryCached(variant.vectorText(), request.getEmbeddingType());
         }
+        final List<Double> vector = queryVector;
         List<ScoredChunk> vectorChunks = List.of();
 
         // #37: when chunk-FTS mode is on, push the keyword terms into the vector call as
@@ -253,13 +317,13 @@ public class HybridSearchService {
         boolean chunkFtsMode = properties.isChunkFtsEnabled() && variant.hasKeywordLeg();
         String chunkFts = chunkFtsMode ? buildChunkFts(variant.keywordText()) : null;
 
-        if (queryVector != null && !queryVector.isEmpty()) {
+        if (vector != null && !vector.isEmpty()) {
             // Default path stays on the 4-arg call; only chunk-FTS mode adds the chunkFTS argument.
-            VectorSearchResult vectorResult = (chunkFts != null)
+            VectorSearchResult vectorResult = traced("rag.search.vector", () -> (chunkFts != null)
                     ? hxprService.vectorSearch(
-                            queryVector, request.getEmbeddingType(), permissionFilter, chunkFts, candidateCount)
+                            vector, request.getEmbeddingType(), permissionFilter, chunkFts, candidateCount)
                     : hxprService.vectorSearch(
-                            queryVector, request.getEmbeddingType(), permissionFilter, candidateCount);
+                            vector, request.getEmbeddingType(), permissionFilter, candidateCount));
             vectorChunks = extractVectorChunks(vectorResult);
         }
 
@@ -271,9 +335,9 @@ public class HybridSearchService {
             // The query embedding is reused: the keyword leg needs a vector only because the embeddings
             // endpoint is the sole way to read chunk text, and embedding the same query twice per search
             // would double the inference cost of every hybrid request for nothing.
-            keywordChunks = executeKeywordSearch(
-                    variant.keywordText(), permissionFilter, candidateCount, queryVector,
-                    request.getEmbeddingType());
+            keywordChunks = traced("rag.search.keyword", () -> executeKeywordSearch(
+                    variant.keywordText(), permissionFilter, candidateCount, vector,
+                    request.getEmbeddingType()));
         }
 
         log.info("Hybrid search candidates: vector={}, keyword={}", vectorChunks.size(), keywordChunks.size());

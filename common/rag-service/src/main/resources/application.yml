@@ -180,6 +180,19 @@ rag:
     max-hops: ${RAG_GRAPH_MAX_HOPS:1}
     seed-documents: ${RAG_GRAPH_SEED_DOCUMENTS:5}
     max-expanded-documents: ${RAG_GRAPH_MAX_EXPANDED_DOCUMENTS:20}
+  # Semantic query-result caching (#72). Off by default so the eval baseline is unchanged. When on,
+  # repeated query+filter+principal combinations skip re-embedding and retrieval within the TTL.
+  # Result-cache keys include the authenticated principal, so entries never cross ACL contexts;
+  # ttl-seconds bounds how stale a principal's group membership may be.
+  cache:
+    enabled: ${RAG_CACHE_ENABLED:false}
+    ttl-seconds: ${RAG_CACHE_TTL_SECONDS:60}
+    max-size: ${RAG_CACHE_MAX_SIZE:1000}
+  # User feedback capture (#74). Enabled by default; POST /api/rag/feedback persists a rating for an
+  # answer as an hxpr document under base-path, feeding the offline evaluation corpus.
+  feedback:
+    enabled: ${RAG_FEEDBACK_ENABLED:true}
+    base-path: ${RAG_FEEDBACK_BASE_PATH:/_feedback}
 
 # Semantic Search configuration
 semantic-search:
@@ -209,7 +222,22 @@ management:
       # Surface the custom hxpr / modelRunner health contributors on /actuator/health.
       show-components: always
       show-details: when-authorized
+  # Distributed tracing (#73). Micrometer Tracing (OpenTelemetry bridge) spans the retrieve, rerank,
+  # embed and generate steps. Sampling is low in production and can be raised to 1.0 in dev. The OTLP
+  # exporter endpoint is blank by default, so spans are created (and trace/span ids reach the logs via
+  # MDC) but nothing is exported until a collector endpoint is configured.
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      # e.g. http://otel-collector:4318/v1/traces -- unset means "do not export".
+      endpoint: ${MANAGEMENT_OTLP_TRACING_ENDPOINT:}
 
 logging:
+  # Correlate log lines with traces: the Micrometer OTel bridge populates traceId/spanId in the MDC.
+  pattern:
+    correlation: "[${spring.application.name:rag-service},%X{traceId:-},%X{spanId:-}] "
+  include-application-name: false
   level:
     org.alfresco.contentlake: ${LOG_LEVEL:INFO}

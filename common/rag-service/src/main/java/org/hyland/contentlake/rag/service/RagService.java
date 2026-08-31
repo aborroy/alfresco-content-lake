@@ -7,6 +7,7 @@ import org.hyland.contentlake.rag.conversation.ConversationMemoryService;
 import org.hyland.contentlake.rag.conversation.ConversationTurn;
 import org.hyland.contentlake.rag.conversation.SessionSummaryService;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
@@ -70,6 +71,8 @@ public class RagService {
     private final CitationVerifier citationVerifier;
     private final StructuredAnswerService structuredAnswerService;
     private final RagToolset ragToolset;
+    /** Optional (#73): null in unit tests that construct this service without the tracing collaborator. */
+    private final RagObservations observations;
 
     /**
      * Executes the full RAG pipeline for a given question.
@@ -79,13 +82,14 @@ public class RagService {
      */
     public RagPromptResponse prompt(RagPromptRequest request) {
         long totalStart = System.currentTimeMillis();
+        String requestId = java.util.UUID.randomUUID().toString();
 
         PromptContext promptContext = prepareContext(request);
         GenerationResult generation = generateAnswer(promptContext);
         long totalTimeMs = System.currentTimeMillis() - totalStart;
 
         persistConversationTurn(request, promptContext, generation);
-        return buildPromptResponse(request, promptContext, generation, totalTimeMs);
+        return buildPromptResponse(request, promptContext, generation, totalTimeMs, requestId);
     }
 
     /**
@@ -102,6 +106,7 @@ public class RagService {
     public SseEmitter streamPrompt(RagPromptRequest request) {
         SseEmitter emitter = new SseEmitter(0L);
         final long totalStart = System.currentTimeMillis();
+        final String requestId = java.util.UUID.randomUUID().toString();
 
         final PromptContext promptContext;
         try {
@@ -150,7 +155,8 @@ public class RagService {
                             );
                             persistConversationTurn(request, promptContext, generation);
                             RagPromptResponse response = buildPromptResponse(
-                                    request, promptContext, generation, System.currentTimeMillis() - totalStart
+                                    request, promptContext, generation,
+                                    System.currentTimeMillis() - totalStart, requestId
                             );
                             sendMetadataEvent(emitter, response);
                             sendDoneEvent(emitter);
@@ -207,7 +213,8 @@ public class RagService {
         long generationStart = System.currentTimeMillis();
 
         try {
-            ChatResponse chatResponse = requestSpec(promptContext).call().chatResponse();
+            ChatResponse chatResponse = traced("rag.generate",
+                    () -> requestSpec(promptContext).call().chatResponse());
             long generationTimeMs = System.currentTimeMillis() - generationStart;
 
             boolean hasContext = !promptContext.trace().rerankedHits().isEmpty();
@@ -231,6 +238,11 @@ public class RagService {
                     generationTimeMs
             );
         }
+    }
+
+    /** Runs {@code work} inside a named tracing span (#73) when observation is wired; otherwise inline. */
+    private <T> T traced(String name, java.util.function.Supplier<T> work) {
+        return observations != null ? observations.observe(name, work) : work.get();
     }
 
     private String resolveModelName(ChatResponse chatResponse) {
@@ -321,7 +333,8 @@ public class RagService {
     private RagPromptResponse buildPromptResponse(RagPromptRequest request,
                                                   PromptContext promptContext,
                                                   GenerationResult generation,
-                                                  long totalTimeMs) {
+                                                  long totalTimeMs,
+                                                  String requestId) {
         List<SearchHit> rerankedHits = promptContext.trace().rerankedHits();
         List<Source> sources = mapSources(rerankedHits);
         List<ContextChunk> contextChunks = request.isIncludeContext() ? mapContextChunks(rerankedHits) : null;
@@ -348,6 +361,7 @@ public class RagService {
 
         return RagPromptResponse.builder()
                 .answer(generation.answer())
+                .requestId(requestId)
                 .question(request.getQuestion())
                 .sessionId(promptContext.conversation().sessionId())
                 .retrievalQuery(retrievalQuery)

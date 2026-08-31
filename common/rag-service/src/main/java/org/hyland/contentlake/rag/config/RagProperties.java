@@ -112,6 +112,12 @@ public class RagProperties {
     /** MCP server exposing rag-service tools to external LLM agents (#61). Enabled by default. */
     private McpProperties mcp = new McpProperties();
 
+    /** Semantic query-result caching (#72). Disabled by default. */
+    private CacheProperties cache = new CacheProperties();
+
+    /** User feedback capture on generated answers (#74). Enabled by default. */
+    private FeedbackProperties feedback = new FeedbackProperties();
+
     @Data
     public static class RerankerProperties {
 
@@ -437,5 +443,43 @@ public class RagProperties {
          * (HTTP Basic / Alfresco ticket), so it is never anonymously accessible.
          */
         private boolean enabled = true;
+    }
+
+    /**
+     * Semantic query-result caching (#72): a short-TTL, bounded in-memory (Caffeine) cache of query
+     * embeddings and full retrieval results. Off by default so the eval baseline is preserved until
+     * the latency/quality delta is characterized.
+     *
+     * <p>Cache entries for retrieval results are keyed on the caller's effective permission scope
+     * (the authenticated principal) as well as the normalized query and its filters, so a cached
+     * result is never served across ACL contexts. Group membership can change within the TTL window;
+     * {@code ttl-seconds} bounds that staleness.</p>
+     */
+    @Data
+    public static class CacheProperties {
+
+        /** Master switch for query-embedding and retrieval-result caching. */
+        private boolean enabled = false;
+
+        /** Time-to-live for cache entries. Also bounds how stale a principal's ACL scope may be. */
+        private long ttlSeconds = 60;
+
+        /** Maximum number of entries per cache (query-embedding cache and result cache each). */
+        private long maxSize = 1000;
+    }
+
+    /**
+     * User feedback capture (#74): a {@code POST /api/rag/feedback} endpoint persists a rating (and
+     * optional comment) for a generated answer as an hxpr document, growing the evaluation corpus
+     * from real usage. Enabled by default; the endpoint sits behind the existing authentication chain.
+     */
+    @Data
+    public static class FeedbackProperties {
+
+        /** Enables the feedback endpoint and persistence. */
+        private boolean enabled = true;
+
+        /** hxpr folder under which feedback documents are stored. */
+        private String basePath = "/_feedback";
     }
 }
