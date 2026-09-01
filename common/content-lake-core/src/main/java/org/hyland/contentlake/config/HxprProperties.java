@@ -17,6 +17,10 @@ public class HxprProperties {
     private String url = "http://localhost:8080";
     private String repositoryId = "default";
 
+    /** HTTP Basic credentials for the ai-ready-index engine (filestore user store). */
+    private String username;
+    private String password;
+
     /**
      * Base target path in HXPR where Alfresco structures are created.
      *
@@ -33,19 +37,8 @@ public class HxprProperties {
      */
     private String pathRepositoryId;
 
-    private IdpConfig idp = new IdpConfig();
-
     /** Knowledge-graph provisioning (hxpr Graph API). Disabled by default. */
     private GraphConfig graph = new GraphConfig();
-
-    @Data
-    public static class IdpConfig {
-        private String tokenUrl;
-        private String clientId;
-        private String clientSecret;
-        private String username;
-        private String password;
-    }
 
     /**
      * GraphRAG foundation: ensures a graphDB, a base ontology, and an ontology route exist in

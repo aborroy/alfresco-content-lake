@@ -13,7 +13,7 @@
 
 ## Content Lake Ecosystem
 
-Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into [hxpr](https://github.com/HylandSoftware/hxpr) for hybrid semantic search and RAG.
+Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo content into the [ai-ready-index](https://github.com/Hyland/ai-ready-index) engine for hybrid semantic search and RAG.
 
 | Repo | Role |
 |---|---|
@@ -211,14 +211,11 @@ export ALFRESCO_URL=http://localhost:8080
 export ALFRESCO_INTERNAL_USERNAME=admin
 export ALFRESCO_INTERNAL_PASSWORD=admin
 
-# hxpr Content Lake
+# ai-ready-index engine (HTTP Basic auth)
 export HXPR_URL=http://localhost:8080
 export HXPR_REPOSITORY_ID=default
-export HXPR_IDP_TOKEN_URL=http://localhost:5002/idp/connect/token
-export HXPR_IDP_CLIENT_ID=nuxeo-client
-export HXPR_IDP_CLIENT_SECRET=secret
-export HXPR_IDP_USERNAME=testuser
-export HXPR_IDP_PASSWORD=password
+export HXPR_USERNAME=admin
+export HXPR_PASSWORD=password
 
 # Transform Service (batch-ingester only)
 export TRANSFORM_URL=http://localhost:10090

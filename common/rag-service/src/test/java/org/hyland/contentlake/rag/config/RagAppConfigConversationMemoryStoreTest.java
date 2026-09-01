@@ -16,11 +16,8 @@ class RagAppConfigConversationMemoryStoreTest {
             .withPropertyValues(
                     "hxpr.url=http://localhost:8080",
                     "hxpr.repository-id=default",
-                    "hxpr.idp.token-url=http://localhost:8081",
-                    "hxpr.idp.client-id=test-client",
-                    "hxpr.idp.client-secret=test-secret",
-                    "hxpr.idp.username=test-user",
-                    "hxpr.idp.password=test-password"
+                    "hxpr.username=test-user",
+                    "hxpr.password=test-password"
             )
             .withBean(EmbeddingModel.class, () -> mock(EmbeddingModel.class));
 

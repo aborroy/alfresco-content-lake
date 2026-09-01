@@ -17,7 +17,7 @@ import org.springframework.web.service.invoker.HttpServiceProxyFactory;
  * Wires the hxpr Graph API client and the GraphRAG provisioning service.
  *
  * <p>Active only when {@code hxpr.graph.enabled=true}. It reuses the application's shared
- * {@code hxprRestClient} bean (which already carries the IDP bearer token and
+ * {@code hxprRestClient} bean (which already carries the HTTP Basic credentials and
  * {@code HXCS-REPOSITORY} header), so the graph proxy inherits authentication automatically.
  * When disabled, no graph beans are created and the module is entirely inert.</p>
  */

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
-import org.hyland.contentlake.client.HxprTokenProvider;
 import org.hyland.nuxeo.contentlake.client.NuxeoClient;
 import org.hyland.nuxeo.contentlake.client.NuxeoConversionClient;
 import org.hyland.contentlake.config.HxprProperties;
@@ -41,22 +40,10 @@ public class AppConfig {
     public static final String HXCS_REPOSITORY = "HXCS-REPOSITORY";
 
     @Bean
-    public HxprTokenProvider hxprTokenProvider(HxprProperties props) {
-        HxprProperties.IdpConfig idp = props.getIdp();
-        return new HxprTokenProvider(
-                idp.getTokenUrl(),
-                idp.getClientId(),
-                idp.getClientSecret(),
-                idp.getUsername(),
-                idp.getPassword()
-        );
-    }
-
-    @Bean
-    public RestClient hxprRestClient(HxprProperties props, HxprTokenProvider tokenProvider) {
+    public RestClient hxprRestClient(HxprProperties props) {
         return RestClient.builder()
                 .baseUrl(props.getUrl())
-                .requestInterceptor(hxprAuthInterceptor(props, tokenProvider))
+                .requestInterceptor(hxprAuthInterceptor(props))
                 .build();
     }
 
@@ -183,10 +170,9 @@ public class AppConfig {
         );
     }
 
-    private static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props,
-                                                                    HxprTokenProvider tokenProvider) {
+    private static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props) {
         return (request, body, execution) -> {
-            request.getHeaders().setBearerAuth(tokenProvider.getToken());
+            request.getHeaders().setBasicAuth(props.getUsername(), props.getPassword());
             request.getHeaders().set(HXCS_REPOSITORY, props.getRepositoryId());
             return execution.execute(request, body);
         };

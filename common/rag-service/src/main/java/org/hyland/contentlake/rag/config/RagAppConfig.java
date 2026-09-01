@@ -6,7 +6,6 @@ import org.hyland.contentlake.client.HxprGraphApi;
 import org.hyland.contentlake.client.HxprGraphService;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
-import org.hyland.contentlake.client.HxprTokenProvider;
 import org.hyland.contentlake.client.HxprVocabularyApi;
 import org.hyland.contentlake.client.NamedQueryService;
 import org.hyland.contentlake.client.VocabularyService;
@@ -53,22 +52,10 @@ public class RagAppConfig {
     // ----------------------------------------------------------------------
 
     @Bean
-    public HxprTokenProvider hxprTokenProvider(HxprProperties props) {
-        HxprProperties.IdpConfig idp = props.getIdp();
-        return new HxprTokenProvider(
-                idp.getTokenUrl(),
-                idp.getClientId(),
-                idp.getClientSecret(),
-                idp.getUsername(),
-                idp.getPassword()
-        );
-    }
-
-    @Bean
-    public RestClient hxprRestClient(HxprProperties props, HxprTokenProvider tokenProvider) {
+    public RestClient hxprRestClient(HxprProperties props) {
         return RestClient.builder()
                 .baseUrl(props.getUrl())
-                .requestInterceptor(hxprAuthInterceptor(props, tokenProvider))
+                .requestInterceptor(hxprAuthInterceptor(props))
                 .build();
     }
 
@@ -170,10 +157,9 @@ public class RagAppConfig {
     // Helpers
     // ----------------------------------------------------------------------
 
-    private static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props,
-                                                                    HxprTokenProvider tokenProvider) {
+    private static ClientHttpRequestInterceptor hxprAuthInterceptor(HxprProperties props) {
         return (request, body, execution) -> {
-            request.getHeaders().setBearerAuth(tokenProvider.getToken());
+            request.getHeaders().setBasicAuth(props.getUsername(), props.getPassword());
             request.getHeaders().set(HXCS_REPOSITORY, props.getRepositoryId());
             return execution.execute(request, body);
         };
@@ -194,15 +180,9 @@ public class RagAppConfig {
     public static class HxprProperties {
         private String url = "http://localhost:8080";
         private String repositoryId = "default";
-        private IdpConfig idp = new IdpConfig();
 
-        @Data
-        public static class IdpConfig {
-            private String tokenUrl;
-            private String clientId;
-            private String clientSecret;
-            private String username;
-            private String password;
-        }
+        /** HTTP Basic credentials for the ai-ready-index engine (filestore user store). */
+        private String username;
+        private String password;
     }
 }

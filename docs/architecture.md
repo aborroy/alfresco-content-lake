@@ -28,7 +28,7 @@ content-lake-app/
 │   │       └── TextExtractor
 │   ├── content-lake-core/         Shared pipeline -- no source-specific SDK imports
 │   │   └── org.hyland.contentlake
-│   │       ├── client/            HxprService, HxprDocumentApi, HxprQueryApi, HxprTokenProvider
+│   │       ├── client/            HxprService, HxprDocumentApi, HxprQueryApi
 │   │       ├── config/            HxprProperties
 │   │       ├── extractor/         TikaTextExtractor (source-agnostic, Tika-based)
 │   │       ├── model/             HxprDocument, HxprEmbedding, Chunk, ContentLakeNodeStatus

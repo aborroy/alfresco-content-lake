@@ -153,7 +153,8 @@ periodically, tracking the last-seen cursor in `AuditCursorStore` (default imple
 3. `MetadataIngester` handles two-phase: metadata first, then transformation queue
 4. `TransformationWorker` picks up tasks from `TransformationQueue` and calls `processContent()`
 
-`HxprModelBootstrapRunner` runs on startup to ensure the hxpr content model is provisioned.
+The `CinRemote`/`CinContext` content model is defined natively by the ai-ready-index engine, so no
+client-side model provisioning runs at startup.
 
 The same service also exposes `POST /api/sync/permissions` for Alfresco ACL reconciliation:
 

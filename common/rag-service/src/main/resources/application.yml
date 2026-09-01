@@ -61,12 +61,9 @@ nuxeo:
 hxpr:
   url: ${HXPR_URL:http://localhost:8080}
   repository-id: ${HXPR_REPOSITORY_ID:default}
-  idp:
-    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
-    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
-    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
-    username: ${HXPR_IDP_USERNAME:testuser}
-    password: ${HXPR_IDP_PASSWORD:password}
+  # HTTP Basic credentials for the ai-ready-index engine (filestore user store).
+  username: ${HXPR_USERNAME:admin}
+  password: ${HXPR_PASSWORD:password}
 
 # RAG configuration
 rag:

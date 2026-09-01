@@ -99,16 +99,9 @@ hxpr:
   # Optional override for the repository-id segment in that hierarchy.
   # If empty, uses Alfresco Discovery repository ID.
   path-repository-id: ${HXPR_PATH_REPOSITORY_ID:}
-  idp:
-    token-url: ${HXPR_IDP_TOKEN_URL:http://localhost:5002/idp/connect/token}
-    client-id: ${HXPR_IDP_CLIENT_ID:nuxeo-client}
-    client-secret: ${HXPR_IDP_CLIENT_SECRET:secret}
-    username: ${HXPR_IDP_USERNAME:testuser}
-    password: ${HXPR_IDP_PASSWORD:password}
-  model:
-    bootstrap:
-      enabled: true
-    fragments: classpath:model-fragments.json
+  # HTTP Basic credentials for the ai-ready-index engine (filestore user store).
+  username: ${HXPR_USERNAME:admin}
+  password: ${HXPR_PASSWORD:password}
   # GraphRAG foundation (issue #53). Disabled by default; when enabled, an idempotent startup step
   # ensures the content-lake graphDB, base ontology, and ontology route exist in hxpr.
   graph:

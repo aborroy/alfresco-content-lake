@@ -18,11 +18,8 @@ services:
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
-      HXPR_IDP_CLIENT_ID: nuxeo-client
-      HXPR_IDP_CLIENT_SECRET: secret
-      HXPR_IDP_USERNAME: testuser
-      HXPR_IDP_PASSWORD: password
+      HXPR_USERNAME: ${HXPR_USERNAME:-admin}
+      HXPR_PASSWORD: ${HXPR_PASSWORD:-password}
 
       # Docker Model Runner
       MODEL_RUNNER_URL: http://model-runner.docker.internal/engines/llama.cpp/v1
@@ -64,11 +61,8 @@ services:
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
-      HXPR_IDP_CLIENT_ID: nuxeo-client
-      HXPR_IDP_CLIENT_SECRET: secret
-      HXPR_IDP_USERNAME: testuser
-      HXPR_IDP_PASSWORD: password
+      HXPR_USERNAME: ${HXPR_USERNAME:-admin}
+      HXPR_PASSWORD: ${HXPR_PASSWORD:-password}
 
       # Docker Model Runner
       MODEL_RUNNER_URL: http://model-runner.docker.internal/engines/llama.cpp/v1
@@ -102,11 +96,8 @@ services:
       HXPR_REPOSITORY_ID: default
       HXPR_TARGET_PATH: /alfresco-sync
       HXPR_PATH_REPOSITORY_ID:
-      HXPR_IDP_TOKEN_URL: ${HXPR_IDP_TOKEN_URL:-http://host.docker.internal:5002/idp/connect/token}
-      HXPR_IDP_CLIENT_ID: nuxeo-client
-      HXPR_IDP_CLIENT_SECRET: secret
-      HXPR_IDP_USERNAME: testuser
-      HXPR_IDP_PASSWORD: password
+      HXPR_USERNAME: ${HXPR_USERNAME:-admin}
+      HXPR_PASSWORD: ${HXPR_PASSWORD:-password}
 
       # Docker Model Runner
       MODEL_RUNNER_URL: http://model-runner.docker.internal/engines/llama.cpp/v1
