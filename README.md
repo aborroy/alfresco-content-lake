@@ -544,6 +544,8 @@ Response:
 | `tokenCount` | Integer | Total token usage (prompt + completion) when provider reports it |
 | `sources[].sourceType` | String | Source type for each cited document |
 | `sources[].openInSourceUrl` | String | Native-source deep link (Share for Alfresco, Web UI for Nuxeo) |
+| `sources[].chunkType` | String | Chunk classification `PROSE`/`TABLE` (from the section map); omitted when unknown |
+| `currentSummary` | String | Persistent running conversation summary when `rag.conversation.summary.enabled=true`; otherwise null |
 | `verified` | Boolean | Citation-faithfulness result when `rag.citation.verify.enabled=true`; otherwise null |
 | `unsupportedClaims` | String[] | Answer claims not grounded in the cited sources (citation verification only) |
 
@@ -827,6 +829,26 @@ curl -X POST http://localhost:9091/api/rag/search/facets -u admin:admin \
 | `topN` | int | service default | Maximum number of buckets to return |
 
 The response is `{ "property": "...", "buckets": [ { "value": "...", "count": N }, ... ] }`.
+
+#### Named Queries
+
+List the hxpr named-query definitions registered server-side, to offer them as saved-search filters.
+Apply one by passing `namedQuery` on a search request (an alternative to an inline `filter`).
+
+```bash
+curl http://localhost:9091/api/rag/named-queries -u admin:admin
+# -> ["recent-contracts","hr-policies"]
+```
+
+#### Session Summary
+
+Return the persistent running conversation summary for a session (also returned inline on
+`/api/rag/prompt` as `currentSummary`). Returns 404 when `rag.conversation.summary.enabled=false`.
+
+```bash
+curl http://localhost:9091/api/rag/sessions/user:alice/summary -u admin:admin
+# -> {"sessionId":"user:alice","summary":"..."}   (summary null when none yet)
+```
 
 #### In-App Evaluation (smoke)
 

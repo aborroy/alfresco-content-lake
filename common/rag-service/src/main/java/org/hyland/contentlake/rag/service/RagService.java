@@ -351,11 +351,21 @@ public class RagService {
                     request.getQuestion(), generation.answer(), rerankedHits);
         }
 
+        // Persistent conversation summary (#50) surfaced to the caller so a client can show a
+        // conversation-memory panel. Present only when the session carries memory and the feature
+        // is enabled; null (and omitted from the JSON) otherwise.
+        String currentSummary = (promptContext.conversation().enabled()
+                && promptContext.conversation().sessionId() != null
+                && sessionSummaryService.isEnabled())
+                ? sessionSummaryService.loadSummary(promptContext.conversation().sessionId())
+                : null;
+
         return RagPromptResponse.builder()
                 .answer(generation.answer())
                 .requestId(requestId)
                 .question(request.getQuestion())
                 .sessionId(promptContext.conversation().sessionId())
+                .currentSummary(currentSummary)
                 .retrievalQuery(retrievalQuery)
                 .historyTurnsUsed(promptContext.conversation().enabled()
                         ? promptContext.conversation().history().size()
@@ -386,6 +396,7 @@ public class RagService {
                         .openInSourceUrl(hit.getSourceDocument() != null ? hit.getSourceDocument().getOpenInSourceUrl() : null)
                         .chunkText(hit.getChunkText())
                         .score(hit.getScore())
+                        .chunkType(hit.getChunkMetadata() != null ? hit.getChunkMetadata().getChunkType() : null)
                         .build())
                 .toList();
     }
@@ -400,6 +411,7 @@ public class RagService {
                         .sourcePath(hit.getSourceDocument() != null ? hit.getSourceDocument().getPath() : null)
                         .sourceType(hit.getSourceDocument() != null ? hit.getSourceDocument().getSourceType() : null)
                         .openInSourceUrl(hit.getSourceDocument() != null ? hit.getSourceDocument().getOpenInSourceUrl() : null)
+                        .chunkType(hit.getChunkMetadata() != null ? hit.getChunkMetadata().getChunkType() : null)
                         .build())
                 .toList();
     }

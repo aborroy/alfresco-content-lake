@@ -41,6 +41,7 @@ class HybridSearchServiceTest {
     @Mock SecurityContextService securityContextService;
     @Mock HybridSearchProperties properties;
     @Mock SourceMetadataResolver sourceMetadataResolver;
+    @Mock SectionMapResolver sectionMapResolver;
     @Mock QueryExpansionService queryExpansionService;
     @Mock RagProperties ragProperties;
     @Mock org.hyland.contentlake.client.NamedQueryService namedQueryService;

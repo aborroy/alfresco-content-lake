@@ -18,6 +18,7 @@ import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
+import org.hyland.contentlake.model.SectionMap;
 import org.hyland.contentlake.service.EmbeddingService;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,6 +69,7 @@ public class SemanticSearchService {
     private final EmbeddingService embeddingService;
     private final SecurityContextService securityContextService;
     private final SourceMetadataResolver sourceMetadataResolver;
+    private final SectionMapResolver sectionMapResolver;
     private final QueryExpansionService queryExpansionService;
     private final RagProperties ragProperties;
     private final NamedQueryService namedQueryService;
@@ -311,8 +313,9 @@ public class SemanticSearchService {
             return VariantResult.empty(queryVector.size());
         }
 
-        Map<String, SourceDocument> documentCache = fetchDocumentMetadata(vectorResult.getEmbeddings());
-        List<SearchHit> hits = buildSearchHits(vectorResult.getEmbeddings(), documentCache, minScore);
+        Map<String, SectionMap> sectionMaps = new ConcurrentHashMap<>();
+        Map<String, SourceDocument> documentCache = fetchDocumentMetadata(vectorResult.getEmbeddings(), sectionMaps);
+        List<SearchHit> hits = buildSearchHits(vectorResult.getEmbeddings(), documentCache, sectionMaps, minScore);
         long totalCount = vectorResult.getTotalCount() != null ? vectorResult.getTotalCount() : hits.size();
 
         return new VariantResult(hits, queryVector.size(), totalCount);
@@ -572,7 +575,8 @@ public class SemanticSearchService {
     // Document metadata enrichment
     // ---------------------------------------------------------------
 
-    private Map<String, SourceDocument> fetchDocumentMetadata(List<Embedding> embeddings) {
+    private Map<String, SourceDocument> fetchDocumentMetadata(List<Embedding> embeddings,
+                                                              Map<String, SectionMap> sectionMaps) {
         Map<String, SourceDocument> cache = new ConcurrentHashMap<>();
 
         Set<String> docIds = embeddings.stream()
@@ -595,7 +599,13 @@ public class SemanticSearchService {
                 if (result != null && result.getDocuments() != null) {
                     result.getDocuments().stream()
                             .findFirst()
-                            .ifPresent(doc -> cache.put(docId, sourceMetadataResolver.resolveSourceDocument(docId, doc)));
+                            .ifPresent(doc -> {
+                                cache.put(docId, sourceMetadataResolver.resolveSourceDocument(docId, doc));
+                                SectionMap map = sectionMapResolver.parse(doc);
+                                if (map != null) {
+                                    sectionMaps.put(docId, map);
+                                }
+                            });
                 }
             } catch (Exception e) {
                 log.warn("Failed to fetch metadata for document {}: {}", docId, e.getMessage());
@@ -612,6 +622,7 @@ public class SemanticSearchService {
 
     private List<SearchHit> buildSearchHits(List<Embedding> embeddings,
                                             Map<String, SourceDocument> documentCache,
+                                            Map<String, SectionMap> sectionMaps,
                                             double minScore) {
         List<SearchHit> hits = new ArrayList<>();
         int rank = 1;
@@ -650,11 +661,16 @@ public class SemanticSearchService {
                     .embeddingType(embedding.getSysembedType())
                     .chunkLength(chunkText.length());
 
+            Integer paragraph = null;
             if (embedding.getSysembedLocation() != null
                     && embedding.getSysembedLocation().getText() != null) {
                 chunkMeta.page(embedding.getSysembedLocation().getText().getPage());
-                chunkMeta.paragraph(embedding.getSysembedLocation().getText().getParagraph());
+                paragraph = embedding.getSysembedLocation().getText().getParagraph();
+                chunkMeta.paragraph(paragraph);
             }
+            // chunkType (#69) resolved from the document's section map (chunk index -> section type).
+            SectionMap sectionMap = docId != null ? sectionMaps.get(docId) : null;
+            chunkMeta.chunkType(sectionMapResolver.chunkType(sectionMap, paragraph));
 
             SourceDocument sourceDoc = (docId != null && documentCache.containsKey(docId))
                     ? documentCache.get(docId)
