@@ -22,8 +22,6 @@ public final class RetrievalTrace {
     private volatile String retrievalQuery;
     private volatile long searchTimeMs;
     private volatile List<SearchHit> rerankedHits = List.of();
-    private volatile List<SearchHit> graphHits = List.of();
-    private volatile List<String> graphEntities = List.of();
 
     public String retrievalQuery() {
         return retrievalQuery;
@@ -37,24 +35,9 @@ public final class RetrievalTrace {
         return rerankedHits;
     }
 
-    /** Additional documents pulled in via graph traversal (#55); empty unless graph expansion ran. */
-    public List<SearchHit> graphHits() {
-        return graphHits;
-    }
-
-    /** Canonical names of the entities traversed during graph expansion (#55). */
-    public List<String> graphEntities() {
-        return graphEntities;
-    }
-
     void record(String retrievalQuery, long searchTimeMs, List<SearchHit> rerankedHits) {
         this.retrievalQuery = retrievalQuery;
         this.searchTimeMs = searchTimeMs;
         this.rerankedHits = rerankedHits != null ? rerankedHits : List.of();
-    }
-
-    void recordGraph(List<SearchHit> graphHits, List<String> graphEntities) {
-        this.graphHits = graphHits != null ? graphHits : List.of();
-        this.graphEntities = graphEntities != null ? graphEntities : List.of();
     }
 }

@@ -4,12 +4,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
-import org.hyland.contentlake.rag.service.CommunitySummaryService;
 import org.hyland.contentlake.rag.service.RagService;
 import org.hyland.contentlake.rag.service.SemanticSearchService;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -52,8 +50,6 @@ public class RagController {
     private final RagService ragService;
     private final SemanticSearchService semanticSearchService;
     private final ChatModel chatModel;
-    /** Present only when rag.graph.enabled=true (community summaries, #56). */
-    private final ObjectProvider<CommunitySummaryService> communitySummaryServiceProvider;
 
     /**
      * Executes the RAG pipeline: retrieve relevant chunks, augment with context, generate answer.
@@ -79,56 +75,6 @@ public class RagController {
 
         RagPromptResponse response = ragService.prompt(request);
         return ResponseEntity.ok(response);
-    }
-
-    /**
-     * GraphRAG variant of {@link #prompt}: same contract, but graph-augmented retrieval is forced on
-     * for this request. After vector/hybrid retrieval the pipeline traverses the knowledge graph to
-     * include related documents; the response adds {@code graphEntities} and {@code graphSources}.
-     * Requires {@code rag.graph.enabled=true} (otherwise it behaves like {@code /prompt}).
-     *
-     * @param request same fields as {@code /prompt}; {@code graphHops} / {@code includeCommunities}
-     *                are honoured, {@code useGraphExpansion} is forced true
-     * @return generated answer with vector sources plus graph-expanded sources and entities
-     */
-    @PostMapping("/graph-prompt")
-    public ResponseEntity<RagPromptResponse> graphPrompt(@RequestBody RagPromptRequest request) {
-        if (hasInvalidQuestion(request)) {
-            return ResponseEntity.badRequest().body(
-                    RagPromptResponse.builder()
-                            .answer("Question is required")
-                            .question("")
-                            .sourcesUsed(0)
-                            .build()
-            );
-        }
-
-        request.setUseGraphExpansion(true);
-        log.info("RAG graph-prompt request: question=\"{}\", sessionId={}, graphHops={}, includeCommunities={}",
-                request.getQuestion(), request.getSessionId(), request.getGraphHops(), request.isIncludeCommunities());
-
-        RagPromptResponse response = ragService.prompt(request);
-        return ResponseEntity.ok(response);
-    }
-
-    /**
-     * Rebuilds graph community summaries (#56) from the current knowledge graph: clusters documents by
-     * shared entity, generates an LLM summary per community, and stores each as a permission-filtered
-     * hxpr document. Corpus-level and idempotent; run after ingestion/extraction has populated the graph.
-     * Requires {@code rag.graph.enabled=true}.
-     *
-     * @return the number of community summaries written
-     */
-    @PostMapping("/graph/communities/rebuild")
-    public ResponseEntity<Map<String, Object>> rebuildCommunities() {
-        CommunitySummaryService service = communitySummaryServiceProvider.getIfAvailable();
-        if (service == null) {
-            return ResponseEntity.status(409).body(Map.of(
-                    "error", "Graph is disabled; set rag.graph.enabled=true to build community summaries."));
-        }
-        int count = service.rebuild();
-        log.info("Community rebuild via API produced {} communities", count);
-        return ResponseEntity.ok(Map.of("communities", count));
     }
 
     /**

@@ -168,15 +168,6 @@ rag:
   # In-app evaluation smoke endpoint. Off by default; content-lake-eval is the authoritative gate.
   evaluation:
     enabled: ${RAG_EVALUATION_ENABLED:false}
-  # Graph-augmented retrieval (#55). Disabled by default; enable to wire the hxpr graph client and
-  # allow /api/rag/graph-prompt to traverse the knowledge graph.
-  graph:
-    enabled: ${RAG_GRAPH_ENABLED:false}
-    graphdb-name: ${HXPR_GRAPH_DB_NAME:content-lake}
-    graphdb-id: ${HXPR_GRAPH_DB_ID:}
-    max-hops: ${RAG_GRAPH_MAX_HOPS:1}
-    seed-documents: ${RAG_GRAPH_SEED_DOCUMENTS:5}
-    max-expanded-documents: ${RAG_GRAPH_MAX_EXPANDED_DOCUMENTS:20}
   # Semantic query-result caching (#72). Off by default so the eval baseline is unchanged. When on,
   # repeated query+filter+principal combinations skip re-embedding and retrieval within the TTL.
   # Result-cache keys include the authenticated principal, so entries never cross ACL contexts;

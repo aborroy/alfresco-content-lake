@@ -6,7 +6,6 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.config.HxprProperties;
 import org.hyland.contentlake.extractor.TikaTextExtractor;
 import org.hyland.contentlake.service.EmbeddingService;
-import org.hyland.contentlake.service.GraphIngestionService;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.NoiseReductionService;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
@@ -16,7 +15,6 @@ import org.hyland.filesystem.contentlake.client.FileSystemSourceClient;
 import org.hyland.filesystem.contentlake.config.FileSystemProperties;
 import org.hyland.filesystem.contentlake.service.FileSystemScopeResolver;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -116,8 +114,7 @@ public class AppConfig {
                                            SimpleChunkingService chunkingService,
                                            HxprProperties props,
                                            @Value("${content-lake.ingest.keyword-context-enrichment-enabled:false}")
-                                           boolean keywordContextEnrichmentEnabled,
-                                           ObjectProvider<GraphIngestionService> graphIngestionServiceProvider) {
+                                           boolean keywordContextEnrichmentEnabled) {
         return new NodeSyncService(
                 fileSystemSourceClient,
                 documentApi,
@@ -127,8 +124,7 @@ public class AppConfig {
                 chunkingService,
                 props.getTargetPath(),
                 props.getPathRepositoryId(),
-                keywordContextEnrichmentEnabled,
-                graphIngestionServiceProvider.getIfAvailable());
+                keywordContextEnrichmentEnabled);
     }
 
     @Bean(name = "filesystemBatchIngestionExecutor")

@@ -23,8 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Per-principal token-bucket rate limiting for RAG/search endpoints (#75).
  *
  * <p>Registered after authentication in the security chain, so the principal is already resolved.
- * Generation endpoints ({@code /api/rag/prompt}, {@code /api/rag/graph-prompt},
- * {@code /api/rag/chat/stream}) get a tighter budget than search ({@code /api/rag/search/**}) given
+ * Generation endpoints ({@code /api/rag/prompt}, {@code /api/rag/chat/stream}) get a tighter budget
+ * than search ({@code /api/rag/search/**}) given
  * the per-request LLM cost. Non-matching paths (health, actuator, status) are not limited.</p>
  *
  * <p>Buckets are held in-memory per {@code (principal, endpoint-class)} and are therefore
@@ -92,7 +92,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return EndpointClass.SEARCH;
         }
         if (path.equals("/api/rag/prompt")
-                || path.equals("/api/rag/graph-prompt")
                 || path.startsWith("/api/rag/chat/stream")) {
             return EndpointClass.GENERATE;
         }

@@ -299,8 +299,6 @@ public class RagService {
                 request.getSourceType(),
                 request.getEmbeddingType(),
                 inferredFilter,
-                request.isUseGraphExpansion(),
-                request.isIncludeCommunities(),
                 new RetrievalTrace()
         );
     }
@@ -346,12 +344,6 @@ public class RagService {
         CitationVerifier.VerificationResult verification =
                 citationVerifier.verify(generation.answer(), rerankedHits);
 
-        // Graph-augmented retrieval output (#55). Present only when graph expansion ran.
-        List<SearchHit> graphHits = promptContext.trace().graphHits();
-        List<Source> graphSources = graphHits.isEmpty() ? null : mapSources(graphHits);
-        List<String> graphEntities = promptContext.trace().graphEntities().isEmpty()
-                ? null : promptContext.trace().graphEntities();
-
         // Structured/typed output (#70). Opt-in second pass; skipped when no context was retrieved.
         StructuredAnswer structured = null;
         if (request.getResponseFormat() == ResponseFormat.STRUCTURED && !rerankedHits.isEmpty()) {
@@ -378,8 +370,6 @@ public class RagService {
                 .context(contextChunks)
                 .verified(verification != null ? verification.verified() : null)
                 .unsupportedClaims(verification != null ? verification.unsupportedClaims() : null)
-                .graphSources(graphSources)
-                .graphEntities(graphEntities)
                 .structured(structured)
                 .build();
     }
@@ -608,8 +598,6 @@ public class RagService {
                                  String sourceType,
                                  String embeddingType,
                                  HybridSearchRequest.MetadataFilter metadataFilter,
-                                 boolean useGraphExpansion,
-                                 boolean includeCommunities,
                                  RetrievalTrace trace) {
 
         /** Non-null optional retrieval params for the advisor context (filter/sourceType/embeddingType/metadata). */
@@ -626,12 +614,6 @@ public class RagService {
             }
             if (metadataFilter != null) {
                 params.put(HxprDocumentRetriever.CTX_METADATA_FILTER, metadataFilter);
-            }
-            if (useGraphExpansion) {
-                params.put(ContentLakeRetrievalAdvisor.PARAM_USE_GRAPH_EXPANSION, Boolean.TRUE);
-            }
-            if (includeCommunities) {
-                params.put(ContentLakeRetrievalAdvisor.PARAM_INCLUDE_COMMUNITIES, Boolean.TRUE);
             }
             return params;
         }

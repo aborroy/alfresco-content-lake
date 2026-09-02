@@ -144,9 +144,7 @@ public class LiveIngesterConfig {
             HxprProperties hxprProps,
             @org.springframework.beans.factory.annotation.Value(
                     "${content-lake.ingest.keyword-context-enrichment-enabled:false}")
-            boolean keywordContextEnrichmentEnabled,
-            org.springframework.beans.factory.ObjectProvider<org.hyland.contentlake.service.GraphIngestionService>
-                    graphIngestionServiceProvider
+            boolean keywordContextEnrichmentEnabled
     ) {
         return new NodeSyncService(
                 alfrescoClient,    // ContentSourceClient
@@ -157,8 +155,7 @@ public class LiveIngesterConfig {
                 chunkingService,
                 hxprProps.getTargetPath(),
                 hxprProps.getPathRepositoryId(),
-                keywordContextEnrichmentEnabled,
-                graphIngestionServiceProvider.getIfAvailable()  // null unless hxpr.graph.enabled
+                keywordContextEnrichmentEnabled
         );
     }
 

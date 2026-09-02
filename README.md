@@ -535,9 +535,6 @@ Response:
 | `systemPrompt` | String | -- | Override the default LLM system prompt |
 | `includeContext` | boolean | false | Include retrieved chunks in response |
 | `inferFilters` | boolean | false | Let the service infer metadata filters from the question intent |
-| `useGraphExpansion` | boolean | false | Expand retrieval through the knowledge graph (forced true by `/graph-prompt`) |
-| `graphHops` | int | 1 | Graph traversal depth when graph expansion is on |
-| `includeCommunities` | boolean | false | Include graph community summaries in the context |
 
 | Response Field | Type | Description |
 |---------------|------|-------------|
@@ -549,8 +546,6 @@ Response:
 | `sources[].openInSourceUrl` | String | Native-source deep link (Share for Alfresco, Web UI for Nuxeo) |
 | `verified` | Boolean | Citation-faithfulness result when `rag.citation.verify.enabled=true`; otherwise null |
 | `unsupportedClaims` | String[] | Answer claims not grounded in the cited sources (citation verification only) |
-| `graphEntities` | String[] | Knowledge-graph entities traversed (graph-augmented requests only) |
-| `graphSources` | Source[] | Documents pulled in via graph expansion (graph-augmented requests only) |
 
 #### Chat Stream (SSE)
 
@@ -812,32 +807,6 @@ curl -X POST http://localhost:9091/api/rag/search/hybrid -u admin:admin \
   -d '{"query":"budget approval process","strategy":"weighted","normalization":"minmax","vectorWeight":0.7,"textWeight":0.3}'
 ```
 
-#### GraphRAG Prompt
-
-Same contract as `/api/rag/prompt`, but graph-augmented retrieval is forced on: after vector/hybrid
-retrieval the pipeline traverses the knowledge graph to pull in related documents, and the response
-adds `graphEntities` and `graphSources`. Requires `rag.graph.enabled=true` (otherwise it behaves like
-`/prompt`). `graphHops` and `includeCommunities` are honoured on the request.
-
-```bash
-curl -X POST http://localhost:9091/api/rag/graph-prompt -u admin:admin \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "How are the Q4 report and the budget proposal related?",
-    "graphHops": 2,
-    "includeCommunities": true
-  }'
-```
-
-Rebuild the graph community summaries (clusters documents by shared entity, generates one
-permission-filtered summary document per community). Corpus-level and idempotent; run after
-ingestion has populated the graph. Also requires `rag.graph.enabled=true`.
-
-```bash
-curl -X POST http://localhost:9091/api/rag/graph/communities/rebuild -u admin:admin
-# -> {"communities": 7}   (409 when the graph is disabled)
-```
-
 #### Faceted Search
 
 Discover the indexed values of a property (with counts) so clients can build informed filters.
@@ -1091,14 +1060,6 @@ rag:
   # In-app evaluation smoke endpoint (content-lake-eval remains the authoritative gate)
   evaluation:
     enabled: ${RAG_EVALUATION_ENABLED:false}
-  # Graph-augmented retrieval; enable to wire the hxpr graph client for /api/rag/graph-prompt
-  graph:
-    enabled: ${RAG_GRAPH_ENABLED:false}
-    graphdb-name: ${HXPR_GRAPH_DB_NAME:content-lake}
-    graphdb-id: ${HXPR_GRAPH_DB_ID:}
-    max-hops: ${RAG_GRAPH_MAX_HOPS:1}
-    seed-documents: ${RAG_GRAPH_SEED_DOCUMENTS:5}
-    max-expanded-documents: ${RAG_GRAPH_MAX_EXPANDED_DOCUMENTS:20}
 ```
 
 Ingestion has a matching opt-in flag, `content-lake.ingest.keyword-context-enrichment-enabled`
@@ -1120,7 +1081,6 @@ Conversation memory storage:
 - [x] Per-request embedding-type selection
 - [x] Table-aware chunking and small-to-big (parent-section) retrieval
 - [x] Citation-faithfulness verification
-- [x] GraphRAG: entity extraction, graph-augmented retrieval, and community summaries
 
 ### Next (Q2 2026 - Open Source Release)
 

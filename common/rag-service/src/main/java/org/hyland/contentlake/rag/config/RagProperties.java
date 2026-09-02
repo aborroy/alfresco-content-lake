@@ -97,9 +97,6 @@ public class RagProperties {
     /** In-app evaluation smoke endpoint (disabled by default). */
     private EvaluationProperties evaluation = new EvaluationProperties();
 
-    /** Graph-augmented retrieval (GraphRAG, #55). Disabled by default. */
-    private GraphProperties graph = new GraphProperties();
-
     /** Prompt-injection defense on retrieved document content (#71). Disabled by default. */
     private PromptInjectionProperties promptInjection = new PromptInjectionProperties();
 
@@ -338,54 +335,6 @@ public class RagProperties {
         private boolean broaden = true;
     }
 
-    /**
-     * Graph-augmented retrieval (#55): after vector/hybrid retrieval, traverse the hxpr knowledge
-     * graph from the retrieved documents to pull in related documents. Off by default.
-     */
-    @Data
-    public static class GraphProperties {
-
-        /** Master switch. When false, no graph client beans are created and expansion never runs. */
-        private boolean enabled = false;
-
-        /** Name of the content-lake graphDB (used to resolve its id by name at query time). */
-        private String graphdbName = "content-lake";
-
-        /** Optional explicit graphDB id; when blank it is resolved by {@link #graphdbName}. */
-        private String graphdbId;
-
-        /** Traversal depth from seed documents (currently single-hop; reserved for deeper expansion). */
-        private int maxHops = 1;
-
-        /** Number of top reranked hits used as traversal seeds. */
-        private int seedDocuments = 5;
-
-        /** Maximum number of graph-expanded documents added to the context. */
-        private int maxExpandedDocuments = 20;
-
-        /** Characters of a graph-expanded document's text included as its context snippet. */
-        private int snippetChars = 500;
-
-        /** Community detection + summaries (#56). */
-        private CommunityProperties communities = new CommunityProperties();
-
-        @Data
-        public static class CommunityProperties {
-
-            /** Minimum number of documents an entity must connect for it to form a community. */
-            private int minSize = 3;
-
-            /** Maximum number of communities to (re)build, most-connected first. */
-            private int maxCommunities = 50;
-
-            /** Characters of each member document's text fed to the community summary LLM call. */
-            private int memberSnippetChars = 1500;
-
-            /** hxpr folder under which community-summary documents are stored. */
-            private String basePath = "/_graph/communities";
-        }
-    }
-
     @Data
     public static class PromptInjectionProperties {
 
@@ -412,8 +361,7 @@ public class RagProperties {
 
         /**
          * Requests per minute for generation endpoints ({@code /api/rag/prompt},
-         * {@code /api/rag/graph-prompt}, {@code /api/rag/chat/stream}). Tighter than search given the
-         * per-request LLM cost.
+         * {@code /api/rag/chat/stream}). Tighter than search given the per-request LLM cost.
          */
         private int generateRequestsPerMinute = 20;
 

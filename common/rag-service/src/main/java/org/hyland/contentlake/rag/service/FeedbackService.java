@@ -23,8 +23,8 @@ import java.util.UUID;
  * Persists user feedback on generated answers (#74) as hxpr documents under a configured folder
  * (default {@code /_feedback}), and lists them for the offline evaluation harness.
  *
- * <p>Follows the same write convention as {@link org.hyland.contentlake.rag.conversation.SessionSummaryService}
- * and {@link CommunitySummaryService}: a {@code SysFile} carrying the {@code CinRemote} mixin, with
+ * <p>Follows the same write convention as {@link org.hyland.contentlake.rag.conversation.SessionSummaryService}:
+ * a {@code SysFile} carrying the {@code CinRemote} mixin, with
  * the feedback fields stored in {@code cin_ingestProperties} (and {@code cin_ingestPropertyNames}
  * kept mirrored). Each feedback entry is a new document keyed by a generated id, so there is no
  * update path. The document's read ACL is scoped to the submitting principal rather than left

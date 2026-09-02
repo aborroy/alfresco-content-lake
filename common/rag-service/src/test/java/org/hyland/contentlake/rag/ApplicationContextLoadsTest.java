@@ -20,8 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
                 "spring.ai.openai.chat.options.model=test-chat",
                 "spring.ai.openai.embedding.model=test-embed",
                 "rag.mcp.enabled=true",
-                "rag.agentic-tools.enabled=true",
-                "rag.graph.enabled=false"
+                "rag.agentic-tools.enabled=true"
         })
 class ApplicationContextLoadsTest {
 

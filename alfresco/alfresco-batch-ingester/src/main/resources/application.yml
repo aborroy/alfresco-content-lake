@@ -67,7 +67,6 @@ spring:
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
-      # Chat model for GraphRAG entity extraction (#54). Only used when hxpr.graph.enabled=true.
       chat:
         options:
           model: ${LLM_MODEL:ai/gpt-oss}
@@ -102,21 +101,6 @@ hxpr:
   # HTTP Basic credentials for the ai-ready-index engine (filestore user store).
   username: ${HXPR_USERNAME:admin}
   password: ${HXPR_PASSWORD:password}
-  # GraphRAG foundation (issue #53). Disabled by default; when enabled, an idempotent startup step
-  # ensures the content-lake graphDB, base ontology, and ontology route exist in hxpr.
-  graph:
-    enabled: ${HXPR_GRAPH_ENABLED:false}
-    graphdb-name: ${HXPR_GRAPH_DB_NAME:content-lake}
-    graphdb-id: ${HXPR_GRAPH_DB_ID:}
-    version: ${HXPR_GRAPH_VERSION:v2}
-    ontology-name: ${HXPR_GRAPH_ONTOLOGY_NAME:content-lake-base}
-    # Entity extraction runs off the ingest hot path (#83): submitted to a bounded executor so
-    # ingestion latency is not dominated by the extraction LLM call (graph population is then
-    # eventually consistent). Set extraction-async=false to run it inline. These bind from
-    # HXPR_GRAPH_EXTRACTION_* on every ingester via relaxed binding.
-    extraction-async: ${HXPR_GRAPH_EXTRACTION_ASYNC:true}
-    extraction-worker-threads: ${HXPR_GRAPH_EXTRACTION_WORKER_THREADS:2}
-    extraction-queue-capacity: ${HXPR_GRAPH_EXTRACTION_QUEUE_CAPACITY:500}
 
 # Alfresco Transform Core AIO (Local Transform) for text extraction
 transform:

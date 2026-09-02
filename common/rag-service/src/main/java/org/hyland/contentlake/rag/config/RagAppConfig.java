@@ -2,8 +2,6 @@ package org.hyland.contentlake.rag.config;
 
 import lombok.Data;
 import org.hyland.contentlake.client.HxprDocumentApi;
-import org.hyland.contentlake.client.HxprGraphApi;
-import org.hyland.contentlake.client.HxprGraphService;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.client.HxprVocabularyApi;
@@ -11,16 +9,9 @@ import org.hyland.contentlake.client.NamedQueryService;
 import org.hyland.contentlake.client.VocabularyService;
 import org.hyland.contentlake.rag.conversation.ConversationMemoryStore;
 import org.hyland.contentlake.rag.conversation.InMemoryConversationMemoryStore;
-import org.hyland.contentlake.rag.config.RagProperties;
-import org.hyland.contentlake.rag.service.CommunitySummaryService;
-import org.hyland.contentlake.rag.service.GraphAugmentationService;
-import org.hyland.contentlake.rag.service.HybridSearchService;
-import org.hyland.contentlake.rag.service.SourceMetadataResolver;
 import org.hyland.contentlake.service.EmbeddingService;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -93,43 +84,6 @@ public class RagAppConfig {
     @Bean
     public NamedQueryService namedQueryService(HxprService hxprService) {
         return new NamedQueryService(hxprService);
-    }
-
-    // ----------------------------------------------------------------------
-    // GraphRAG (#55) - only wired when rag.graph.enabled=true
-    // ----------------------------------------------------------------------
-
-    @Bean
-    @ConditionalOnProperty(name = "rag.graph.enabled", havingValue = "true")
-    public HxprGraphApi hxprGraphApi(RestClient hxprRestClient) {
-        return httpProxyFactory(hxprRestClient).createClient(HxprGraphApi.class);
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "rag.graph.enabled", havingValue = "true")
-    public HxprGraphService hxprGraphService(HxprGraphApi hxprGraphApi, RestClient hxprRestClient) {
-        return new HxprGraphService(hxprGraphApi, hxprRestClient);
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "rag.graph.enabled", havingValue = "true")
-    public GraphAugmentationService graphAugmentationService(HxprGraphService hxprGraphService,
-                                                             HybridSearchService hybridSearchService,
-                                                             HxprService hxprService,
-                                                             SourceMetadataResolver sourceMetadataResolver,
-                                                             RagProperties ragProperties) {
-        return new GraphAugmentationService(hxprGraphService, hybridSearchService, hxprService,
-                sourceMetadataResolver, ragProperties);
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "rag.graph.enabled", havingValue = "true")
-    public CommunitySummaryService communitySummaryService(HxprGraphService hxprGraphService,
-                                                           HxprService hxprService,
-                                                           HxprDocumentApi hxprDocumentApi,
-                                                           ChatModel chatModel,
-                                                           RagProperties ragProperties) {
-        return new CommunitySummaryService(hxprGraphService, hxprService, hxprDocumentApi, chatModel, ragProperties);
     }
 
     // ----------------------------------------------------------------------

@@ -66,8 +66,7 @@ class NodeSyncServiceExtractedTextTest {
                 chunkingService,
                 "/nuxeo-sync",
                 null,
-                true,  // keyword-leg context enrichment on: these tests assert the prefix
-                null   // no graph extraction in these tests
+                true  // keyword-leg context enrichment on: these tests assert the prefix
         );
     }
 

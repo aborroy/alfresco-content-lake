@@ -57,8 +57,7 @@ class NodeSyncServiceTextExtractionTest {
                 chunkingService,
                 "/nuxeo-sync",
                 null,
-                false,
-                null   // no graph extraction in these tests
+                false
         );
     }
 

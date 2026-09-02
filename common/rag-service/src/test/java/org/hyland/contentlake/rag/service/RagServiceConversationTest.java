@@ -94,7 +94,7 @@ class RagServiceConversationTest {
                 new SectionExpansionService(hxprDocumentApi, properties);
         ContentLakeRetrievalAdvisor advisor = new ContentLakeRetrievalAdvisor(
                 retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties,
-                sectionExpansionService, null, new PromptInjectionScanner());
+                sectionExpansionService, new PromptInjectionScanner());
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();

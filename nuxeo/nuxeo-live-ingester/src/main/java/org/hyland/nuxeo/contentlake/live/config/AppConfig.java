@@ -153,9 +153,7 @@ public class AppConfig {
                                            HxprProperties props,
                                            @org.springframework.beans.factory.annotation.Value(
                                                    "${content-lake.ingest.keyword-context-enrichment-enabled:false}")
-                                           boolean keywordContextEnrichmentEnabled,
-                                           org.springframework.beans.factory.ObjectProvider<org.hyland.contentlake.service.GraphIngestionService>
-                                                   graphIngestionServiceProvider) {
+                                           boolean keywordContextEnrichmentEnabled) {
         return new NodeSyncService(
                 nuxeoClient,
                 documentApi,
@@ -165,8 +163,7 @@ public class AppConfig {
                 chunkingService,
                 props.getTargetPath(),
                 props.getPathRepositoryId(),
-                keywordContextEnrichmentEnabled,
-                graphIngestionServiceProvider.getIfAvailable()  // null unless hxpr.graph.enabled
+                keywordContextEnrichmentEnabled
         );
     }
 

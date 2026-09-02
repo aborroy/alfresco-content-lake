@@ -266,11 +266,3 @@ prose noise.
   (`FacetsService`), vocabulary lookup and chunk full-text search are expressed through hxpr's
   AdvancedQuery API rather than hand-built query strings, which is what powers the metadata filters on
   hybrid search and the `/search/facets` endpoint
-- **GraphRAG is a gated overlay** (`rag.graph.enabled`, default off) -- when enabled, ingestion
-  extracts entities and provisions a knowledge graph, and `/api/rag/graph-prompt` augments normal
-  vector/hybrid retrieval by traversing that graph (bounded by `graphHops`, seed and expansion
-  document limits). Graph-expanded documents are re-filtered against `sys_acl` so traversal never
-  widens what a user may see. `CommunitySummaryService` clusters the graph by shared entity and writes
-  one permission-filtered summary document per community, rebuilt idempotently via
-  `/api/rag/graph/communities/rebuild`. With the flag off, none of these beans load and retrieval is
-  unchanged.

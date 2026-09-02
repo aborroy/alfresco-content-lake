@@ -79,18 +79,6 @@ public class RagPromptResponse {
     private List<String> unsupportedClaims;
 
     /**
-     * Entities identified in the retrieved documents and traversed in the graph (#55). Present only
-     * when graph expansion ran for this request.
-     */
-    private List<String> graphEntities;
-
-    /**
-     * Additional documents pulled in via graph traversal, distinct from vector {@link #sources} (#55).
-     * Present only when graph expansion ran for this request.
-     */
-    private List<Source> graphSources;
-
-    /**
      * Typed answer (#70), present only when the request asked for {@link ResponseFormat#STRUCTURED}.
      * Derived from {@link #answer} in a second pass; the free-text {@code answer} is always present.
      */

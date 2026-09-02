@@ -71,8 +71,7 @@ class NodeSyncServicePathConflictTest {
                 chunkingService,
                 TARGET_PATH,
                 null,
-                false,
-                null   // no graph extraction in these tests
+                false
         );
     }
 

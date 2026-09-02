@@ -58,10 +58,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     public static final String PARAM_RETRIEVAL_QUERY = "cl.retrievalQuery";
     /** Advisor param: {@link String} assembled conversation-history block (may be blank). */
     public static final String PARAM_HISTORY_BLOCK = "cl.historyBlock";
-    /** Advisor param: {@link Boolean} enabling graph-augmented retrieval (#55) for this request. */
-    public static final String PARAM_USE_GRAPH_EXPANSION = "cl.useGraphExpansion";
-    /** Advisor param: {@link Boolean} including community summaries (#56) in graph expansion. */
-    public static final String PARAM_INCLUDE_COMMUNITIES = "cl.includeCommunities";
 
     /** Fallback answer emitted (without an LLM call) when no relevant context is retrieved. */
     public static final String NO_CONTEXT_ANSWER =
@@ -77,9 +73,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     private final RagProperties ragProperties;
     private final SectionExpansionService sectionExpansionService;
 
-    /** Optional graph-augmentation collaborator (#55); null when {@code rag.graph.enabled} is off. */
-    private final GraphAugmentationService graphAugmentationService;
-
     /** Prompt-injection defense on retrieved content (#71). */
     private final PromptInjectionScanner promptInjectionScanner;
 
@@ -89,7 +82,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
                                        RetrievalGrader retrievalGrader,
                                        RagProperties ragProperties,
                                        SectionExpansionService sectionExpansionService,
-                                       GraphAugmentationService graphAugmentationService,
                                        PromptInjectionScanner promptInjectionScanner) {
         this.documentRetriever = documentRetriever;
         this.diversitySelector = diversitySelector;
@@ -97,7 +89,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         this.retrievalGrader = retrievalGrader;
         this.ragProperties = ragProperties;
         this.sectionExpansionService = sectionExpansionService;
-        this.graphAugmentationService = graphAugmentationService;
         this.promptInjectionScanner = promptInjectionScanner;
     }
 
@@ -154,22 +145,7 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         final List<SearchHit> graded = rerankedHits;
         trace(context).ifPresent(t -> t.record(retrievalQuery, searchTimeMs, graded));
 
-        // GraphRAG (#55): expand context via the knowledge graph when requested for this call.
-        GraphAugmentationService.Expansion expansion = maybeExpandViaGraph(context, graded);
-        trace(context).ifPresent(t -> t.recordGraph(expansion.graphHits(), expansion.entities()));
-
-        return new Retrieval(graded, expansion.graphHits());
-    }
-
-    /** Runs graph expansion only when enabled, requested, and there are seed hits to traverse from. */
-    private GraphAugmentationService.Expansion maybeExpandViaGraph(Map<String, Object> context, List<SearchHit> seeds) {
-        boolean requested = Boolean.TRUE.equals(context.get(PARAM_USE_GRAPH_EXPANSION));
-        if (!requested || graphAugmentationService == null || seeds.isEmpty()) {
-            return GraphAugmentationService.Expansion.empty();
-        }
-        String sourceType = stringParam(context.get(HxprDocumentRetriever.CTX_SOURCE_TYPE), null);
-        boolean includeCommunities = Boolean.TRUE.equals(context.get(PARAM_INCLUDE_COMMUNITIES));
-        return graphAugmentationService.expand(seeds, sourceType, includeCommunities);
+        return new Retrieval(graded);
     }
 
     /** Retrieve, diversify, rerank. One pass over the hxpr search stack. */
@@ -257,11 +233,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         // Small-to-big: expand each hit to its parent section for context assembly only. The trace
         // (and thus the response's source citations) keeps the original per-chunk hits.
         List<SearchHit> contextHits = new ArrayList<>(sectionExpansionService.expandForContext(retrieval.hits()));
-        // Graph-expanded documents (#55) join the context so the LLM can reason over them; they are
-        // tracked separately in the trace so the response reports them as graphSources.
-        if (retrieval.graphHits() != null) {
-            contextHits.addAll(retrieval.graphHits());
-        }
         String contextBlock = assembleContext(contextHits);
         String augmentedUserText = buildUserPrompt(question, historyBlock, contextBlock);
 
@@ -387,6 +358,6 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         return value instanceof Number number ? number.intValue() : fallback;
     }
 
-    private record Retrieval(List<SearchHit> hits, List<SearchHit> graphHits) {
+    private record Retrieval(List<SearchHit> hits) {
     }
 }

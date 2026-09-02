@@ -15,7 +15,6 @@ spring:
       api-key: ${MODEL_RUNNER_API_KEY:not-needed}
       embedding:
         model: ${EMBEDDING_MODEL:ai/mxbai-embed-large}
-      # Chat model for GraphRAG entity extraction (#54). Only used when hxpr.graph.enabled=true.
       chat:
         options:
           model: ${LLM_MODEL:ai/gpt-oss}
