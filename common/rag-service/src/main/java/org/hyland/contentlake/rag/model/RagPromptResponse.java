@@ -36,6 +36,12 @@ public class RagPromptResponse {
     /** Effective conversation session id used for this request. */
     private String sessionId;
 
+    /**
+     * Persistent running summary of the session (#50), when conversation memory and the summary
+     * feature ({@code rag.conversation.summary.enabled}) are on. Null/omitted otherwise.
+     */
+    private String currentSummary;
+
     /** Query actually used for retrieval (may be reformulated from the original question). */
     private String retrievalQuery;
 
@@ -117,6 +123,12 @@ public class RagPromptResponse {
 
         /** Cosine similarity score. */
         private double score;
+
+        /**
+         * Chunk classification (#69): {@code PROSE} or {@code TABLE}. Null when the source
+         * document has no section map. Lets clients render table chunks distinctly.
+         */
+        private String chunkType;
     }
 
     @Data
@@ -146,5 +158,11 @@ public class RagPromptResponse {
 
         /** Deep link to open the source document for this context chunk. */
         private String openInSourceUrl;
+
+        /**
+         * Chunk classification (#69): {@code PROSE} or {@code TABLE}. Null when the source
+         * document has no section map.
+         */
+        private String chunkType;
     }
 }

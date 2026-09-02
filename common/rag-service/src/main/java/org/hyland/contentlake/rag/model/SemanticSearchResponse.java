@@ -126,5 +126,11 @@ public class SemanticSearchResponse {
 
         /** Character length of the chunk text. */
         private int chunkLength;
+
+        /**
+         * Chunk classification (#69): {@code PROSE} or {@code TABLE}, resolved from the document's
+         * section map. Null when the document has no section map (e.g. it exceeded the ingest cap).
+         */
+        private String chunkType;
     }
 }

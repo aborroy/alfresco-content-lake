@@ -9,6 +9,7 @@ import org.hyland.contentlake.hxpr.api.model.Embedding;
 import org.hyland.contentlake.hxpr.api.model.VectorSearchResult;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
+import org.hyland.contentlake.model.SectionMap;
 import org.hyland.contentlake.rag.cache.RagQueryCache;
 import org.hyland.contentlake.rag.config.HybridSearchProperties;
 import org.hyland.contentlake.rag.config.RagProperties;
@@ -95,6 +96,7 @@ public class HybridSearchService {
     private final SecurityContextService securityContextService;
     private final HybridSearchProperties properties;
     private final SourceMetadataResolver sourceMetadataResolver;
+    private final SectionMapResolver sectionMapResolver;
     private final QueryExpansionService queryExpansionService;
     private final RagProperties ragProperties;
     private final NamedQueryService namedQueryService;
@@ -235,10 +237,11 @@ public class HybridSearchService {
                 .toList();
 
         // --- Enrich with document metadata ---
-        Map<String, SourceDocument> docCache = fetchDocumentMetadata(filtered);
+        Map<String, SectionMap> sectionMaps = new ConcurrentHashMap<>();
+        Map<String, SourceDocument> docCache = fetchDocumentMetadata(filtered, sectionMaps);
 
         // --- Build response ---
-        List<HybridHit> hits = buildHits(filtered, docCache);
+        List<HybridHit> hits = buildHits(filtered, docCache, sectionMaps);
 
         long searchTimeMs = System.currentTimeMillis() - startTime;
         log.info("Hybrid search completed: {} results in {}ms (strategy={}, vector={}, keyword={}, variants={})",
@@ -807,7 +810,8 @@ public class HybridSearchService {
     // Document metadata enrichment
     // ---------------------------------------------------------------
 
-    private Map<String, SourceDocument> fetchDocumentMetadata(List<FusedResult> results) {
+    private Map<String, SourceDocument> fetchDocumentMetadata(List<FusedResult> results,
+                                                              Map<String, SectionMap> sectionMaps) {
         Map<String, SourceDocument> cache = new ConcurrentHashMap<>();
 
         Set<String> docIds = results.stream()
@@ -829,7 +833,13 @@ public class HybridSearchService {
                 if (result != null && result.getDocuments() != null) {
                     result.getDocuments().stream()
                             .findFirst()
-                            .ifPresent(doc -> cache.put(docId, sourceMetadataResolver.resolveSourceDocument(docId, doc)));
+                            .ifPresent(doc -> {
+                                cache.put(docId, sourceMetadataResolver.resolveSourceDocument(docId, doc));
+                                SectionMap map = sectionMapResolver.parse(doc);
+                                if (map != null) {
+                                    sectionMaps.put(docId, map);
+                                }
+                            });
                 }
             } catch (Exception e) {
                 log.warn("Failed to fetch metadata for document {}: {}", docId, e.getMessage());
@@ -843,19 +853,23 @@ public class HybridSearchService {
     // Response building
     // ---------------------------------------------------------------
 
-    private List<HybridHit> buildHits(List<FusedResult> results, Map<String, SourceDocument> docCache) {
+    private List<HybridHit> buildHits(List<FusedResult> results, Map<String, SourceDocument> docCache,
+                                      Map<String, SectionMap> sectionMaps) {
         List<HybridHit> hits = new ArrayList<>();
         int rank = 1;
 
         for (FusedResult r : results) {
             ScoredChunk chunk = r.chunk;
 
+            // chunkType (#69) resolved from the document's section map.
+            SectionMap sectionMap = chunk.docId != null ? sectionMaps.get(chunk.docId) : null;
             ChunkMetadata.ChunkMetadataBuilder chunkMeta = ChunkMetadata.builder()
                     .embeddingId(chunk.embeddingId)
                     .embeddingType(chunk.embeddingType)
                     .chunkLength(chunk.text != null ? chunk.text.length() : 0)
                     .page(chunk.page)
-                    .paragraph(chunk.paragraph);
+                    .paragraph(chunk.paragraph)
+                    .chunkType(sectionMapResolver.chunkType(sectionMap, chunk.paragraph));
 
             SourceDocument sourceDoc = (chunk.docId != null && docCache.containsKey(chunk.docId))
                     ? docCache.get(chunk.docId)
