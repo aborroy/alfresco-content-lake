@@ -1,7 +1,6 @@
 package org.hyland.alfresco.contentlake.service;
 
 import org.hyland.alfresco.contentlake.client.AlfrescoClient;
-import org.hyland.alfresco.contentlake.client.AlfrescoSearchService;
 import org.hyland.contentlake.spi.ScopeResolver;
 import org.hyland.contentlake.spi.SourceNode;
 import org.alfresco.core.model.Node;
@@ -25,10 +24,12 @@ import java.util.stream.Collectors;
  *
  * <h3>Ancestor scope check</h3>
  * The Alfresco REST API does not populate aspect names on path elements, so ancestor
- * detection requires individual {@code GET /nodes/{id}} calls. Results are cached in
- * a bounded in-memory map (max {@value CACHE_MAX_SIZE} entries). Call
- * {@link #invalidateFolderScope(String)} whenever {@code cl:indexed} is added to or
- * removed from a folder so the cache stays consistent.
+ * detection walks {@code node.getPath().getElements()} with one {@code GET /nodes/{id}}
+ * call per element. Those reads hit the repository database, which keeps scope decisions
+ * consistent with the event that triggered them and independent of the search index --
+ * both of which an AFTS ancestor query fails at: it races the index commit, and a custom
+ * model's fields are not guaranteed to be indexed at all (the ACS 26.2+ OpenSearch batch
+ * indexer drops any property or aspect whose namespace prefix it cannot resolve).
  */
 public class ContentLakeScopeResolver implements ScopeResolver {
 
@@ -38,16 +39,13 @@ public class ContentLakeScopeResolver implements ScopeResolver {
     private final List<String> excludedPathPatterns;
     private final Set<String> excludedAspects;
     private final AlfrescoClient alfrescoClient;
-    private final AlfrescoSearchService searchService;
 
     public ContentLakeScopeResolver(Collection<String> excludedPathPatterns,
                                     Collection<String> excludedAspects,
-                                    AlfrescoClient alfrescoClient,
-                                    AlfrescoSearchService searchService) {
+                                    AlfrescoClient alfrescoClient) {
         this.excludedPathPatterns = List.copyOf(excludedPathPatterns);
         this.excludedAspects = Set.copyOf(excludedAspects);
         this.alfrescoClient = alfrescoClient;
-        this.searchService = searchService;
     }
 
     /** Returns the configured excluded aspects (used by AFTS query builders). */
@@ -123,31 +121,6 @@ public class ContentLakeScopeResolver implements ScopeResolver {
     }
 
     /**
-     * REST-based variant of {@link #isInScope(Node)} that does not race the search-index
-     * commit. Resolves ancestor {@code cl:indexed} / {@code cl:excludeFromLake} state by
-     * reading each path element via {@code GET /nodes/{id}} (DB-consistent) instead of the
-     * AFTS {@code hasIndexedAncestor} / {@code hasExcludedAncestor} queries.
-     *
-     * <p>Used by the live create/update path, where the node fires its event the instant it
-     * is created -- before the OpenSearch batch indexer (ACS 26.2+) has indexed it or its
-     * ancestors, so an AFTS ancestor check would return a stale {@code false} and wrongly drop
-     * an in-scope file. See issue #88.</p>
-     */
-    public boolean isInScopeViaRest(Node node) {
-        if (node == null || Boolean.TRUE.equals(node.isIsFolder())) {
-            return false;
-        }
-        if (!shouldTraverse(node)) {
-            return false;
-        }
-        if (isExcludedBySelfOrAncestorViaRest(node)) {
-            return false;
-        }
-
-        return hasIndexedAspect(node.getAspectNames()) || hasIndexedAncestorViaRest(node);
-    }
-
-    /**
      * Returns {@code true} when a folder itself belongs to an indexed subtree and
      * is not excluded by a folder-level override.
      */
@@ -182,14 +155,8 @@ public class ContentLakeScopeResolver implements ScopeResolver {
     /**
      * Walks the path elements via REST and returns {@code true} when any ancestor folder
      * has the {@code cl:indexed} aspect.
-     *
-     * <p>Used by the tear-down path (cl:indexed removal) where the AFTS-based
-     * {@link AlfrescoSearchService#hasIndexedAncestor} would race with the Solr commit
-     * in the wrong direction (returning a stale {@code true} and skipping a valid
-     * tear-down). REST reads from the DB and is therefore consistent with the
-     * triggering event.</p>
      */
-    public boolean hasIndexedAncestorViaRest(Node node) {
+    public boolean hasIndexedAncestor(Node node) {
         for (String ancestorId : pathElementIds(node)) {
             Node ancestor = alfrescoClient.getAlfrescoNode(ancestorId);
             if (ancestor != null && hasIndexedAspect(ancestor.getAspectNames())) {
@@ -197,52 +164,6 @@ public class ContentLakeScopeResolver implements ScopeResolver {
             }
         }
         return false;
-    }
-
-    /**
-     * REST-based variant of {@link #isExcludedBySelfOrAncestor} that does not race
-     * with Solr commits.
-     */
-    public boolean isExcludedBySelfOrAncestorViaRest(Node node) {
-        if (node == null) {
-            return false;
-        }
-        if (isExcludedFromLake(node)) {
-            return true;
-        }
-        for (String ancestorId : pathElementIds(node)) {
-            Node ancestor = alfrescoClient.getAlfrescoNode(ancestorId);
-            if (ancestor != null && isExcludedFromLake(ancestor)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * REST-based variant of {@link #isFolderInScope}. Used by the tear-down dispatcher
-     * to decide whether a {@code cl:indexed}-removed folder still has scope via an
-     * ancestor — without racing the Solr commit of the just-removed aspect.
-     */
-    public boolean isFolderInScopeViaRest(Node folder) {
-        if (folder == null || !Boolean.TRUE.equals(folder.isIsFolder())) {
-            return false;
-        }
-        if (!shouldTraverse(folder)) {
-            return false;
-        }
-        if (isExcludedBySelfOrAncestorViaRest(folder)) {
-            return false;
-        }
-        return hasIndexedAspect(folder.getAspectNames()) || hasIndexedAncestorViaRest(folder);
-    }
-
-    private boolean hasIndexedAncestor(Node node) {
-        return searchService.hasIndexedAncestor(pathElementIds(node));
-    }
-
-    private boolean hasExcludedAncestor(Node node) {
-        return searchService.hasExcludedAncestor(pathElementIds(node));
     }
 
     private static List<String> pathElementIds(Node node) {
@@ -283,7 +204,16 @@ public class ContentLakeScopeResolver implements ScopeResolver {
         if (node == null) {
             return false;
         }
-        return isExcludedFromLake(node) || hasExcludedAncestor(node);
+        if (isExcludedFromLake(node)) {
+            return true;
+        }
+        for (String ancestorId : pathElementIds(node)) {
+            Node ancestor = alfrescoClient.getAlfrescoNode(ancestorId);
+            if (ancestor != null && isExcludedFromLake(ancestor)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean matchesAny(String path, List<String> patterns) {

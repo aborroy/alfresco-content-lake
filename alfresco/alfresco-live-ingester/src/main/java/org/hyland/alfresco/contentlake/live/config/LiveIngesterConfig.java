@@ -2,7 +2,6 @@ package org.hyland.alfresco.contentlake.live.config;
 
 import lombok.Data;
 import org.hyland.alfresco.contentlake.client.AlfrescoClient;
-import org.hyland.alfresco.contentlake.client.AlfrescoSearchService;
 import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
@@ -119,13 +118,11 @@ public class LiveIngesterConfig {
 
     @Bean
     public ContentLakeScopeResolver contentLakeScopeResolver(LiveIngesterProperties props,
-                                                              AlfrescoClient alfrescoClient,
-                                                              AlfrescoSearchService searchService) {
+                                                              AlfrescoClient alfrescoClient) {
         return new ContentLakeScopeResolver(
                 props.getFilter().getExcludePaths(),
                 props.getFilter().getExcludeAspects(),
-                alfrescoClient,
-                searchService
+                alfrescoClient
         );
     }
 

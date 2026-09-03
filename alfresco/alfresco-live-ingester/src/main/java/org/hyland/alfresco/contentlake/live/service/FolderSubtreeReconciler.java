@@ -116,7 +116,7 @@ public class FolderSubtreeReconciler {
         // `NOT @cl:excludeFromLake:true` predicate only matches a file that directly
         // carries the property and races the Solr commit anyway, so a subtree excluded
         // (on an ancestor folder) just before this event would otherwise be re-synced.
-        // isExcludedBySelfOrAncestorViaRest reads from the DB and does not race Solr.
+        // isExcludedBySelfOrAncestor reads from the DB and does not race Solr.
         Set<String> excludedAspects = scopeResolver.getExcludedAspects();
         for (Node child : searchService.findDescendantFilesWithRetry(
                 folderId, excludedAspects, discoveryMaxAttempts, discoveryRetryIntervalMs)) {
@@ -126,7 +126,7 @@ public class FolderSubtreeReconciler {
                     continue;
                 }
                 if (mode == ReconciliationMode.SCOPE
-                        && scopeResolver.isExcludedBySelfOrAncestorViaRest(child)) {
+                        && scopeResolver.isExcludedBySelfOrAncestor(child)) {
                     result.skipped++;
                     continue;
                 }

@@ -104,7 +104,7 @@ public class PermissionSyncService {
         // REST-based scope check: an ACL change fires this reconciliation immediately, while the
         // OpenSearch batch indexer may still be re-indexing the affected subtree. The AFTS-based
         // isInScope would race that and wrongly delete an in-scope document (issue #88).
-        if (!scopeResolver.isInScopeViaRest(file)) {
+        if (!scopeResolver.isInScope(file)) {
             nodeSyncService.deleteNode(file.getId(), file.getModifiedAt());
             result.deleted++;
             return;

@@ -85,7 +85,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("file-1");
         when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("file-1")).thenReturn(file);
-        when(scopeResolver.isInScopeViaRest(file)).thenReturn(true);
+        when(scopeResolver.isInScope(file)).thenReturn(true);
         when(alfrescoClient.extractReadAuthorities(file)).thenReturn(Set.of("user-a"));
         when(alfrescoClient.getSourceId()).thenReturn("repo-main");
 
@@ -125,11 +125,11 @@ class LiveEventProcessorTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // processNodeStateChange — REST-based scope check (issue #88)
+    // processNodeStateChange — scope check (issue #88)
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
-    void processNodeStateChange_inScopeViaRest_syncsNode() {
+    void processNodeStateChange_inScope_syncsNode() {
         Node file = new Node()
                 .id("file-1")
                 .name("live-test.txt")
@@ -140,7 +140,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("file-1");
         when(deduplicator.shouldSkip(event, "file-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("file-1")).thenReturn(file);
-        when(scopeResolver.isInScopeViaRest(file)).thenReturn(true);
+        when(scopeResolver.isInScope(file)).thenReturn(true);
         when(alfrescoClient.extractReadAuthorities(file)).thenReturn(Set.of("user-a"));
         when(alfrescoClient.getSourceId()).thenReturn("repo-main");
 
@@ -148,12 +148,10 @@ class LiveEventProcessorTest {
 
         verify(nodeSyncService).syncNode(any());
         verify(nodeSyncService, never()).deleteNode(any(), any());
-        // The AFTS-racing variant must not be consulted on the live create/update path.
-        verify(scopeResolver, never()).isInScope(any(Node.class));
     }
 
     @Test
-    void processNodeStateChange_outOfScopeViaRest_deletesNode() {
+    void processNodeStateChange_outOfScope_deletesNode() {
         Node file = new Node()
                 .id("file-2")
                 .name("out-of-scope.txt")
@@ -164,7 +162,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("file-2");
         when(deduplicator.shouldSkip(event, "file-2")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("file-2")).thenReturn(file);
-        when(scopeResolver.isInScopeViaRest(file)).thenReturn(false);
+        when(scopeResolver.isInScope(file)).thenReturn(false);
 
         processor.processNodeStateChange(event);
 
@@ -184,7 +182,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("folder-1");
         when(deduplicator.shouldSkip(event, "folder-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("folder-1")).thenReturn(folder);
-        when(scopeResolver.isFolderInScopeViaRest(folder)).thenReturn(true);
+        when(scopeResolver.isFolderInScope(folder)).thenReturn(true);
         when(scopeResolver.shouldTraverse(folder)).thenReturn(true);
         when(folderSubtreeReconciler.reconcile(eq(folder), any()))
                 .thenReturn(new FolderSubtreeReconciler.ReconciliationResult());
@@ -203,7 +201,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("folder-1");
         when(deduplicator.shouldSkip(event, "folder-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("folder-1")).thenReturn(folder);
-        when(scopeResolver.isFolderInScopeViaRest(folder)).thenReturn(false);
+        when(scopeResolver.isFolderInScope(folder)).thenReturn(false);
         when(folderSubtreeReconciler.reconcileTearDown(eq(folder), any()))
                 .thenReturn(new FolderSubtreeReconciler.ReconciliationResult());
 
@@ -222,7 +220,7 @@ class LiveEventProcessorTest {
         when(deduplicator.shouldSkip(event, "folder-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("folder-1")).thenReturn(folder);
         // Subtree still in scope via an ancestor, but folder itself has no cl:indexed.
-        when(scopeResolver.isFolderInScopeViaRest(folder)).thenReturn(true);
+        when(scopeResolver.isFolderInScope(folder)).thenReturn(true);
 
         processor.processFolderScopeChange(event);
 
@@ -239,7 +237,7 @@ class LiveEventProcessorTest {
         when(resource.getId()).thenReturn("folder-1");
         when(deduplicator.shouldSkip(event, "folder-1")).thenReturn(false);
         when(alfrescoClient.getAlfrescoNode("folder-1")).thenReturn(folder);
-        when(scopeResolver.isFolderInScopeViaRest(folder)).thenReturn(false);
+        when(scopeResolver.isFolderInScope(folder)).thenReturn(false);
         when(folderSubtreeReconciler.reconcileTearDown(eq(folder), any()))
                 .thenReturn(new FolderSubtreeReconciler.ReconciliationResult());
 

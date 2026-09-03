@@ -134,7 +134,7 @@ class FolderSubtreeReconcilerTest {
     }
 
     @Test
-    void reconcile_skipsChildExcludedBySelfOrAncestorViaRest() {
+    void reconcile_skipsChildExcludedBySelfOrAncestor() {
         // Issue #81: cl:excludeFromLake set on an ancestor folder just before this event. The AFTS
         // descendant query still returns the subtree (Solr commit lag), so a scope reconcile must
         // drop it via the authoritative REST check, not re-ingest it.
@@ -144,8 +144,8 @@ class FolderSubtreeReconcilerTest {
 
         searchService.descendantsByFolderId.put("folder-1", List.of(inScope, excluded));
         when(scopeResolver.getExcludedAspects()).thenReturn(Set.of());
-        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(inScope)).thenReturn(false);
-        when(scopeResolver.isExcludedBySelfOrAncestorViaRest(excluded)).thenReturn(true);
+        when(scopeResolver.isExcludedBySelfOrAncestor(inScope)).thenReturn(false);
+        when(scopeResolver.isExcludedBySelfOrAncestor(excluded)).thenReturn(true);
 
         FolderSubtreeReconciler.ReconciliationResult result =
                 reconciler.reconcile(folder, OffsetDateTime.parse("2026-03-30T09:11:00Z"));
@@ -169,7 +169,7 @@ class FolderSubtreeReconcilerTest {
 
         reconciler.reconcilePermissions(folder, OffsetDateTime.parse("2026-03-30T09:11:00Z"));
 
-        verify(scopeResolver, never()).isExcludedBySelfOrAncestorViaRest(any());
+        verify(scopeResolver, never()).isExcludedBySelfOrAncestor(any());
         verify(nodeSyncService).updatePermissions(any());
     }
 

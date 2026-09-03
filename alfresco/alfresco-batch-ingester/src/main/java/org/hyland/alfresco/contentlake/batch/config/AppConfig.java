@@ -1,7 +1,6 @@
 package org.hyland.alfresco.contentlake.batch.config;
 
 import org.hyland.alfresco.contentlake.client.AlfrescoClient;
-import org.hyland.alfresco.contentlake.client.AlfrescoSearchService;
 import org.hyland.contentlake.client.HxprDocumentApi;
 import org.hyland.contentlake.client.HxprQueryApi;
 import org.hyland.contentlake.client.HxprService;
@@ -130,13 +129,11 @@ public class AppConfig {
 
     @Bean
     public ContentLakeScopeResolver contentLakeScopeResolver(IngestionProperties props,
-                                                              AlfrescoClient alfrescoClient,
-                                                              AlfrescoSearchService searchService) {
+                                                              AlfrescoClient alfrescoClient) {
         return new ContentLakeScopeResolver(
                 props.getExclude().getPaths(),
                 props.getExclude().getAspects(),
-                alfrescoClient,
-                searchService
+                alfrescoClient
         );
     }
 

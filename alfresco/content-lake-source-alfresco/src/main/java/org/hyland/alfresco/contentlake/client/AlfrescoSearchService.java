@@ -3,14 +3,9 @@ package org.hyland.alfresco.contentlake.client;
 import lombok.extern.slf4j.Slf4j;
 import org.alfresco.core.model.Node;
 import org.alfresco.search.handler.SearchApi;
-import org.alfresco.search.model.RequestFacetField;
-import org.alfresco.search.model.RequestFacetFields;
 import org.alfresco.search.model.RequestPagination;
 import org.alfresco.search.model.RequestQuery;
-import org.alfresco.search.model.ResultBuckets;
-import org.alfresco.search.model.ResultBucketsBuckets;
 import org.alfresco.search.model.ResultSetPaging;
-import org.alfresco.search.model.ResultSetPagingList;
 import org.alfresco.search.model.ResultSetRowEntry;
 import org.alfresco.search.model.SearchRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -35,8 +31,8 @@ public class AlfrescoSearchService {
 
     private static final int PAGE_SIZE = 1000;
 
-    private static final String SYNC_STATUS_FIELD =
-            "@{http://www.alfresco.org/model/contentlake/1.0}syncStatusValue";
+    private static final String SYNC_STATUS_PROPERTY = "cl:syncStatusValue";
+    private static final String EXCLUDE_FROM_LAKE_PROPERTY = "cl:excludeFromLake";
 
     private final SearchApi searchApi;
     private final AlfrescoClient alfrescoClient;
@@ -124,139 +120,57 @@ public class AlfrescoSearchService {
     /**
      * Returns aggregate sync-status counts for all in-scope files under the folder.
      *
-     * <p>Issues a single AFTS query with a facet on {@code cl:syncStatusValue}
-     * to obtain INDEXED and FAILED counts. PENDING is derived as
-     * {@code total - indexed - failed}.</p>
+     * <p>Counts are derived from the {@code cl:syncStatusValue} property of each
+     * descendant node as returned by the Nodes REST API, not from an AFTS facet on that
+     * property: a facet only sees what the search engine indexed, and the ACS 26.2+
+     * OpenSearch batch indexer silently drops properties whose namespace prefix is
+     * missing from its static prefix map. A facet would then report every document as
+     * PENDING while it is in fact indexed. PENDING is derived as
+     * {@code total - indexed - failed}, so a document that has no status property yet
+     * still counts as pending.</p>
      *
-     * @param folderId       ancestor folder node identifier
+     * @param folderId        ancestor folder node identifier
      * @param excludedAspects aspect names to exclude
      * @return counts record; returns zeros when folder has no in-scope files
      */
     public FolderStatusCounts getFolderStatusCounts(String folderId, Collection<String> excludedAspects) {
-        String aftsQuery = buildDescendantFilesQuery(folderId, excludedAspects);
-        log.debug("AFTS folder status counts query for {}: {}", folderId, aftsQuery);
+        long total = 0;
+        long indexed = 0;
+        long failed = 0;
 
-        SearchRequest request = new SearchRequest()
-                .query(new RequestQuery()
-                        .language(RequestQuery.LanguageEnum.AFTS)
-                        .query(aftsQuery))
-                .paging(new RequestPagination().maxItems(1).skipCount(0))
-                .facetFields(new RequestFacetFields().addFacetsItem(
-                        new RequestFacetField().field(SYNC_STATUS_FIELD)));
-
-        try {
-            var response = searchApi.search(request);
-            ResultSetPaging paging = response != null ? response.getBody() : null;
-            if (paging == null || paging.getList() == null) {
-                return new FolderStatusCounts(0, 0, 0);
+        for (Node node : findDescendantFiles(folderId, excludedAspects)) {
+            // The AFTS query already asks for this, but the predicate is a no-op on a
+            // search engine that did not index cl:excludeFromLake, so re-check here.
+            if (isExcludedFromLake(node)) {
+                continue;
             }
-
-            ResultSetPagingList list = paging.getList();
-            long total = list.getPagination() != null && list.getPagination().getTotalItems() != null
-                    ? list.getPagination().getTotalItems()
-                    : 0;
-
-            long indexed = 0;
-            long failed = 0;
-
-            if (list.getContext() != null && list.getContext().getFacetsFields() != null) {
-                for (ResultBuckets facetBuckets : list.getContext().getFacetsFields()) {
-                    if (facetBuckets.getBuckets() == null) {
-                        continue;
-                    }
-                    for (ResultBucketsBuckets bucket : facetBuckets.getBuckets()) {
-                        if (bucket.getLabel() == null || bucket.getCount() == null) {
-                            continue;
-                        }
-                        switch (bucket.getLabel()) {
-                            case "INDEXED" -> indexed += bucket.getCount();
-                            case "FAILED"  -> failed  += bucket.getCount();
-                        }
-                    }
-                }
+            total++;
+            String status = readProperty(node, SYNC_STATUS_PROPERTY);
+            if ("INDEXED".equals(status)) {
+                indexed++;
+            } else if ("FAILED".equals(status)) {
+                failed++;
             }
-
-            log.debug("AFTS status counts for folder {}: total={} indexed={} failed={}", folderId, total, indexed, failed);
-            return new FolderStatusCounts(total, indexed, failed);
-
-        } catch (Exception e) {
-            log.warn("AFTS folder status counts failed for {}: {}", folderId, e.getMessage());
-            return new FolderStatusCounts(0, 0, 0);
         }
-    }
 
-    /**
-     * Returns {@code true} when any of the given ancestor folder IDs has the {@code cl:indexed} aspect.
-     *
-     * <p>Issues a single AFTS query with an {@code ID:} OR predicate over all ancestor IDs.
-     * The caller extracts ancestor IDs from {@code node.getPath().getElements()}.</p>
-     *
-     * <p>TODO(part-2): Solr-commit race. This method races with the Solr commit of a
-     * just-added/removed {@code cl:indexed} aspect. Callers reached during the same
-     * event that mutated the aspect must avoid this method.</p>
-     *
-     * @param ancestorIds path element IDs from {@code node.getPath().getElements()}
-     */
-    public boolean hasIndexedAncestor(Collection<String> ancestorIds) {
-        if (ancestorIds == null || ancestorIds.isEmpty()) {
-            return false;
-        }
-        String idPredicate = buildIdOrPredicate(ancestorIds);
-        return existsInSearchResult(
-                "(" + idPredicate + ") AND ASPECT:\"cl:indexed\"",
-                "ancestors", "hasIndexedAncestor");
-    }
-
-    /**
-     * Returns {@code true} when any of the given ancestor folder IDs has {@code cl:excludeFromLake=true}.
-     *
-     * <p>TODO(part-2): Solr-commit race. Same caveat as {@link #hasIndexedAncestor}.</p>
-     *
-     * @param ancestorIds path element IDs from {@code node.getPath().getElements()}
-     */
-    public boolean hasExcludedAncestor(Collection<String> ancestorIds) {
-        if (ancestorIds == null || ancestorIds.isEmpty()) {
-            return false;
-        }
-        String idPredicate = buildIdOrPredicate(ancestorIds);
-        return existsInSearchResult(
-                "(" + idPredicate + ") AND @cl:excludeFromLake:true",
-                "ancestors", "hasExcludedAncestor");
-    }
-
-    private static String buildIdOrPredicate(Collection<String> nodeIds) {
-        StringBuilder sb = new StringBuilder();
-        for (String id : nodeIds) {
-            if (id == null || id.isBlank()) continue;
-            if (!sb.isEmpty()) sb.append(" OR ");
-            sb.append("ID:\"workspace://SpacesStore/").append(id).append("\"");
-        }
-        return sb.toString();
+        log.debug("Status counts for folder {}: total={} indexed={} failed={}", folderId, total, indexed, failed);
+        return new FolderStatusCounts(total, indexed, failed);
     }
 
     // ──────────────────────────────────────────────────────────────────────
     // Internal helpers
     // ──────────────────────────────────────────────────────────────────────
 
-    private boolean existsInSearchResult(String aftsQuery, String nodeId, String context) {
-        SearchRequest request = new SearchRequest()
-                .query(new RequestQuery()
-                        .language(RequestQuery.LanguageEnum.AFTS)
-                        .query(aftsQuery))
-                .paging(new RequestPagination().maxItems(1).skipCount(0));
-        try {
-            var response = searchApi.search(request);
-            ResultSetPaging paging = response != null ? response.getBody() : null;
-            if (paging == null || paging.getList() == null
-                    || paging.getList().getPagination() == null) {
-                return false;
-            }
-            Long total = paging.getList().getPagination().getTotalItems();
-            return total != null && total > 0;
-        } catch (Exception e) {
-            log.warn("AFTS {} check failed for node {}: {}", context, nodeId, e.getMessage());
-            return false;
+    private static boolean isExcludedFromLake(Node node) {
+        return Boolean.parseBoolean(readProperty(node, EXCLUDE_FROM_LAKE_PROPERTY));
+    }
+
+    private static String readProperty(Node node, String propertyName) {
+        if (node.getProperties() instanceof Map<?, ?> properties) {
+            Object value = properties.get(propertyName);
+            return value != null ? value.toString() : null;
         }
+        return null;
     }
 
     private List<String> findDescendantFileIds(String folderId, Collection<String> excludedAspects) {

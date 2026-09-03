@@ -105,7 +105,7 @@ public class NodeDiscoveryService {
                     // commit of a just-set exclusion (issue #81, same class as #78). Re-check each
                     // discovered node authoritatively via the Nodes REST API so a subtree excluded
                     // immediately before sync is not ingested.
-                    .filter(node -> !scopeResolver.isExcludedBySelfOrAncestorViaRest(node));
+                    .filter(node -> !scopeResolver.isExcludedBySelfOrAncestor(node));
         }
 
         // Non-recursive: single level only, no AFTS needed

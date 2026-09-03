@@ -189,7 +189,7 @@ class ContentLakeNodeStatusServiceTest {
         private final Set<String> traversableFolderIds = new LinkedHashSet<>();
 
         private StubScopeResolver(AlfrescoClient alfrescoClient) {
-            super(List.of(), List.of(), alfrescoClient, null);
+            super(List.of(), List.of(), alfrescoClient);
         }
 
         @Override

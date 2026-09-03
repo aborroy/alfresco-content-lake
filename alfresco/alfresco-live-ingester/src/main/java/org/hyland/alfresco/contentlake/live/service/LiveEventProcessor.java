@@ -61,7 +61,7 @@ public class LiveEventProcessor {
                     log.warn("Node {} not found for event {}", nodeId, event.getId());
                     return;
                 }
-            } else if (scopeResolver.isInScopeViaRest(node)) {
+            } else if (scopeResolver.isInScope(node)) {
                 // REST-based scope check: a create/update event fires the instant the node is
                 // written, before the OpenSearch batch indexer has indexed it or its ancestors.
                 // The AFTS-based isInScope would race that commit and drop the file (issue #88).
@@ -153,7 +153,7 @@ public class LiveEventProcessor {
                 return;
             }
 
-            if (!scopeResolver.isInScopeViaRest(node)) {
+            if (!scopeResolver.isInScope(node)) {
                 // REST-based scope check (issue #88): a permission event can arrive while the
                 // OpenSearch batch indexer is still re-indexing the node, so the AFTS-based
                 // isInScope would race and wrongly delete an in-scope document.
@@ -203,7 +203,7 @@ public class LiveEventProcessor {
 
             // REST-based scope check: avoids the Solr-commit race that would otherwise
             // misclassify the just-mutated cl:indexed / cl:excludeFromLake aspect/property.
-            boolean inScope = scopeResolver.isFolderInScopeViaRest(folder);
+            boolean inScope = scopeResolver.isFolderInScope(folder);
             FolderSubtreeReconciler.ReconciliationResult result;
             String operation;
 

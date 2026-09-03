@@ -4,11 +4,9 @@ import org.alfresco.core.model.Node;
 import org.alfresco.core.model.PathElement;
 import org.alfresco.core.model.PathInfo;
 import org.hyland.alfresco.contentlake.client.AlfrescoClient;
-import org.hyland.alfresco.contentlake.client.AlfrescoSearchService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,32 +15,29 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Regression tests for ancestor-scope checks in ContentLakeScopeResolver.
+ * Ancestor-scope checks in ContentLakeScopeResolver.
  *
- * Previously, AlfrescoSearchService.hasIndexedAncestor() used
- * ANCESTOR:"workspace://SpacesStore/{nodeId}" which returns DESCENDANTS of that
- * node, not its ancestors -- always returning false for a file that is a leaf.
- * The fix passes the path element IDs to a ID:-based OR query instead.
+ * Scope is resolved by walking the node's own path elements with one
+ * {@code GET /nodes/{id}} per element: the file's own node ID is never part of the
+ * ancestor set, and the search index is never consulted (a custom model's aspects and
+ * properties are not guaranteed to be indexed, and an index read would race the commit
+ * of the very aspect change that triggered the check).
  */
 class ContentLakeScopeResolverAncestorTest {
 
-    private StubSearchService searchService;
     private StubAlfrescoClient alfrescoClient;
     private ContentLakeScopeResolver resolver;
 
     @BeforeEach
     void setUp() {
-        searchService = new StubSearchService();
         alfrescoClient = new StubAlfrescoClient();
-        resolver = new ContentLakeScopeResolver(List.of(), Set.of(),
-                alfrescoClient, searchService);
+        resolver = new ContentLakeScopeResolver(List.of(), Set.of(), alfrescoClient);
     }
 
     @Test
     void isInScope_returnsTrueWhenAncestorHasIndexedAspect() {
-        // File under a folder whose ID will be passed to hasIndexedAncestor
         Node file = fileWithPath("file-1", List.of("root-id", "sites-id", "doclib-id"));
-        searchService.indexedAncestorIds.add("doclib-id");
+        indexedFolder("doclib-id");
 
         assertThat(resolver.isInScope(file)).isTrue();
     }
@@ -50,7 +45,9 @@ class ContentLakeScopeResolverAncestorTest {
     @Test
     void isInScope_returnsFalseWhenNoAncestorHasIndexedAspect() {
         Node file = fileWithPath("file-1", List.of("root-id", "sites-id", "doclib-id"));
-        // No ancestor IDs added to indexedAncestorIds
+        plainFolder("root-id");
+        plainFolder("sites-id");
+        plainFolder("doclib-id");
 
         assertThat(resolver.isInScope(file)).isFalse();
     }
@@ -58,8 +55,8 @@ class ContentLakeScopeResolverAncestorTest {
     @Test
     void isInScope_returnsFalseWhenAncestorIsExcluded() {
         Node file = fileWithPath("file-1", List.of("root-id", "sites-id", "doclib-id"));
-        searchService.indexedAncestorIds.add("doclib-id");
-        searchService.excludedAncestorIds.add("sites-id");
+        indexedFolder("doclib-id");
+        excludedFolder("sites-id");
 
         assertThat(resolver.isInScope(file)).isFalse();
     }
@@ -68,104 +65,106 @@ class ContentLakeScopeResolverAncestorTest {
     void isInScope_returnsTrueWhenFileHasIndexedAspectDirectly() {
         Node file = fileWithPath("file-1", List.of("root-id"));
         file.aspectNames(List.of("cl:indexed"));
-        // No ancestor indexed, but file itself has cl:indexed -- unusual but supported
+        // No ancestor indexed, but the file itself has cl:indexed -- unusual but supported
 
         assertThat(resolver.isInScope(file)).isTrue();
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // REST-based ancestor checks (Part 2 — tear-down race avoidance)
-    // ──────────────────────────────────────────────────────────────────────
-
     @Test
-    void hasIndexedAncestorViaRest_walksRestNotSolr() {
-        Node folder = folderWithPath("folder-1", List.of("root-id", "parent-id"));
-        alfrescoClient.nodesById.put("parent-id", folderWithAspects("parent-id", List.of("cl:indexed")));
-        alfrescoClient.nodesById.put("root-id", folderWithAspects("root-id", List.of()));
+    void isInScope_ignoresTheNodesOwnId() {
+        // Guard against regression: the walk must use ancestor path element IDs,
+        // NOT the file's own node ID.
+        Node file = fileWithPath("file-node-id", List.of("ancestor-a"));
+        alfrescoClient.nodesById.put("file-node-id", folderWithAspects("file-node-id", List.of("cl:indexed")));
+        plainFolder("ancestor-a");
 
-        assertThat(resolver.hasIndexedAncestorViaRest(folder)).isTrue();
-        assertThat(searchService.lastQueriedIds).isNull(); // Solr not consulted
+        assertThat(resolver.isInScope(file)).isFalse();
+        assertThat(alfrescoClient.requestedIds).containsOnly("ancestor-a");
     }
 
     @Test
-    void isFolderInScopeViaRest_returnsTrueViaAncestorIndex() {
+    void hasIndexedAncestor_walksPathElementsViaRest() {
+        Node folder = folderWithPath("folder-1", List.of("root-id", "parent-id"));
+        indexedFolder("parent-id");
+        plainFolder("root-id");
+
+        assertThat(resolver.hasIndexedAncestor(folder)).isTrue();
+    }
+
+    @Test
+    void isFolderInScope_returnsTrueViaAncestorIndex() {
         Node folder = folderWithAspects("folder-1", List.of()); // no self cl:indexed
         folder.path(new PathInfo()
                 .elements(List.of(new PathElement().id("ancestor-1").name("Sites")))
                 .name("/Sites/...")
                 .isComplete(true));
-        alfrescoClient.nodesById.put("ancestor-1", folderWithAspects("ancestor-1", List.of("cl:indexed")));
+        indexedFolder("ancestor-1");
 
-        assertThat(resolver.isFolderInScopeViaRest(folder)).isTrue();
+        assertThat(resolver.isFolderInScope(folder)).isTrue();
     }
 
     @Test
-    void isFolderInScopeViaRest_returnsFalseWhenNoSelfNorAncestorIndex() {
+    void isFolderInScope_returnsFalseWhenNoSelfNorAncestorIndex() {
         Node folder = folderWithAspects("folder-1", List.of());
         folder.path(new PathInfo()
                 .elements(List.of(new PathElement().id("ancestor-1").name("Sites")))
                 .name("/Sites/...")
                 .isComplete(true));
-        alfrescoClient.nodesById.put("ancestor-1", folderWithAspects("ancestor-1", List.of()));
+        plainFolder("ancestor-1");
 
-        assertThat(resolver.isFolderInScopeViaRest(folder)).isFalse();
+        assertThat(resolver.isFolderInScope(folder)).isFalse();
     }
 
     @Test
-    void isFolderInScopeViaRest_returnsFalseWhenSelfExcludedFromLake() {
+    void isFolderInScope_returnsFalseWhenSelfExcludedFromLake() {
         Node folder = folderWithAspects("folder-1", List.of("cl:indexed", "cl:fileScope"));
         folder.properties(Map.of("cl:excludeFromLake", true));
         folder.path(new PathInfo().elements(List.of()).name("/Sites/...").isComplete(true));
 
-        assertThat(resolver.isFolderInScopeViaRest(folder)).isFalse();
-    }
-
-    @Test
-    void searchService_receivesPathElementIdsNotNodeId() {
-        // Guard against regression: the query must use ancestor path element IDs,
-        // NOT the file's own node ID.
-        Node file = fileWithPath("file-node-id", List.of("ancestor-a", "ancestor-b"));
-        searchService.indexedAncestorIds.add("ancestor-a");
-
-        resolver.isInScope(file);
-
-        assertThat(searchService.lastQueriedIds)
-                .containsExactlyInAnyOrder("ancestor-a", "ancestor-b")
-                .doesNotContain("file-node-id");
+        assertThat(resolver.isFolderInScope(folder)).isFalse();
     }
 
     // ──────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────
 
+    private void indexedFolder(String nodeId) {
+        alfrescoClient.nodesById.put(nodeId, folderWithAspects(nodeId, List.of("cl:indexed")));
+    }
+
+    private void plainFolder(String nodeId) {
+        alfrescoClient.nodesById.put(nodeId, folderWithAspects(nodeId, List.of()));
+    }
+
+    private void excludedFolder(String nodeId) {
+        alfrescoClient.nodesById.put(nodeId,
+                folderWithAspects(nodeId, List.of("cl:fileScope")).properties(Map.of("cl:excludeFromLake", true)));
+    }
+
     private static Node fileWithPath(String nodeId, List<String> ancestorIds) {
-        List<PathElement> elements = ancestorIds.stream()
-                .map(id -> new PathElement().id(id).name("name-" + id))
-                .toList();
-        PathInfo path = new PathInfo()
-                .elements(elements)
-                .name("/Company Home/...")
-                .isComplete(true);
         return new Node()
                 .id(nodeId)
                 .isFolder(false)
                 .isFile(true)
-                .path(path);
+                .path(pathOf(ancestorIds));
     }
 
     private static Node folderWithPath(String nodeId, List<String> ancestorIds) {
-        List<PathElement> elements = ancestorIds.stream()
-                .map(id -> new PathElement().id(id).name("name-" + id))
-                .toList();
-        PathInfo path = new PathInfo()
-                .elements(elements)
-                .name("/Company Home/...")
-                .isComplete(true);
         return new Node()
                 .id(nodeId)
                 .isFolder(true)
                 .isFile(false)
-                .path(path);
+                .path(pathOf(ancestorIds));
+    }
+
+    private static PathInfo pathOf(List<String> ancestorIds) {
+        List<PathElement> elements = ancestorIds.stream()
+                .map(id -> new PathElement().id(id).name("name-" + id))
+                .toList();
+        return new PathInfo()
+                .elements(elements)
+                .name("/Company Home/...")
+                .isComplete(true);
     }
 
     private static Node folderWithAspects(String nodeId, List<String> aspects) {
@@ -176,29 +175,9 @@ class ContentLakeScopeResolverAncestorTest {
                 .aspectNames(aspects);
     }
 
-    private static final class StubSearchService extends AlfrescoSearchService {
-        final Set<String> indexedAncestorIds = new java.util.HashSet<>();
-        final Set<String> excludedAncestorIds = new java.util.HashSet<>();
-        Collection<String> lastQueriedIds;
-
-        StubSearchService() {
-            super(null, null, null);
-        }
-
-        @Override
-        public boolean hasIndexedAncestor(Collection<String> ancestorIds) {
-            this.lastQueriedIds = ancestorIds;
-            return ancestorIds.stream().anyMatch(indexedAncestorIds::contains);
-        }
-
-        @Override
-        public boolean hasExcludedAncestor(Collection<String> ancestorIds) {
-            return ancestorIds.stream().anyMatch(excludedAncestorIds::contains);
-        }
-    }
-
     private static final class StubAlfrescoClient extends AlfrescoClient {
         final Map<String, Node> nodesById = new HashMap<>();
+        final List<String> requestedIds = new java.util.ArrayList<>();
 
         StubAlfrescoClient() {
             super(null, null);
@@ -212,6 +191,7 @@ class ContentLakeScopeResolverAncestorTest {
 
         @Override
         public Node getAlfrescoNode(String nodeId) {
+            requestedIds.add(nodeId);
             return nodesById.get(nodeId);
         }
     }
