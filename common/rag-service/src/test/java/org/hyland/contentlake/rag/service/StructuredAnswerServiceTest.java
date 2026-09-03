@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +43,27 @@ class StructuredAnswerServiceTest {
                 .contains("What was Q1 revenue?")
                 .contains("Q1 revenue was 4.2M.")
                 .contains("Revenue was 4.2M in Q1.");
+    }
+
+    @Test
+    void summarize_capsHowManySourcesReachTheSecondPass() {
+        StructuredAnswerService service = new StructuredAnswerService(structuredLlmCaller);
+        when(structuredLlmCaller.call(any(), any(), eq(StructuredAnswer.class), any(), eq("structured-answer")))
+                .thenReturn(new StructuredAnswer("s", List.of(), List.of()));
+
+        // A demo deployment reranks 30 hits; the prompt must not grow with top-k.
+        List<SearchHit> hits = IntStream.rangeClosed(1, 30)
+                .mapToObj(i -> SearchHit.builder().chunkText("chunk text " + i).score(1.0 / i).build())
+                .toList();
+
+        service.summarize("q", "answer", hits);
+
+        ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
+        verify(structuredLlmCaller).call(any(), userCaptor.capture(), eq(StructuredAnswer.class), any(),
+                eq("structured-answer"));
+        String user = userCaptor.getValue();
+        assertThat(user).contains("chunk text 1").contains("chunk text 8");
+        assertThat(user).doesNotContain("chunk text 9").doesNotContain("chunk text 30");
     }
 
     @Test

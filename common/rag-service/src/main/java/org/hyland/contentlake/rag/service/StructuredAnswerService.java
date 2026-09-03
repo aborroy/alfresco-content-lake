@@ -23,6 +23,14 @@ import java.util.List;
 public class StructuredAnswerService {
 
     private static final int MAX_SOURCE_SNIPPET = 400;
+
+    /**
+     * How many of the reranked hits this pass sees. Feeding it every hit made the prompt scale with
+     * {@code rag.default-top-k} -- 30 sources on a demo deployment, ~12k characters -- for a call
+     * whose only job is to name the sources the answer drew on. The hits are already ordered by
+     * relevance, so the top few carry what a citation can point at.
+     */
+    private static final int MAX_SOURCES = 8;
     private static final String SYSTEM = """
             You convert a document-grounded answer into a structured JSON object.
             Use ONLY the ANSWER and SOURCES provided; do not add facts.
@@ -57,7 +65,7 @@ public class StructuredAnswerService {
         }
         StringBuilder sb = new StringBuilder();
         int i = 1;
-        for (SearchHit hit : hits) {
+        for (SearchHit hit : hits.subList(0, Math.min(hits.size(), MAX_SOURCES))) {
             String name = hit.getSourceDocument() != null && hit.getSourceDocument().getName() != null
                     ? hit.getSourceDocument().getName()
                     : "Unknown document";

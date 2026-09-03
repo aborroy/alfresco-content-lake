@@ -89,7 +89,8 @@ public class RagService {
         long totalTimeMs = System.currentTimeMillis() - totalStart;
 
         persistConversationTurn(request, promptContext, generation);
-        return buildPromptResponse(request, promptContext, generation, totalTimeMs, requestId);
+        return buildPromptResponse(request, promptContext, generation, totalTimeMs, requestId,
+                resolveStructuredAnswer(request, promptContext, generation));
     }
 
     /**
@@ -99,6 +100,11 @@ public class RagService {
      * <ul>
      *   <li>{@code event: token} for every non-empty token delta</li>
      *   <li>{@code event: metadata} with the final {@link RagPromptResponse}</li>
+     *   <li>{@code event: structured} with the {@link StructuredAnswer}, only when the request asked
+     *       for {@code responseFormat=STRUCTURED} and something was retrieved. It follows
+     *       {@code metadata} rather than travelling inside it because deriving it is a second LLM
+     *       pass over the finished answer, and the client should not wait for it to see its
+     *       sources.</li>
      *   <li>{@code event: done} when the stream completes</li>
      *   <li>{@code event: error} on terminal failures</li>
      * </ul>
@@ -160,9 +166,18 @@ public class RagService {
                             persistConversationTurn(request, promptContext, generation);
                             RagPromptResponse response = buildPromptResponse(
                                     request, promptContext, generation,
-                                    System.currentTimeMillis() - totalStart, requestId
+                                    System.currentTimeMillis() - totalStart, requestId, null
                             );
                             sendMetadataEvent(emitter, response);
+
+                            // The typed view is a second LLM pass over the finished answer, so it
+                            // gets its own event: holding the metadata back for it would leave the
+                            // client with a complete answer and no sources for the whole call.
+                            StructuredAnswer structured =
+                                    resolveStructuredAnswer(request, promptContext, generation);
+                            if (structured != null) {
+                                sendStructuredEvent(emitter, structured);
+                            }
                             sendDoneEvent(emitter);
                             emitter.complete();
                         });
@@ -336,7 +351,8 @@ public class RagService {
                                                   PromptContext promptContext,
                                                   GenerationResult generation,
                                                   long totalTimeMs,
-                                                  String requestId) {
+                                                  String requestId,
+                                                  StructuredAnswer structured) {
         List<SearchHit> rerankedHits = promptContext.trace().rerankedHits();
         List<Source> sources = mapSources(rerankedHits);
         List<ContextChunk> contextChunks = request.isIncludeContext() ? mapContextChunks(rerankedHits) : null;
@@ -347,13 +363,6 @@ public class RagService {
         // Post-generation faithfulness check (opt-in). Null result leaves both fields absent.
         CitationVerifier.VerificationResult verification =
                 citationVerifier.verify(generation.answer(), rerankedHits);
-
-        // Structured/typed output (#70). Opt-in second pass; skipped when no context was retrieved.
-        StructuredAnswer structured = null;
-        if (request.getResponseFormat() == ResponseFormat.STRUCTURED && !rerankedHits.isEmpty()) {
-            structured = structuredAnswerService.summarize(
-                    request.getQuestion(), generation.answer(), rerankedHits);
-        }
 
         // Persistent conversation summary (#50) surfaced to the caller so a client can show a
         // conversation-memory panel. Present only when the session carries memory and the feature
@@ -386,6 +395,20 @@ public class RagService {
                 .unsupportedClaims(verification != null ? verification.unsupportedClaims() : null)
                 .structured(structured)
                 .build();
+    }
+
+    /**
+     * Derives the typed view of an answer (#70), or {@code null} when the caller did not ask for one
+     * or nothing was retrieved to ground it.
+     */
+    private StructuredAnswer resolveStructuredAnswer(RagPromptRequest request,
+                                                     PromptContext promptContext,
+                                                     GenerationResult generation) {
+        List<SearchHit> rerankedHits = promptContext.trace().rerankedHits();
+        if (request.getResponseFormat() != ResponseFormat.STRUCTURED || rerankedHits.isEmpty()) {
+            return null;
+        }
+        return structuredAnswerService.summarize(request.getQuestion(), generation.answer(), rerankedHits);
     }
 
     private List<Source> mapSources(List<SearchHit> hits) {
@@ -451,6 +474,16 @@ public class RagService {
                     .data(response));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to send SSE metadata event", e);
+        }
+    }
+
+    private void sendStructuredEvent(SseEmitter emitter, StructuredAnswer structured) {
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("structured")
+                    .data(structured));
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to send SSE structured event", e);
         }
     }
 
