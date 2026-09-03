@@ -19,10 +19,13 @@ import org.springframework.ai.chat.prompt.Prompt;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -70,18 +73,20 @@ class SessionSummaryServiceTest {
     }
 
     @Test
-    void updateAfterTurn_createsSummaryDocumentWhenNoneExists() {
+    void refreshSummary_createsSummaryDocumentWhenNoneExists() {
         enable();
         when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("User asked about retention; kept 7 years."));
         when(hxprService.findByPath(any())).thenReturn(null);
 
-        service.updateAfterTurn("user:alice", turns());
+        service.refreshSummary("user:alice", turns());
 
         verify(hxprService).ensureFolder("/_sessions");
         ArgumentCaptor<HxprDocument> captor = ArgumentCaptor.forClass(HxprDocument.class);
         verify(hxprService).createDocument(eq("/_sessions"), captor.capture());
         HxprDocument saved = captor.getValue();
         assertThat(saved.getSysName()).isEqualTo("user_alice");
+        // Without the mixin hxpr rejects the cin_* fields with 400 "cin_ingestPropertyNames".
+        assertThat(saved.getSysMixinTypes()).containsExactly(HxprDocument.MIXIN_CIN_REMOTE);
         assertThat((String) saved.getCinIngestProperties().get(SessionSummaryService.SUMMARY_PROPERTY))
                 .contains("retention");
         assertThat(saved.getCinIngestPropertyNames())
@@ -90,17 +95,63 @@ class SessionSummaryServiceTest {
     }
 
     @Test
-    void updateAfterTurn_updatesExistingSummaryDocument() {
+    void refreshSummary_updatesExistingSummaryDocument() {
         enable();
         HxprDocument existing = new HxprDocument();
         existing.setSysId("sess-doc-1");
         when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("updated notes"));
         when(hxprService.findByPath(any())).thenReturn(existing);
 
-        service.updateAfterTurn("user:alice", turns());
+        service.refreshSummary("user:alice", turns());
 
         verify(documentApi).updateById(eq("sess-doc-1"), any(HxprDocument.class));
         verify(hxprService, never()).createDocument(any(), any());
+    }
+
+    @Test
+    void updateAfterTurn_persistsOffTheCallingThread() throws Exception {
+        enable();
+        CountDownLatch persisted = new CountDownLatch(1);
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse("notes"));
+        when(hxprService.findByPath(any())).thenReturn(null);
+        doAnswer(invocation -> {
+            persisted.countDown();
+            return null;
+        }).when(hxprService).createDocument(any(), any());
+
+        service.updateAfterTurn("user:alice", turns());
+
+        assertThat(persisted.await(5, TimeUnit.SECONDS)).isTrue();
+        verify(hxprService).createDocument(eq("/_sessions"), any(HxprDocument.class));
+    }
+
+    @Test
+    void updateAfterTurn_doesNotBlockOnASlowRefresh() throws Exception {
+        enable();
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        CountDownLatch refreshFinished = new CountDownLatch(1);
+        when(chatModel.call(any(Prompt.class))).thenAnswer(invocation -> {
+            refreshStarted.countDown();
+            releaseRefresh.await(5, TimeUnit.SECONDS);
+            return chatResponse("notes");
+        });
+        doAnswer(invocation -> {
+            refreshFinished.countDown();
+            return null;
+        }).when(hxprService).createDocument(any(), any());
+
+        long before = System.nanoTime();
+        service.updateAfterTurn("user:alice", turns());
+        long elapsedMs = (System.nanoTime() - before) / 1_000_000;
+
+        // The caller -- a streaming response waiting to emit its sources -- returns while the
+        // refresh is still inside the LLM call.
+        assertThat(refreshStarted.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(elapsedMs).isLessThan(1_000);
+
+        releaseRefresh.countDown();
+        assertThat(refreshFinished.await(5, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test

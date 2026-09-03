@@ -153,6 +153,10 @@ public class RagService {
                                     resolveStreamTokenCount(accumulator, answer),
                                     generationTimeMs
                             );
+                            // Both of these must stay cheap: the client has the whole answer on
+                            // screen already but cannot render its sources until the metadata event
+                            // below arrives, so anything slow here reads as a stall. The running
+                            // summary refresh this triggers is queued, not awaited.
                             persistConversationTurn(request, promptContext, generation);
                             RagPromptResponse response = buildPromptResponse(
                                     request, promptContext, generation,

@@ -56,7 +56,7 @@ public class NodeSyncService {
 
     /* ---- hxpr type / mixin constants ---- */
     private static final String SYS_FILE         = "SysFile";
-    private static final String MIXIN_CIN_REMOTE = "CinRemote";
+    private static final String MIXIN_CIN_REMOTE = HxprDocument.MIXIN_CIN_REMOTE;
 
     /* ---- cin_ingestProperties keys ---- */
     private static final String P_SOURCE_MODIFIED_AT = ContentLakeIngestProperties.SOURCE_MODIFIED_AT;

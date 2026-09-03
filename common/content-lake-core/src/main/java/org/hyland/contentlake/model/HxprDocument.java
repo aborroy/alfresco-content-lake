@@ -15,6 +15,13 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class HxprDocument {
 
+    /**
+     * Mixin that owns every {@code cin_*} field below. hxpr rejects a document carrying any of
+     * them with {@code 400} and the offending field name unless {@code sys_mixinTypes} includes
+     * this value, so anything that writes {@code cin_ingestProperties} must set it.
+     */
+    public static final String MIXIN_CIN_REMOTE = "CinRemote";
+
     // Core hxpr / Nuxeo fields (API contract)
 
     @JsonProperty("sys_id")

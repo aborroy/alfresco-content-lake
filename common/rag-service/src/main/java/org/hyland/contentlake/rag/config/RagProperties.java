@@ -91,6 +91,9 @@ public class RagProperties {
     /** Post-generation citation faithfulness verification (disabled by default). */
     private CitationProperties citation = new CitationProperties();
 
+    /** hxpr named-query exposure. */
+    private NamedQueryProperties namedQuery = new NamedQueryProperties();
+
     /** Retrieval-shaping settings, including small-to-big section expansion. */
     private RetrievalProperties retrieval = new RetrievalProperties();
 
@@ -293,6 +296,27 @@ public class RagProperties {
              * response. Off by default (adds an LLM call per answer).
              */
             private boolean enabled = false;
+        }
+    }
+
+    @Data
+    public static class NamedQueryProperties {
+
+        /** Whether clients may discover the named queries registered in hxpr. */
+        private DiscoveryProperties discovery = new DiscoveryProperties();
+
+        @Data
+        public static class DiscoveryProperties {
+
+            /**
+             * When true, {@code GET /api/rag/named-queries} lists the named-query names registered
+             * in hxpr so a client can offer them as saved-search filters; the UI selector hides
+             * itself on an empty list. Turn it off where those names are hxpr internals
+             * ({@code tree_children}, {@code simple_search}, ...) rather than curated saved
+             * searches. This governs discovery only: a {@code namedQuery} a client sends explicitly
+             * on a search request is still resolved to its filter.
+             */
+            private boolean enabled = true;
         }
     }
 

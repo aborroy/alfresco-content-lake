@@ -1,5 +1,6 @@
 package org.hyland.contentlake.rag.conversation;
 
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hyland.contentlake.client.HxprDocumentApi;
@@ -18,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Long-term conversation memory: an LLM-maintained running summary that preserves key facts, named
@@ -52,6 +55,19 @@ public class SessionSummaryService {
     private final HxprDocumentApi documentApi;
     private final RagProperties ragProperties;
 
+    /**
+     * Runs the refreshes. Single-threaded so that successive turns stay consistent -- a refresh
+     * reads the previous summary before writing the new one, so overlapping refreshes would lose
+     * turns. Owned here rather than exposed as a bean: any {@code Executor} bean in the context
+     * suppresses Spring Boot's {@code applicationTaskExecutor}, which MVC uses for the async
+     * requests this service's own streaming caller depends on.
+     */
+    private final ExecutorService summaryExecutor = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "session-summary");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     public boolean isEnabled() {
         return ragProperties.getConversation().getSummary().isEnabled();
     }
@@ -78,13 +94,33 @@ public class SessionSummaryService {
     }
 
     /**
-     * Regenerates and persists the running summary after a completed turn. Best-effort: any failure
-     * is logged and swallowed.
+     * Queues a summary refresh for a completed turn and returns immediately.
+     *
+     * <p>The refresh is a full LLM call plus two hxpr round trips. Running it inline would hold up
+     * whatever the caller does next -- on the streaming path that is the {@code metadata} event, so
+     * the answer would sit on screen for seconds before its sources appeared. Nothing in the
+     * response depends on the new summary: the {@code currentSummary} a caller receives is the one
+     * that informed the answer it is reading, and the refresh lands shortly after.</p>
+     *
+     * <p>{@code summaryExecutor} is single-threaded, which is what keeps successive turns
+     * consistent: each task reads the previous summary only after the preceding task has stored
+     * it. Best-effort, as before -- a failed refresh leaves the conversation on its in-memory
+     * window.</p>
      */
     public void updateAfterTurn(String sessionId, List<ConversationTurn> turns) {
         if (!isEnabled() || sessionId == null || sessionId.isBlank() || turns == null || turns.isEmpty()) {
             return;
         }
+        summaryExecutor.execute(() -> refreshSummary(sessionId, turns));
+    }
+
+    @PreDestroy
+    void stopSummaryExecutor() {
+        summaryExecutor.shutdownNow();
+    }
+
+    /** The work {@link #updateAfterTurn} queues; visible for tests, which run it inline. */
+    void refreshSummary(String sessionId, List<ConversationTurn> turns) {
         try {
             String previous = loadSummary(sessionId);
             String updated = generateSummary(previous, turns);
@@ -133,6 +169,9 @@ public class SessionSummaryService {
         HxprDocument doc = new HxprDocument();
         doc.setSysPrimaryType("SysFile");
         doc.setSysName(safeName(sessionId));
+        // cin_ingestProperties belongs to the CinRemote mixin; without it hxpr answers 400
+        // "cin_ingestPropertyNames" and the summary is silently never stored.
+        doc.setSysMixinTypes(List.of(HxprDocument.MIXIN_CIN_REMOTE));
         doc.setCinIngestProperties(props);
         // cin_ingestPropertyNames must always mirror cin_ingestProperties.keySet().
         doc.setCinIngestPropertyNames(new ArrayList<>(props.keySet()));

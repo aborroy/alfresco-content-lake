@@ -89,7 +89,7 @@ public class FeedbackService {
 
             HxprDocument doc = new HxprDocument();
             doc.setSysPrimaryType("SysFile");
-            doc.setSysMixinTypes(List.of("CinRemote"));  // required for the cin_* properties to be valid
+            doc.setSysMixinTypes(List.of(HxprDocument.MIXIN_CIN_REMOTE));
             doc.setSysName(feedbackId);
             doc.setCinIngestProperties(props);
             // cin_ingestPropertyNames must always mirror cin_ingestProperties.keySet().
