@@ -366,6 +366,10 @@ security change to protect it.
 Current mixed-source filtering keeps Alfresco and Nuxeo principals source-native:
 
 - Ingested ACLs are written to hxpr with the source instance suffix `_#_<sourceId>`.
+- The read-time `sys_racl` predicate and the ingest-time ACEs are both produced by
+  `AclFilterBuilder` in `content-lake-core`, so the two sides of the encoding cannot drift apart.
+  Read access to every document depends on the predicate that class emits, so it is the one place to
+  audit and it is covered by its own specification tests.
 - Alfresco and Nuxeo principals are not normalized to a shared identity yet.
 - `rag-service` expands Alfresco groups from Alfresco and Nuxeo groups from Nuxeo, then applies them only to matching source IDs.
 - Alfresco repository admins keep repository-admin discoverability for Alfresco sources without storing synthetic `admin` ACEs in `sys_acl`.

@@ -20,6 +20,7 @@ import org.hyland.contentlake.rag.model.HybridSearchResponse;
 import org.hyland.contentlake.rag.model.HybridSearchResponse.HybridHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.service.EmbeddingService;
 import jakarta.annotation.PostConstruct;
@@ -57,14 +58,10 @@ public class HybridSearchService {
     static final String NORMALIZATION_MINMAX = "minmax";
 
     private static final int MAX_CANDIDATE_COUNT = 100;
-    private static final String BASE_QUERY = "SELECT * FROM SysContent";
-    private static final String RACL_FIELD = "sys_racl";
-    private static final String EVERYONE_PRINCIPAL = "__Everyone__";
+    // The sys_racl predicate itself lives in AclFilterBuilder, which owns every constant and every
+    // clause it is made of. GROUP_PREFIX stays here because it is also used to normalise Nuxeo group
+    // names, which is not an ACL concern.
     private static final String GROUP_PREFIX = "GROUP_";
-    private static final String ALFRESCO_ADMINISTRATORS = "GROUP_ALFRESCO_ADMINISTRATORS";
-    private static final String USER_RACL_PREFIX = "u:";
-    private static final String GROUP_RACL_PREFIX = "g:";
-    private static final String SOURCE_ID_SEPARATOR = "_#_";
     private static final String INGEST_PROP_PREFIX = "cin_ingestProperties.";
     private static final String SOURCE_MIME_PROP = INGEST_PROP_PREFIX + ContentLakeIngestProperties.SOURCE_MIME_TYPE;
     private static final String SOURCE_PATH_PROP = INGEST_PROP_PREFIX + ContentLakeIngestProperties.SOURCE_PATH;
@@ -88,7 +85,6 @@ public class HybridSearchService {
             "why", "with", "you", "your", "from", "into", "than", "them", "then", "they", "will");
     private static final Pattern CUSTOM_PROP_KEY_PATTERN = Pattern.compile("[A-Za-z0-9_:-]+");
     private static final Pattern SOURCE_ID_EQUALS_PATTERN = Pattern.compile("cin_sourceId\\s*=\\s*'([^']+)'");
-    private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
     private static final int SOURCE_DISCOVERY_LIMIT = 25;
 
     private final HxprService hxprService;
@@ -534,15 +530,16 @@ public class HybridSearchService {
         if (fulltextClause == null) {
             // No usable term: fall back to the permission filter alone rather than emitting a
             // clause that matches everything, which would hand the whole corpus to the keyword leg.
-            return permissionFilter != null ? permissionFilter : BASE_QUERY;
+            return permissionFilter != null ? permissionFilter : AclFilterBuilder.BASE_QUERY;
         }
 
-        if (permissionFilter != null && permissionFilter.startsWith(BASE_QUERY + " WHERE ")) {
-            String whereClause = permissionFilter.substring((BASE_QUERY + " WHERE ").length());
-            return BASE_QUERY + " WHERE " + fulltextClause + " AND " + whereClause;
+        String prefix = AclFilterBuilder.BASE_QUERY + " WHERE ";
+        if (permissionFilter != null && permissionFilter.startsWith(prefix)) {
+            String whereClause = permissionFilter.substring(prefix.length());
+            return prefix + fulltextClause + " AND " + whereClause;
         }
 
-        return BASE_QUERY + " WHERE " + fulltextClause;
+        return prefix + fulltextClause;
     }
 
     /**
@@ -827,7 +824,7 @@ public class HybridSearchService {
         for (String docId : docIds) {
             try {
                 HxprDocument.QueryResult result = hxprService.query(
-                        "SELECT * FROM SysContent WHERE sys_id = '" + escapeHxqlLiteral(docId) + "'",
+                        "SELECT * FROM SysContent WHERE sys_id = '" + AclFilterBuilder.escapeLiteral(docId) + "'",
                         1, 0);
 
                 if (result != null && result.getDocuments() != null) {
@@ -920,21 +917,21 @@ public class HybridSearchService {
         List<String> clauses = new ArrayList<>();
 
         if (metadata.getMimeType() != null && !metadata.getMimeType().isBlank()) {
-            clauses.add(SOURCE_MIME_PROP + " = '" + escapeHxqlLiteral(metadata.getMimeType().trim()) + "'");
+            clauses.add(SOURCE_MIME_PROP + " = '" + AclFilterBuilder.escapeLiteral(metadata.getMimeType().trim()) + "'");
         }
 
         if (metadata.getPathPrefix() != null && !metadata.getPathPrefix().isBlank()) {
-            String escapedPrefix = escapeHxqlLiteral(metadata.getPathPrefix().trim());
+            String escapedPrefix = AclFilterBuilder.escapeLiteral(metadata.getPathPrefix().trim());
             clauses.add("(" + SOURCE_PATH_PROP + " >= '" + escapedPrefix + "' AND "
                     + SOURCE_PATH_PROP + " < '" + escapedPrefix + "\uFFFF')");
         }
 
         if (metadata.getModifiedAfter() != null && !metadata.getModifiedAfter().isBlank()) {
-            clauses.add(SOURCE_MODIFIED_PROP + " >= '" + escapeHxqlLiteral(metadata.getModifiedAfter().trim()) + "'");
+            clauses.add(SOURCE_MODIFIED_PROP + " >= '" + AclFilterBuilder.escapeLiteral(metadata.getModifiedAfter().trim()) + "'");
         }
 
         if (metadata.getModifiedBefore() != null && !metadata.getModifiedBefore().isBlank()) {
-            clauses.add(SOURCE_MODIFIED_PROP + " <= '" + escapeHxqlLiteral(metadata.getModifiedBefore().trim()) + "'");
+            clauses.add(SOURCE_MODIFIED_PROP + " <= '" + AclFilterBuilder.escapeLiteral(metadata.getModifiedBefore().trim()) + "'");
         }
 
         if (metadata.getProperties() != null && !metadata.getProperties().isEmpty()) {
@@ -947,7 +944,7 @@ public class HybridSearchService {
                 // Normalize the caller's label to its canonical vocabulary key so the same concept
                 // matches across repos; a no-op when no vocabulary maps the value.
                 String canonical = vocabularyService.resolve(value.trim());
-                clauses.add(INGEST_PROP_PREFIX + key + " = '" + escapeHxqlLiteral(canonical) + "'");
+                clauses.add(INGEST_PROP_PREFIX + key + " = '" + AclFilterBuilder.escapeLiteral(canonical) + "'");
             }
         }
 
@@ -994,9 +991,6 @@ public class HybridSearchService {
     /** Dual-auth variant — see {@link SemanticSearchService#buildPermissionFilter(String, String, String, String)}. */
     String buildPermissionFilter(String alfrescoUser, String nuxeoUser,
                                  String sourceType, String additionalFilter) {
-        StringBuilder hxql = new StringBuilder(BASE_QUERY);
-        List<String> conditions = new ArrayList<>();
-
         List<String> sourceIds = resolvePermissionSourceIds(sourceType, additionalFilter);
         Map<String, List<String>> authoritiesBySource =
                 resolveAuthoritiesByDualSource(alfrescoUser, nuxeoUser, sourceIds);
@@ -1007,8 +1001,9 @@ public class HybridSearchService {
             if (username == null) {
                 continue;
             }
-            List<String> authorities = authoritiesBySource.getOrDefault(sourceId, defaultAuthorities(username));
-            sourceClauses.add(buildSourcePermissionClause(sourceId, authorities));
+            List<String> authorities = authoritiesBySource.getOrDefault(
+                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
         log.debug("Dual-auth permission filter (hybrid): alfrescoUser={}, nuxeoUser={}, sourceIds={}",
@@ -1017,17 +1012,9 @@ public class HybridSearchService {
         if (sourceClauses.isEmpty()) {
             log.warn("No permission clauses resolved (alfrescoUser={}, nuxeoUser={}, sourceType={}, filter={})",
                     alfrescoUser, nuxeoUser, sourceType, additionalFilter);
-            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
-        } else {
-            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
         }
 
-        if (additionalFilter != null && !additionalFilter.isBlank()) {
-            conditions.add("(" + additionalFilter.trim() + ")");
-        }
-
-        hxql.append(" WHERE ").append(String.join(" AND ", conditions));
-        return hxql.toString();
+        return AclFilterBuilder.query(sourceClauses, additionalFilter);
     }
 
     Map<String, List<String>> resolveAuthoritiesByDualSource(String alfrescoUser, String nuxeoUser,
@@ -1043,32 +1030,22 @@ public class HybridSearchService {
     }
 
     String buildPermissionFilter(String username, String sourceType, String additionalFilter) {
-        StringBuilder hxql = new StringBuilder(BASE_QUERY);
-        List<String> conditions = new ArrayList<>();
-
         List<String> sourceIds = resolvePermissionSourceIds(sourceType, additionalFilter);
         Map<String, List<String>> authoritiesBySource = resolveAuthoritiesBySource(username, sourceIds);
 
         List<String> sourceClauses = new ArrayList<>();
         for (String sourceId : sourceIds) {
-            List<String> authorities = authoritiesBySource.getOrDefault(sourceId, defaultAuthorities(username));
-            sourceClauses.add(buildSourcePermissionClause(sourceId, authorities));
+            List<String> authorities = authoritiesBySource.getOrDefault(
+                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
         if (sourceClauses.isEmpty()) {
             log.warn("No permission source ids resolved for user {} (sourceType={}, additionalFilter={})",
                     username, sourceType, additionalFilter);
-            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
-        } else {
-            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
         }
 
-        if (additionalFilter != null && !additionalFilter.isBlank()) {
-            conditions.add("(" + additionalFilter.trim() + ")");
-        }
-
-        hxql.append(" WHERE ").append(String.join(" AND ", conditions));
-        return hxql.toString();
+        return AclFilterBuilder.query(sourceClauses, additionalFilter);
     }
 
     Map<String, List<String>> resolveAuthoritiesBySource(String username, List<String> sourceIds) {
@@ -1081,7 +1058,8 @@ public class HybridSearchService {
 
     @SuppressWarnings("unchecked")
     List<String> getUserAuthorities(String username, String sourceId) {
-        LinkedHashSet<String> authorities = new LinkedHashSet<>(defaultAuthorities(username));
+        LinkedHashSet<String> authorities =
+                new LinkedHashSet<>(AclFilterBuilder.defaultAuthorities(username));
         try {
             if (isAlfrescoSource(sourceId)) {
                 authorities.addAll(fetchAlfrescoGroups(username));
@@ -1142,51 +1120,23 @@ public class HybridSearchService {
         return (docId != null ? docId : "?") + "::" + (embeddingId != null ? embeddingId : UUID.randomUUID().toString());
     }
 
-    private static String escapeHxqlLiteral(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("'", "\\'");
-    }
-
     private String buildSourceTypeFilter(String sourceType) {
         String normalized = normalizeSourceType(sourceType);
         if (normalized == null) {
             return null;
         }
         return "cin_ingestProperties." + ContentLakeIngestProperties.SOURCE_TYPE
-                + " = '" + escapeHxqlLiteral(normalized) + "'";
+                + " = '" + AclFilterBuilder.escapeLiteral(normalized) + "'";
     }
 
-    private String buildAuthorityClause(String authority, String sourceId) {
-        String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
-        String principal = authority.startsWith(GROUP_PREFIX)
-                ? GROUP_RACL_PREFIX + namespaced
-                : USER_RACL_PREFIX + namespaced;
-        return RACL_FIELD + " = '" + escapeHxqlLiteral(principal) + "'";
-    }
-
-    private String buildSourcePermissionClause(String sourceId, List<String> authorities) {
-        if (hasFullSourceAccess(sourceId, authorities)) {
-            return buildSourceIdClause(sourceId);
-        }
-
-        List<String> raclClauses = new ArrayList<>();
-        raclClauses.add(RACL_FIELD + " = '" + escapeHxqlLiteral(EVERYONE_PRINCIPAL) + "'");
-
-        for (String authority : authorities) {
-            if ("GROUP_EVERYONE".equals(authority)) {
-                continue;
-            }
-            raclClauses.add(buildAuthorityClause(authority, sourceId));
-        }
-
-        return "(" + String.join(" OR ", raclClauses) + ")";
-    }
-
-    private boolean hasFullSourceAccess(String sourceId, List<String> authorities) {
-        return isAlfrescoSource(sourceId) && authorities != null && authorities.contains(ALFRESCO_ADMINISTRATORS);
-    }
-
-    private String buildSourceIdClause(String sourceId) {
-        return "cin_sourceId = '" + escapeHxqlLiteral(formatSourceId(sourceId)) + "'";
+    /**
+     * The per-source ACL predicate. The bypass argument is the local policy decision, which today is
+     * that the administrator group only grants full access on an Alfresco source; the predicate
+     * itself belongs to {@link AclFilterBuilder}.
+     */
+    private String sourcePermissionClause(String sourceId, List<String> authorities) {
+        return AclFilterBuilder.sourcePermissionClause(
+                sourceId, formatSourceId(sourceId), authorities, isAlfrescoSource(sourceId));
     }
 
     private String formatSourceId(String sourceId) {
@@ -1299,7 +1249,7 @@ public class HybridSearchService {
         try {
             String hxql = "SELECT * FROM SysContent WHERE cin_ingestProperties."
                     + ContentLakeIngestProperties.SOURCE_TYPE
-                    + " = '" + escapeHxqlLiteral(sourceType) + "'";
+                    + " = '" + AclFilterBuilder.escapeLiteral(sourceType) + "'";
             HxprDocument.QueryResult result = hxprService.query(hxql, SOURCE_DISCOVERY_LIMIT, 0);
             if (result == null || result.getDocuments() == null) {
                 return List.of();
@@ -1419,10 +1369,6 @@ public class HybridSearchService {
         }
 
         return List.copyOf(groups);
-    }
-
-    private List<String> defaultAuthorities(String username) {
-        return List.of(username, "GROUP_EVERYONE");
     }
 
     private boolean isAlfrescoSource(String sourceId) {

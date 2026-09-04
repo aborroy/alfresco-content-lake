@@ -11,6 +11,7 @@ import org.hyland.contentlake.model.HxprNamedQueries;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprEmbedding;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -299,7 +300,7 @@ public class HxprService {
         // child is never deleted -- the root cause of duplicated embeddings on re-sync.
         String hxql = String.format(
                 "SELECT * FROM SysContent WHERE sys_parentId = '%s' AND sys_name LIKE '%s%%'",
-                escapeHxql(documentId), escapeHxql(childName)
+                AclFilterBuilder.escapeLiteral(documentId), AclFilterBuilder.escapeLiteral(childName)
         );
 
         HxprDocument.QueryResult queryResult = queryApi.query(newQuery(hxql, 100, 0));
@@ -431,7 +432,7 @@ public class HxprService {
             // single concatenated HXQL WHERE string.
             List<String> clauses = new ArrayList<>();
             clauses.add("sys_primaryType = '" + SYS_FILE + "'");
-            clauses.add("cin_id = '" + escapeHxql(nodeId) + "'");
+            clauses.add("cin_id = '" + AclFilterBuilder.escapeLiteral(nodeId) + "'");
             if (sourceId != null && !sourceId.isBlank()) {
                 clauses.add(buildSourceIdPredicate(sourceId));
             }
@@ -469,7 +470,7 @@ public class HxprService {
 
         try {
             String idPredicate = sanitizedIds.stream()
-                    .map(id -> "cin_id = '" + escapeHxql(id) + "'")
+                    .map(id -> "cin_id = '" + AclFilterBuilder.escapeLiteral(id) + "'")
                     .collect(Collectors.joining(" OR ", "(", ")"));
 
             // Independent quick-filter clauses (the id predicate is a single OR-clause).
@@ -732,11 +733,11 @@ public class HxprService {
     private static String buildSourceIdPredicate(String sourceId) {
         List<String> variants = sourceIdVariants(sourceId);
         if (variants.size() == 1) {
-            return "cin_sourceId = '" + escapeHxql(variants.get(0)) + "'";
+            return "cin_sourceId = '" + AclFilterBuilder.escapeLiteral(variants.get(0)) + "'";
         }
 
         return variants.stream()
-                .map(variant -> "cin_sourceId = '" + escapeHxql(variant) + "'")
+                .map(variant -> "cin_sourceId = '" + AclFilterBuilder.escapeLiteral(variant) + "'")
                 .collect(Collectors.joining(" OR ", "(", ")"));
     }
 
@@ -790,7 +791,4 @@ public class HxprService {
         return current;
     }
 
-    private static String escapeHxql(String value) {
-        return value == null ? "" : value.replace("'", "''");
-    }
 }

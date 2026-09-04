@@ -5,6 +5,7 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
@@ -77,7 +78,7 @@ public class ContentLakeMcpServer {
     @Tool(name = "getDocument", description = "Fetch the stored text and metadata for a single document "
             + "by its id. Returns the document only if the authenticated user is permitted to read it.")
     public String getDocument(@ToolParam(description = "The document id (cin_id) to fetch") String documentId) {
-        String escaped = documentId == null ? "" : documentId.replace("'", "''");
+        String escaped = AclFilterBuilder.escapeLiteral(documentId);
         // ACL-safe: AND the id predicate onto the current user's permission filter; never a raw query.
         String hxql = semanticSearchService.currentUserPermissionFilter(null, "cin_id = '" + escaped + "'");
         HxprDocument.QueryResult result = hxprService.query(hxql, 1, 0);

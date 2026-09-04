@@ -14,6 +14,7 @@ import org.hyland.contentlake.model.ContentLakeNodeStatus;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprEmbedding;
 import org.hyland.contentlake.model.SectionMap;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
 import org.hyland.contentlake.spi.ContentSourceClient;
 import org.hyland.contentlake.spi.SourceNode;
@@ -86,7 +87,6 @@ public class NodeSyncService {
     private static final int MAX_EXTRACTED_TEXT_CHARS = 64_000;
 
     /* ---- ACL constants ---- */
-    private static final String EVERYONE_PRINCIPAL = "__Everyone__";
     private static final String GROUP_PREFIX       = "GROUP_";
     private static final String PERMISSION_READ    = "Read";
 
@@ -418,17 +418,20 @@ public class NodeSyncService {
     // ACL mapping
     // ──────────────────────────────────────────────────────────────────────
 
+    /**
+     * The write side of the ACL. It takes its principal encoding from {@link AclFilterBuilder}, which
+     * owns the read side, so a change to the namespacing cannot land on one side only.
+     */
     private List<ACE> buildSysAcl(List<String> authorities, String sourceId) {
         List<ACE> acl = new ArrayList<>();
-        String suffix = "_#_" + sourceId;
 
         for (String authority : authorities) {
-            if ("GROUP_EVERYONE".equals(authority)) {
-                acl.add(buildUserAce(EVERYONE_PRINCIPAL));
+            if (AclFilterBuilder.EVERYONE_AUTHORITY.equals(authority)) {
+                acl.add(buildUserAce(AclFilterBuilder.EVERYONE_PRINCIPAL));
             } else if (authority.startsWith(GROUP_PREFIX)) {
-                acl.add(buildGroupAce(authority + suffix));
+                acl.add(buildGroupAce(AclFilterBuilder.namespace(authority, sourceId)));
             } else {
-                acl.add(buildUserAce(authority + suffix));
+                acl.add(buildUserAce(AclFilterBuilder.namespace(authority, sourceId)));
             }
         }
         return acl;

@@ -6,6 +6,7 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.HxprDocument;
 import org.hyland.contentlake.model.HxprTermsAggregationResult;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchRequest;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse;
@@ -90,7 +91,7 @@ public class RagToolset {
             ToolContext toolContext) {
 
         return withAuth(toolContext, () -> {
-            String escaped = documentId == null ? "" : documentId.replace("'", "''");
+            String escaped = AclFilterBuilder.escapeLiteral(documentId);
             // ACL-safe: reuse the current user's permission filter and AND the id predicate; never a
             // raw sys_id/cin_id query, which would bypass sys_racl.
             String hxql = semanticSearchService.currentUserPermissionFilter(null, "cin_id = '" + escaped + "'");

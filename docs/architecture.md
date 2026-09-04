@@ -225,6 +225,26 @@ Source adapters add extra properties via `SourceNode.sourceProperties()` using t
 `User` or a `Group`. User/group names are namespaced per source instance by appending
 `_#_<repositoryId>`. `GROUP_EVERYONE` maps to the special principal `__Everyone__`.
 
+Both sides of that encoding come from `AclFilterBuilder` in
+`common/content-lake-core/.../security/`: `NodeSyncService` writes the ACEs through it at ingest, and
+the read path builds its `sys_racl` predicate from it at query time. Read access to every document
+depends on those two agreeing, so they share one implementation rather than two matching ones.
+
+| Element | Value | Note |
+|---|---|---|
+| ACL field queried at read time | `sys_racl` | the engine's expansion of `sys_acl` |
+| User principal | `u:<username>_#_<sourceId>` | |
+| Group principal | `g:<groupName>_#_<sourceId>` | |
+| Everyone | `__Everyone__` | un-namespaced: readable from any source |
+| No resolvable source | `cin_sourceId = '__unresolved_permission_source__'` | matches nothing, so the absence of a decision is not the absence of a filter |
+
+The `_#_<sourceId>` suffix is what keeps `g:sales_#_alfresco` from matching `g:sales_#_nuxeo`. Two
+repositories can each have a `sales` group with different members, so stripping the suffix would merge
+two unrelated populations and hand each the other's documents.
+
+HXQL literals are escaped with a backslash (`\'`), and a backslash is doubled before quotes are
+escaped. SQL-style quote doubling (`''`) is rejected by the engine with HTTP 400.
+
 ### `Chunk` -- unit of embedding
 
 Text is split into `Chunk` records before embedding. Beyond the text and offsets, each chunk carries
@@ -259,6 +279,12 @@ prose noise.
   configuring it. `rag-service` additionally exempts `/api/rag/health`. Each chain carries a negative
   test asserting that an unmapped path and `/actuator/metrics` both return 401: the guarantee is that
   forgetting to secure a route is not a way to publish it
+- **`rag-service` is the policy enforcement point for read access, not the index** -- the engine
+  applies no ACL filter of its own for our connection, because the service account it authenticates is
+  an administrator, so the predicate `AclFilterBuilder` produces is the only thing standing between a
+  caller and another caller's documents. It therefore lives in exactly one class, which both search
+  services and the ingest write path call: one place to audit, one place to test. A per-request
+  identity on the engine side would need a delegation primitive the engine does not have
 - **`filesystem-batch-ingester` authenticates against one configured account** -- the other ingesters
   validate callers against their source repository, but a filesystem has no user directory. Both
   `filesystem.batch.security.username` and `.password` are required and startup fails when either is

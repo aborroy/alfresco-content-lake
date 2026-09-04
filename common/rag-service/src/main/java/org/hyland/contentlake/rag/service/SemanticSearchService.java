@@ -11,6 +11,7 @@ import org.hyland.contentlake.rag.security.DualSourceAuthentication;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.client.NamedQueryService;
@@ -52,15 +53,11 @@ import java.util.stream.Collectors;
 public class SemanticSearchService {
 
     private static final int MAX_TOP_K = 50;
-    private static final String BASE_QUERY = "SELECT * FROM SysContent";
 
-    private static final String RACL_FIELD = "sys_racl";
-    private static final String EVERYONE_PRINCIPAL = "__Everyone__";
+    // The sys_racl predicate itself lives in AclFilterBuilder, which owns every constant and every
+    // clause it is made of. GROUP_PREFIX stays here because it is also used to normalise Nuxeo group
+    // names, which is not an ACL concern.
     private static final String GROUP_PREFIX = "GROUP_";
-    private static final String ALFRESCO_ADMINISTRATORS = "GROUP_ALFRESCO_ADMINISTRATORS";
-    private static final String USER_RACL_PREFIX = "u:";
-    private static final String GROUP_RACL_PREFIX = "g:";
-    private static final String SOURCE_ID_SEPARATOR = "_#_";
     private static final Pattern SOURCE_ID_EQUALS_PATTERN = Pattern.compile("cin_sourceId\\s*=\\s*'([^']+)'");
 
     private static final double FALLBACK_MIN_SCORE = 0.5d;
@@ -78,7 +75,6 @@ public class SemanticSearchService {
     /** Optional (#73): null in unit tests that construct this service without the tracing collaborator. */
     private final RagObservations observations;
 
-    private static final String UNRESOLVED_SOURCE_ID = "__unresolved_permission_source__";
     private static final int SOURCE_DISCOVERY_LIMIT = 25;
 
     @Value("${alfresco.source-id:}")
@@ -382,9 +378,6 @@ public class SemanticSearchService {
      */
     String buildPermissionFilter(String alfrescoUser, String nuxeoUser,
                                  String sourceType, String additionalFilter) {
-        StringBuilder hxql = new StringBuilder(BASE_QUERY);
-        List<String> conditions = new ArrayList<>();
-
         List<String> sourceIds = resolvePermissionSourceIds(sourceType, additionalFilter);
         Map<String, List<String>> authoritiesBySource =
                 resolveAuthoritiesByDualSource(alfrescoUser, nuxeoUser, sourceIds);
@@ -393,11 +386,12 @@ public class SemanticSearchService {
         for (String sourceId : sourceIds) {
             String username = isNuxeoSource(sourceId) ? nuxeoUser : alfrescoUser;
             if (username == null) {
-                // Not authenticated against this source — exclude it from results
+                // Not authenticated against this source, so exclude it from results entirely.
                 continue;
             }
-            List<String> authorities = authoritiesBySource.getOrDefault(sourceId, defaultAuthorities(username));
-            sourceClauses.add(buildSourcePermissionClause(sourceId, authorities));
+            List<String> authorities = authoritiesBySource.getOrDefault(
+                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
         log.debug("Dual-auth permission filter: alfrescoUser={}, nuxeoUser={}, sourceIds={}",
@@ -406,17 +400,9 @@ public class SemanticSearchService {
         if (sourceClauses.isEmpty()) {
             log.warn("No permission clauses resolved (alfrescoUser={}, nuxeoUser={}, sourceType={}, filter={})",
                     alfrescoUser, nuxeoUser, sourceType, additionalFilter);
-            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
-        } else {
-            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
         }
 
-        if (additionalFilter != null && !additionalFilter.isBlank()) {
-            conditions.add("(" + additionalFilter.trim() + ")");
-        }
-
-        hxql.append(" WHERE ").append(String.join(" AND ", conditions));
-        return hxql.toString();
+        return AclFilterBuilder.query(sourceClauses, additionalFilter);
     }
 
     Map<String, List<String>> resolveAuthoritiesByDualSource(String alfrescoUser, String nuxeoUser,
@@ -432,16 +418,14 @@ public class SemanticSearchService {
     }
 
     String buildPermissionFilter(String username, String sourceType, String additionalFilter) {
-        StringBuilder hxql = new StringBuilder(BASE_QUERY);
-        List<String> conditions = new ArrayList<>();
-
         List<String> sourceIds = resolvePermissionSourceIds(sourceType, additionalFilter);
         Map<String, List<String>> authoritiesBySource = resolveAuthoritiesBySource(username, sourceIds);
 
         List<String> sourceClauses = new ArrayList<>();
         for (String sourceId : sourceIds) {
-            List<String> authorities = authoritiesBySource.getOrDefault(sourceId, defaultAuthorities(username));
-            sourceClauses.add(buildSourcePermissionClause(sourceId, authorities));
+            List<String> authorities = authoritiesBySource.getOrDefault(
+                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
         log.debug("Permission filter with source-scoped authorities for user {} (sourceIds={})", username, sourceIds);
@@ -449,18 +433,9 @@ public class SemanticSearchService {
         if (sourceClauses.isEmpty()) {
             log.warn("No permission source ids resolved for user {} (sourceType={}, additionalFilter={})",
                     username, sourceType, additionalFilter);
-            conditions.add("cin_sourceId = '" + UNRESOLVED_SOURCE_ID + "'");
-        } else {
-            conditions.add("(" + String.join(" OR ", sourceClauses) + ")");
         }
 
-        if (additionalFilter != null && !additionalFilter.isBlank()) {
-            conditions.add("(" + additionalFilter.trim() + ")");
-        }
-
-        hxql.append(" WHERE ").append(String.join(" AND ", conditions));
-
-        return hxql.toString();
+        return AclFilterBuilder.query(sourceClauses, additionalFilter);
     }
 
     Map<String, List<String>> resolveAuthoritiesBySource(String username, List<String> sourceIds) {
@@ -472,7 +447,8 @@ public class SemanticSearchService {
     }
 
     List<String> getUserAuthorities(String username, String sourceId) {
-        LinkedHashSet<String> authorities = new LinkedHashSet<>(defaultAuthorities(username));
+        LinkedHashSet<String> authorities =
+                new LinkedHashSet<>(AclFilterBuilder.defaultAuthorities(username));
         try {
             if (isAlfrescoSource(sourceId)) {
                 authorities.addAll(fetchAlfrescoGroups(username));
@@ -593,7 +569,8 @@ public class SemanticSearchService {
         for (String docId : docIds) {
             try {
                 HxprDocument.QueryResult result = hxprService.query(
-                        "SELECT * FROM SysContent WHERE sys_id = '" + escapeHxql(docId) + "'",
+                        "SELECT * FROM SysContent WHERE sys_id = '"
+                                + AclFilterBuilder.escapeLiteral(docId) + "'",
                         1, 0);
 
                 if (result != null && result.getDocuments() != null) {
@@ -715,51 +692,23 @@ public class SemanticSearchService {
         return null;
     }
 
-    private static String escapeHxql(String value) {
-        return value == null ? "" : value.replace("'", "''");
-    }
-
     private String buildSourceTypeFilter(String sourceType) {
         String normalized = normalizeSourceType(sourceType);
         if (normalized == null) {
             return null;
         }
         return "cin_ingestProperties." + ContentLakeIngestProperties.SOURCE_TYPE
-                + " = '" + escapeHxql(normalized) + "'";
+                + " = '" + AclFilterBuilder.escapeLiteral(normalized) + "'";
     }
 
-    private String buildAuthorityClause(String authority, String sourceId) {
-        String namespaced = authority + SOURCE_ID_SEPARATOR + sourceId;
-        String principal = authority.startsWith(GROUP_PREFIX)
-                ? GROUP_RACL_PREFIX + namespaced
-                : USER_RACL_PREFIX + namespaced;
-        return RACL_FIELD + " = '" + escapeHxql(principal) + "'";
-    }
-
-    private String buildSourcePermissionClause(String sourceId, List<String> authorities) {
-        if (hasFullSourceAccess(sourceId, authorities)) {
-            return buildSourceIdClause(sourceId);
-        }
-
-        List<String> raclClauses = new ArrayList<>();
-        raclClauses.add(RACL_FIELD + " = '" + escapeHxql(EVERYONE_PRINCIPAL) + "'");
-
-        for (String authority : authorities) {
-            if ("GROUP_EVERYONE".equals(authority)) {
-                continue;
-            }
-            raclClauses.add(buildAuthorityClause(authority, sourceId));
-        }
-
-        return "(" + String.join(" OR ", raclClauses) + ")";
-    }
-
-    private boolean hasFullSourceAccess(String sourceId, List<String> authorities) {
-        return isAlfrescoSource(sourceId) && authorities != null && authorities.contains(ALFRESCO_ADMINISTRATORS);
-    }
-
-    private String buildSourceIdClause(String sourceId) {
-        return "cin_sourceId = '" + escapeHxql(formatSourceId(sourceId)) + "'";
+    /**
+     * The per-source ACL predicate. The bypass argument is the local policy decision, which today is
+     * that the administrator group only grants full access on an Alfresco source; the predicate
+     * itself belongs to {@link AclFilterBuilder}.
+     */
+    private String sourcePermissionClause(String sourceId, List<String> authorities) {
+        return AclFilterBuilder.sourcePermissionClause(
+                sourceId, formatSourceId(sourceId), authorities, isAlfrescoSource(sourceId));
     }
 
     private String formatSourceId(String sourceId) {
@@ -872,7 +821,7 @@ public class SemanticSearchService {
         try {
             String hxql = "SELECT * FROM SysContent WHERE cin_ingestProperties."
                     + ContentLakeIngestProperties.SOURCE_TYPE
-                    + " = '" + escapeHxql(sourceType) + "'";
+                    + " = '" + AclFilterBuilder.escapeLiteral(sourceType) + "'";
             HxprDocument.QueryResult result = hxprService.query(hxql, SOURCE_DISCOVERY_LIMIT, 0);
             if (result == null || result.getDocuments() == null) {
                 return List.of();
@@ -913,10 +862,6 @@ public class SemanticSearchService {
         sourceIds.add(separator >= 0 && separator < trimmed.length() - 1
                 ? trimmed.substring(separator + 1)
                 : trimmed);
-    }
-
-    private List<String> defaultAuthorities(String username) {
-        return List.of(username, "GROUP_EVERYONE");
     }
 
     private boolean isAlfrescoSource(String sourceId) {
