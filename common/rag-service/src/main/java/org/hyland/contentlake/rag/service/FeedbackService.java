@@ -8,7 +8,9 @@ import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.FeedbackRating;
 import org.hyland.contentlake.rag.model.FeedbackRecord;
 import org.hyland.contentlake.rag.model.FeedbackRequest;
+import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.security.SecurityContextService;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -27,14 +29,20 @@ import java.util.UUID;
  * a {@code SysFile} carrying the {@code CinRemote} mixin, with
  * the feedback fields stored in {@code cin_ingestProperties} (and {@code cin_ingestPropertyNames}
  * kept mirrored). Each feedback entry is a new document keyed by a generated id, so there is no
- * update path. The document's read ACL is scoped to the submitting principal rather than left
- * world-readable.</p>
+ * update path.</p>
+ *
+ * <p>A feedback entry records a user's question and the answer they were given, so it is readable by
+ * its submitter and by nobody else. That is enforced here rather than by the ACL: the listing runs
+ * through the raw hxpr query API, and every query carries a predicate on the stored submitter. The
+ * aggregate view the evaluation harness needs is a separate method, restricted to the accounts in
+ * {@code rag.feedback.operator-users}.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FeedbackService {
 
+    static final String PROP_SUBMITTER = "feedback_submitter";
     static final String PROP_SESSION_ID = "feedback_sessionId";
     static final String PROP_REQUEST_ID = "feedback_requestId";
     static final String PROP_RATING = "feedback_rating";
@@ -72,6 +80,9 @@ public class FeedbackService {
         String submitter = securityContextService.getCurrentUsername();
 
         Map<String, Object> props = new LinkedHashMap<>();
+        // The submitter is a stored property, not only an ACL field, because it is what the listing
+        // endpoint filters on: a feedback document is readable through it by its submitter alone.
+        put(props, PROP_SUBMITTER, submitter);
         put(props, PROP_SESSION_ID, request.getSessionId());
         put(props, PROP_REQUEST_ID, request.getRequestId());
         put(props, PROP_RATING, request.getRating().name());
@@ -94,10 +105,12 @@ public class FeedbackService {
             doc.setCinIngestProperties(props);
             // cin_ingestPropertyNames must always mirror cin_ingestProperties.keySet().
             doc.setCinIngestPropertyNames(new ArrayList<>(props.keySet()));
-            // Scope reads to the submitter rather than leaving feedback world-readable.
-            if (submitter != null && !submitter.isBlank()) {
-                doc.setCinRead(new ArrayList<>(List.of(submitter)));
-            }
+            // Records the owner, following the ingest convention where cin_read holds raw source
+            // authorities and sys_acl holds the namespaced ones. No sys_acl is written: a feedback
+            // document belongs to no content source, so there is no `_#_<sourceId>` suffix that could
+            // be correct for it, and a document with no read ACE is invisible to the ACL-filtered
+            // search path. Reaching it goes through this service's submitter predicate instead.
+            doc.setCinRead(new ArrayList<>(List.of(submitter)));
 
             hxprService.createDocument(basePath, doc);
             log.info("Stored {} feedback {} (requestId={}, session={})",
@@ -110,14 +123,51 @@ public class FeedbackService {
     }
 
     /**
-     * Lists persisted feedback, optionally filtered by rating, most useful to the evaluation harness
-     * when filtered to {@link FeedbackRating#DOWN}. Uses the raw hxpr query API (not the ACL-filtered
-     * search path), so callers must be trusted operators; the endpoint sits behind the auth chain.
+     * Lists the calling user's own feedback, optionally filtered by rating.
+     *
+     * <p>The listing runs through the raw hxpr query API rather than the ACL-filtered search path, so
+     * the ownership predicate below is the whole of the authorization: it is added to every query and
+     * there is no argument a caller can pass to remove it. Authentication alone does not grant a view
+     * of anyone else's questions and answers; see {@link #listAll} for the aggregate view.</p>
      */
     public List<FeedbackRecord> list(FeedbackRating rating, int limit) {
         if (!isEnabled()) {
             return List.of();
         }
+        return query(rating, limit, securityContextService.getCurrentUsername());
+    }
+
+    /**
+     * Lists every submitter's feedback, for the offline evaluation harness
+     * ({@code cleval feedback import}), which needs the whole corpus rather than one operator's own
+     * entries.
+     *
+     * <p>Restricted to the accounts named in {@code rag.feedback.operator-users}, which is empty by
+     * default: a deployment that does not configure an operator has no aggregate view at all. Every
+     * authenticated caller carries exactly {@code ROLE_USER}, since roles come from the source
+     * repositories and neither exposes one, so the allow-list is the available way to say "operator"
+     * rather than merely "authenticated".</p>
+     *
+     * @throws AccessDeniedException when the caller is not a configured operator
+     */
+    public List<FeedbackRecord> listAll(FeedbackRating rating, int limit) {
+        if (!isEnabled()) {
+            return List.of();
+        }
+        String username = securityContextService.getCurrentUsername();
+        if (!isOperator(username)) {
+            log.warn("Refusing the unscoped feedback listing to {}: not a configured operator", username);
+            throw new AccessDeniedException("Listing all submitters' feedback requires an operator account");
+        }
+        log.info("Operator {} listed all submitters' feedback (rating={})", username, rating);
+        return query(rating, limit, null);
+    }
+
+    /**
+     * @param submitter the only submitter whose feedback may be returned, or {@code null} for the
+     *                  operator-only aggregate view
+     */
+    private List<FeedbackRecord> query(FeedbackRating rating, int limit, String submitter) {
         int cappedLimit = Math.min(Math.max(limit, 1), 1000);
         // Select feedback docs by their rating property (equality predicates, as elsewhere in the
         // codebase). When no rating is requested, match either value rather than relying on an
@@ -127,6 +177,12 @@ public class FeedbackService {
                 : "(cin_ingestProperties." + PROP_RATING + " = '" + FeedbackRating.UP.name() + "'"
                         + " OR cin_ingestProperties." + PROP_RATING + " = '" + FeedbackRating.DOWN.name() + "')";
         String hxql = "SELECT * FROM SysContent WHERE " + ratingClause;
+        if (submitter != null) {
+            // Escaped through AclFilterBuilder: a username is caller-controlled input reaching an HXQL
+            // literal, and an unescaped apostrophe in one would end the literal.
+            hxql += " AND cin_ingestProperties." + PROP_SUBMITTER
+                    + " = '" + AclFilterBuilder.escapeLiteral(submitter) + "'";
+        }
 
         try {
             HxprDocument.QueryResult result = hxprService.query(hxql, cappedLimit, 0);
@@ -166,6 +222,7 @@ public class FeedbackService {
 
         return FeedbackRecord.builder()
                 .feedbackId(doc.getSysName())
+                .submitter(str(props.get(PROP_SUBMITTER)))
                 .sessionId(str(props.get(PROP_SESSION_ID)))
                 .requestId(str(props.get(PROP_REQUEST_ID)))
                 .rating(rating)
@@ -175,6 +232,18 @@ public class FeedbackService {
                 .sourceNodeIds(sourceNodeIds)
                 .createdAt(str(props.get(PROP_CREATED_AT)))
                 .build();
+    }
+
+    private boolean isOperator(String username) {
+        List<String> operators = ragProperties.getFeedback().getOperatorUsers();
+        if (operators == null || operators.isEmpty()) {
+            return false;
+        }
+        // Case-insensitive because Alfresco authenticates usernames case-insensitively, so "Admin" and
+        // "admin" are the same account and an operator list that distinguished them would surprise.
+        return operators.stream()
+                .filter(o -> o != null && !o.isBlank())
+                .anyMatch(o -> o.trim().equalsIgnoreCase(username));
     }
 
     private static void put(Map<String, Object> props, String key, String value) {

@@ -13,11 +13,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -89,8 +91,12 @@ class FeedbackServiceTest {
         assertThat(props.get(FeedbackService.PROP_SOURCES)).isEqualTo("node-a,node-b");
         assertThat(props.get(FeedbackService.PROP_CREATED_AT)).isNotNull();
 
-        // Feedback is scoped to the submitter, not world-readable.
+        // The submitter is stored as a property, because that is what the listing filters on.
+        assertThat(props.get(FeedbackService.PROP_SUBMITTER)).isEqualTo("alice");
         assertThat(doc.getCinRead()).containsExactly("alice");
+        // No read ACE: a feedback document belongs to no source, so it is invisible to the
+        // ACL-filtered search path rather than carrying a principal that cannot be namespaced.
+        assertThat(doc.getSysAcl()).isNull();
     }
 
     @Test
@@ -105,10 +111,12 @@ class FeedbackServiceTest {
 
     @Test
     void list_parsesDownRatedRecords() {
+        when(securityContextService.getCurrentUsername()).thenReturn("alice");
         HxprDocument doc = new HxprDocument();
         doc.setSysName("fb-1");
         doc.setCinIngestProperties(Map.of(
                 FeedbackService.PROP_RATING, "DOWN",
+                FeedbackService.PROP_SUBMITTER, "alice",
                 FeedbackService.PROP_REQUEST_ID, "req-9",
                 FeedbackService.PROP_QUESTION, "Q?",
                 FeedbackService.PROP_SOURCES, "n1,n2",
@@ -126,6 +134,7 @@ class FeedbackServiceTest {
         assertThat(record.getRating()).isEqualTo(FeedbackRating.DOWN);
         assertThat(record.getRequestId()).isEqualTo("req-9");
         assertThat(record.getSourceNodeIds()).containsExactly("n1", "n2");
+        assertThat(record.getSubmitter()).isEqualTo("alice");
     }
 
     @Test
@@ -133,5 +142,110 @@ class FeedbackServiceTest {
         ragProperties.getFeedback().setEnabled(false);
         assertThat(service.list(FeedbackRating.DOWN, 50)).isEmpty();
         verify(hxprService, never()).query(anyString(), anyInt(), anyInt());
+    }
+
+    // -----------------------------------------------------------------------
+    // Authorization: one user's feedback is not another user's to read
+    // -----------------------------------------------------------------------
+
+    @Test
+    void list_scopesEveryQueryToTheCallersOwnSubmitter() {
+        when(securityContextService.getCurrentUsername()).thenReturn("bob");
+        when(hxprService.query(anyString(), anyInt(), anyInt())).thenReturn(emptyResult());
+
+        service.list(FeedbackRating.DOWN, 50);
+
+        assertThat(capturedHxql()).isEqualTo("SELECT * FROM SysContent WHERE"
+                + " cin_ingestProperties.feedback_rating = 'DOWN'"
+                + " AND cin_ingestProperties.feedback_submitter = 'bob'");
+    }
+
+    @Test
+    void list_withNoRatingStillScopesToTheCaller() {
+        // The rating disjunction must not swallow the ownership predicate: it is parenthesised and the
+        // submitter clause is ANDed outside it.
+        when(securityContextService.getCurrentUsername()).thenReturn("bob");
+        when(hxprService.query(anyString(), anyInt(), anyInt())).thenReturn(emptyResult());
+
+        service.list(null, 50);
+
+        assertThat(capturedHxql()).isEqualTo("SELECT * FROM SysContent WHERE"
+                + " (cin_ingestProperties.feedback_rating = 'UP'"
+                + " OR cin_ingestProperties.feedback_rating = 'DOWN')"
+                + " AND cin_ingestProperties.feedback_submitter = 'bob'");
+    }
+
+    @Test
+    void list_escapesAnApostropheInTheCallersName() {
+        // An unescaped quote here would end the literal and change the predicate.
+        when(securityContextService.getCurrentUsername()).thenReturn("o'brien");
+        when(hxprService.query(anyString(), anyInt(), anyInt())).thenReturn(emptyResult());
+
+        service.list(FeedbackRating.UP, 50);
+
+        assertThat(capturedHxql()).endsWith("cin_ingestProperties.feedback_submitter = 'o\\'brien'");
+    }
+
+    @Test
+    void listAll_isRefusedToACallerWhoIsMerelyAuthenticated() {
+        when(securityContextService.getCurrentUsername()).thenReturn("alice");
+
+        assertThatThrownBy(() -> service.listAll(FeedbackRating.DOWN, 50))
+                .isInstanceOf(AccessDeniedException.class);
+        verify(hxprService, never()).query(anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listAll_isRefusedWhenNoOperatorIsConfigured() {
+        // The default is an empty operator list, so the aggregate view does not exist until a
+        // deployment names someone. Not even the account the service authenticates to hxpr with.
+        when(securityContextService.getCurrentUsername()).thenReturn("admin");
+
+        assertThatThrownBy(() -> service.listAll(FeedbackRating.DOWN, 50))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void listAll_returnsEverySubmitterForAConfiguredOperator() {
+        ragProperties.getFeedback().setOperatorUsers(List.of("admin"));
+        when(securityContextService.getCurrentUsername()).thenReturn("admin");
+        when(hxprService.query(anyString(), anyInt(), anyInt())).thenReturn(emptyResult());
+
+        service.listAll(FeedbackRating.DOWN, 50);
+
+        assertThat(capturedHxql()).isEqualTo(
+                "SELECT * FROM SysContent WHERE cin_ingestProperties.feedback_rating = 'DOWN'");
+        assertThat(capturedHxql()).doesNotContain(FeedbackService.PROP_SUBMITTER);
+    }
+
+    @Test
+    void listAll_matchesTheOperatorListCaseInsensitively() {
+        // Alfresco authenticates usernames case-insensitively, so "Admin" is the configured "admin".
+        ragProperties.getFeedback().setOperatorUsers(List.of(" admin "));
+        when(securityContextService.getCurrentUsername()).thenReturn("Admin");
+        when(hxprService.query(anyString(), anyInt(), anyInt())).thenReturn(emptyResult());
+
+        assertThat(service.listAll(FeedbackRating.DOWN, 50)).isEmpty();
+        verify(hxprService).query(anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listAll_disabled_returnsEmptyWithoutCheckingTheCaller() {
+        ragProperties.getFeedback().setEnabled(false);
+
+        assertThat(service.listAll(FeedbackRating.DOWN, 50)).isEmpty();
+        verifyNoInteractions(hxprService, securityContextService);
+    }
+
+    private HxprDocument.QueryResult emptyResult() {
+        HxprDocument.QueryResult result = new HxprDocument.QueryResult();
+        result.setDocuments(List.of());
+        return result;
+    }
+
+    private String capturedHxql() {
+        ArgumentCaptor<String> hxql = ArgumentCaptor.forClass(String.class);
+        verify(hxprService).query(hxql.capture(), anyInt(), anyInt());
+        return hxql.getValue();
     }
 }

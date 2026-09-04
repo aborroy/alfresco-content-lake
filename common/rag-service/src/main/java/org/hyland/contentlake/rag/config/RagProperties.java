@@ -4,6 +4,9 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Configuration properties for RAG behaviour.
  *
@@ -453,5 +456,11 @@ public class RagProperties {
 
         /** hxpr folder under which feedback documents are stored. */
         private String basePath = "/_feedback";
+
+        /**
+         * Accounts allowed to list every submitter's feedback rather than only their own. Empty by
+         * default, so the aggregate view is closed until a deployment names an operator.
+         */
+        private List<String> operatorUsers = new ArrayList<>();
     }
 }

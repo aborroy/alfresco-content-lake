@@ -24,12 +24,14 @@ import java.util.List;
  * <ul>
  *   <li>{@code POST /api/rag/feedback} - submit a rating (and optional comment) for an answer,
  *       correlated by {@code requestId} from the prompt response.</li>
- *   <li>{@code GET /api/rag/feedback?rating=down} - list stored feedback for the offline evaluation
- *       harness ({@code cleval feedback import}).</li>
+ *   <li>{@code GET /api/rag/feedback?rating=down} - list the calling user's own feedback.</li>
+ *   <li>{@code GET /api/rag/feedback?scope=all} - list every submitter's feedback, for the offline
+ *       evaluation harness ({@code cleval feedback import}). Operators only, so a caller who is merely
+ *       authenticated gets 403 rather than other users' questions and answers.</li>
  * </ul>
  *
- * <p>Both sit behind the existing authentication chain (HTTP Basic / Alfresco ticket / Nuxeo token),
- * so feedback is never submitted or read anonymously.</p>
+ * <p>All three sit behind the existing authentication chain (HTTP Basic / Alfresco ticket / Nuxeo
+ * token), so feedback is never submitted or read anonymously.</p>
  */
 @Slf4j
 @RestController
@@ -55,9 +57,14 @@ public class FeedbackController {
     @GetMapping("/feedback")
     public ResponseEntity<List<FeedbackRecord>> list(
             @RequestParam(value = "rating", required = false) String rating,
-            @RequestParam(value = "limit", defaultValue = "200") int limit) {
+            @RequestParam(value = "limit", defaultValue = "200") int limit,
+            @RequestParam(value = "scope", defaultValue = "own") String scope) {
         // Parse the rating param case-insensitively (Spring's default enum binding is case-sensitive).
         FeedbackRating parsed = (rating == null || rating.isBlank()) ? null : FeedbackRating.fromValue(rating);
-        return ResponseEntity.ok(feedbackService.list(parsed, limit));
+        // Anything other than an explicit scope=all is the caller's own feedback, so a mistyped scope
+        // narrows the result rather than widening it.
+        return ResponseEntity.ok("all".equalsIgnoreCase(scope)
+                ? feedbackService.listAll(parsed, limit)
+                : feedbackService.list(parsed, limit));
     }
 }

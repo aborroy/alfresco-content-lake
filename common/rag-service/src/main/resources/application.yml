@@ -194,6 +194,11 @@ rag:
   feedback:
     enabled: ${RAG_FEEDBACK_ENABLED:true}
     base-path: ${RAG_FEEDBACK_BASE_PATH:/_feedback}
+    # Accounts that may list every submitter's feedback (GET /api/rag/feedback?scope=all), which the
+    # evaluation harness needs. Empty by default: a caller who is merely authenticated reads their own
+    # entries and gets 403 on the aggregate view, because a feedback entry holds a user's question and
+    # the answer they were given.
+    operator-users: ${RAG_FEEDBACK_OPERATOR_USERS:}
 
 # Semantic Search configuration
 semantic-search:

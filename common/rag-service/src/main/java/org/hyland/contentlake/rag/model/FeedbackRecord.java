@@ -22,6 +22,9 @@ public class FeedbackRecord {
     /** Stable id of this feedback document. */
     private String feedbackId;
 
+    /** The account that submitted the rating. The only account the entry is listed to, operators aside. */
+    private String submitter;
+
     private String sessionId;
     private String requestId;
     private FeedbackRating rating;

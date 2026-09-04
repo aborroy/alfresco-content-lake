@@ -315,6 +315,13 @@ prose noise.
   predicate builder: `AclFilterBuilder` grants it only when the caller passes both the opt-in and the
   fact that the source is an Alfresco source, so it cannot reach a source that does not recognise the
   group
+- **Feedback documents are authorized by the endpoint, not by an ACL** -- a feedback entry records a
+  user's question and the answer they were given, and it belongs to no content source, so there is no
+  `_#_<sourceId>` suffix that could namespace its principal. It is written with no read ACE, which
+  keeps it out of the ACL-filtered search path entirely, and `FeedbackService` puts a predicate on the
+  stored submitter into every listing query. The aggregate view the evaluation harness needs is a
+  separate method restricted to `rag.feedback.operator-users`, empty by default, because "authenticated"
+  and "may read everyone's questions" are different things
 - **`filesystem-batch-ingester` authenticates against one configured account** -- the other ingesters
   validate callers against their source repository, but a filesystem has no user directory. Both
   `filesystem.batch.security.username` and `.password` are required and startup fails when either is
