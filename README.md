@@ -372,7 +372,11 @@ Current mixed-source filtering keeps Alfresco and Nuxeo principals source-native
   audit and it is covered by its own specification tests.
 - Alfresco and Nuxeo principals are not normalized to a shared identity yet.
 - `rag-service` expands Alfresco groups from Alfresco and Nuxeo groups from Nuxeo, then applies them only to matching source IDs.
-- Alfresco repository admins keep repository-admin discoverability for Alfresco sources without storing synthetic `admin` ACEs in `sys_acl`.
+- Alfresco repository admins can read an Alfresco source without a `sys_racl` condition, which gives
+  repository-admin discoverability without storing synthetic `admin` ACEs in `sys_acl`. It is off
+  unless `rag.security.admin-bypass.enabled` (`RAG_SECURITY_ADMIN_BYPASS_ENABLED`) is set: by default
+  an administrator is ACL-filtered like every other caller. Even when enabled it applies only to
+  `GROUP_ALFRESCO_ADMINISTRATORS` on an Alfresco source, never to a Nuxeo one.
 - This mode assumes the authenticated username is the same login string in each source you want to query.
 - Nuxeo group expansion in `rag-service` uses the configured `NUXEO_USERNAME` and `NUXEO_PASSWORD` service credentials to read `/api/v1/user/{username}`.
 - A request with no authenticated caller is rejected with 401; there is no anonymous or placeholder

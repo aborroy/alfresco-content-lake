@@ -237,6 +237,7 @@ depends on those two agreeing, so they share one implementation rather than two 
 | Group principal | `g:<groupName>_#_<sourceId>` | |
 | Everyone | `__Everyone__` | un-namespaced: readable from any source |
 | No resolvable source | `cin_sourceId = '__unresolved_permission_source__'` | matches nothing, so the absence of a decision is not the absence of a filter |
+| Whole-source read | `cin_sourceId = '<sourceType>:<sourceId>'` | no `sys_racl` condition at all; only for `GROUP_ALFRESCO_ADMINISTRATORS`, only on an Alfresco source, and only when `rag.security.admin-bypass.enabled` is set |
 
 The `_#_<sourceId>` suffix is what keeps `g:sales_#_alfresco` from matching `g:sales_#_nuxeo`. Two
 repositories can each have a `sales` group with different members, so stripping the suffix would merge
@@ -306,6 +307,14 @@ prose noise.
   few documents and a WARN in the log, never too many. `rag.security.group-resolution-failure=degrade`
   exists for deployments that would rather lose group-granted results than lose a whole source, and it
   is opt-in for that reason
+- **A group membership that reads a whole source is opt-in** -- `GROUP_ALFRESCO_ADMINISTRATORS`
+  replaces the `sys_racl` predicate with a bare `cin_sourceId` match, which is the widest grant the
+  filter can express, so `rag.security.admin-bypass.enabled` defaults to `false` and an Alfresco
+  administrator reads through document ACLs like anyone else. Deployments that want repository-admin
+  discoverability turn it on. The bypass is also scoped at the call site rather than inside the
+  predicate builder: `AclFilterBuilder` grants it only when the caller passes both the opt-in and the
+  fact that the source is an Alfresco source, so it cannot reach a source that does not recognise the
+  group
 - **`filesystem-batch-ingester` authenticates against one configured account** -- the other ingesters
   validate callers against their source repository, but a filesystem has no user directory. Both
   `filesystem.batch.security.username` and `.password` are required and startup fails when either is

@@ -111,9 +111,10 @@ public final class AclFilterBuilder {
     /**
      * True when the caller may read a whole source without ACL filtering.
      *
-     * <p>{@code bypassAllowed} is the caller's decision about whether the bypass applies at all, which
-     * today means the source is an Alfresco source. Both conditions must hold, so the group name alone
-     * grants nothing on a source that does not recognise it.</p>
+     * <p>{@code bypassAllowed} is the caller's decision about whether the bypass applies at all: in
+     * rag-service, that the bypass is configured on and the source is an Alfresco source. Both
+     * conditions must hold, so the group name alone grants nothing, neither on a source that does not
+     * recognise it nor in a deployment that has not opted in.</p>
      */
     public static boolean hasFullSourceAccess(Collection<String> authorities, boolean bypassAllowed) {
         return bypassAllowed && authorities != null && authorities.contains(ALFRESCO_ADMINISTRATORS);

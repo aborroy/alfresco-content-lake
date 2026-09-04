@@ -635,6 +635,7 @@ class HybridSearchServiceTest {
         @Test
         void buildPermissionFilter_alfrescoAdminDoesNotRestrictToAdminAuthorities() {
             HybridSearchService svc = spy(service);
+            ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
             doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
                     .when(svc).getUserAuthorities("admin", "test-repo");
 
@@ -646,9 +647,39 @@ class HybridSearchServiceTest {
         }
 
         @Test
+        void buildPermissionFilter_adminBypassOffByDefault_alfrescoAdminIsAclFilteredLikeAnyoneElse() {
+            HybridSearchService svc = spy(service);
+            doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                    .when(svc).getUserAuthorities("admin", "test-repo");
+
+            String filter = svc.buildPermissionFilter("admin", "alfresco", null);
+
+            assertThat(filter).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
+            assertThat(filter).contains("sys_racl = 'u:admin_#_test-repo'");
+            assertThat(filter).contains("sys_racl = '__Everyone__'");
+            assertThat(filter).contains("sys_racl = 'g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo'");
+        }
+
+        @Test
+        void buildPermissionFilter_adminBypassOn_doesNotLeakIntoANuxeoSource() {
+            HybridSearchService svc = spy(service);
+            ReflectionTestUtils.setField(svc, "permissionSourceIds", "nuxeo-demo");
+            ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+            ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
+            doReturn(List.of("admin", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                    .when(svc).getUserAuthorities("admin", "nuxeo-demo");
+
+            String filter = svc.buildPermissionFilter("admin", null);
+
+            assertThat(filter).doesNotContain("cin_sourceId = 'nuxeo:nuxeo-demo'");
+            assertThat(filter).contains("sys_racl = 'u:admin_#_nuxeo-demo'");
+        }
+
+        @Test
         void buildPermissionFilter_discoversAlfrescoSourceIdFromHxprDocuments() {
             HybridSearchService svc = spy(service);
             ReflectionTestUtils.setField(svc, "alfrescoSourceId", "");
+            ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
 
             HxprDocument doc = new HxprDocument();
             doc.setCinSourceId("alfresco:discovered-repo");
@@ -710,6 +741,7 @@ class HybridSearchServiceTest {
             HybridSearchService svc = spy(service);
             ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
             ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+            ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
             doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
                     .when(svc).getUserAuthorities("admin", "test-repo");
             doReturn(List.of("admin", "GROUP_MEMBERS"))

@@ -183,6 +183,12 @@ rag:
   # read as fail-closed.
   security:
     group-resolution-failure: ${RAG_SECURITY_GROUP_RESOLUTION_FAILURE:fail-closed}
+    # Whether GROUP_ALFRESCO_ADMINISTRATORS reads an Alfresco source without any sys_racl condition.
+    # Off by default: an Alfresco administrator sees what their own ACLs allow, like everyone else.
+    # Turn it on where repository-admin discoverability is wanted (the demo stack does), knowing it
+    # means one group membership grants read access to every document of that source.
+    admin-bypass:
+      enabled: ${RAG_SECURITY_ADMIN_BYPASS_ENABLED:false}
   # User feedback capture (#74). Enabled by default; POST /api/rag/feedback persists a rating for an
   # answer as an hxpr document under base-path, feeding the offline evaluation corpus.
   feedback:

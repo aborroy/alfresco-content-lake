@@ -112,6 +112,9 @@ public class HybridSearchService {
     @Value("${rag.security.group-resolution-failure:fail-closed}")
     private String groupResolutionFailureMode;
 
+    @Value("${rag.security.admin-bypass.enabled:false}")
+    private boolean adminBypassEnabled;
+
     @Value("${nuxeo.source-id:}")
     private String nuxeoSourceId;
 
@@ -1167,13 +1170,14 @@ public class HybridSearchService {
     }
 
     /**
-     * The per-source ACL predicate. The bypass argument is the local policy decision, which today is
-     * that the administrator group only grants full access on an Alfresco source; the predicate
-     * itself belongs to {@link AclFilterBuilder}.
+     * The per-source ACL predicate. The bypass argument is the local policy decision: the
+     * administrator group grants full access only when {@code rag.security.admin-bypass.enabled} is
+     * set and only on an Alfresco source. The predicate itself belongs to {@link AclFilterBuilder}.
      */
     private String sourcePermissionClause(String sourceId, List<String> authorities) {
         return AclFilterBuilder.sourcePermissionClause(
-                sourceId, formatSourceId(sourceId), authorities, isAlfrescoSource(sourceId));
+                sourceId, formatSourceId(sourceId), authorities,
+                adminBypassEnabled && isAlfrescoSource(sourceId));
     }
 
     private String formatSourceId(String sourceId) {

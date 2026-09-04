@@ -135,6 +135,21 @@ class AclFilterBuilderTest {
         }
 
         @Test
+        void withTheBypassDisabledTheAdministratorReadsThroughTheAclLikeAnyoneElse() {
+            // What a deployment that has not opted into the bypass gets, on an Alfresco source: the
+            // administrator group is namespaced like any other group and grants only what documents name.
+            List<String> admin = List.of("admin", AclFilterBuilder.ALFRESCO_ADMINISTRATORS);
+
+            String clause = AclFilterBuilder.sourcePermissionClause(
+                    ALFRESCO, "alfresco:" + ALFRESCO, admin, false);
+
+            assertThat(clause).doesNotContain("cin_sourceId");
+            assertThat(clause).isEqualTo("(sys_racl = '__Everyone__'"
+                    + " OR sys_racl = 'u:admin_#_alfresco-source'"
+                    + " OR sys_racl = 'g:GROUP_ALFRESCO_ADMINISTRATORS_#_alfresco-source')");
+        }
+
+        @Test
         void theAdministratorGroupNameAloneGrantsNothing() {
             assertThat(AclFilterBuilder.hasFullSourceAccess(
                     List.of(AclFilterBuilder.ALFRESCO_ADMINISTRATORS), false)).isFalse();

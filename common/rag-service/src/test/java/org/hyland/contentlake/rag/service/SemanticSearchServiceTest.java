@@ -139,6 +139,7 @@ class SemanticSearchServiceTest {
     @Test
     void buildPermissionFilter_alfrescoAdminDoesNotRestrictToAdminAuthorities() {
         SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
         doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
                 .when(svc).getUserAuthorities("admin", "test-repo");
 
@@ -150,9 +151,26 @@ class SemanticSearchServiceTest {
     }
 
     @Test
+    void buildPermissionFilter_adminBypassOffByDefault_alfrescoAdminIsAclFilteredLikeAnyoneElse() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                .when(svc).getUserAuthorities("admin", "test-repo");
+
+        String filter = svc.buildPermissionFilter("admin", "alfresco", null);
+
+        // No unconditional source clause: the administrator reads through sys_racl like everyone else.
+        assertThat(filter).doesNotContain("cin_sourceId = 'alfresco:test-repo'");
+        assertThat(filter).contains("sys_racl = 'u:admin_#_test-repo'");
+        assertThat(filter).contains("sys_racl = '__Everyone__'");
+        // The group is namespaced like any other, so it grants only what documents actually name.
+        assertThat(filter).contains("sys_racl = 'g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo'");
+    }
+
+    @Test
     void buildPermissionFilter_discoversAlfrescoSourceIdFromHxprDocuments() {
         SemanticSearchService svc = spy(service);
         ReflectionTestUtils.setField(svc, "alfrescoSourceId", "");
+        ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
 
         HxprDocument doc = new HxprDocument();
         doc.setCinSourceId("alfresco:discovered-repo");
@@ -289,6 +307,7 @@ class SemanticSearchServiceTest {
         SemanticSearchService svc = spy(service);
         ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
         ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+        ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
         doReturn(List.of("admin", "GROUP_EVERYONE", "GROUP_ALFRESCO_ADMINISTRATORS"))
                 .when(svc).getUserAuthorities("admin", "test-repo");
         doReturn(List.of("admin", "GROUP_MEMBERS"))
@@ -300,6 +319,23 @@ class SemanticSearchServiceTest {
         assertThat(filter).contains("sys_racl = 'g:GROUP_MEMBERS_#_nuxeo-demo'");
         assertThat(filter).doesNotContain("sys_racl = 'u:admin_#_test-repo'");
         assertThat(filter).doesNotContain("g:GROUP_ALFRESCO_ADMINISTRATORS_#_test-repo");
+    }
+
+    @Test
+    void buildPermissionFilter_adminBypassOn_doesNotLeakIntoANuxeoSource() {
+        // The bypass is an Alfresco repository concept. Enabling it must not turn the same group name
+        // into full access on a source that has no notion of it.
+        SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "permissionSourceIds", "nuxeo-demo");
+        ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+        ReflectionTestUtils.setField(svc, "adminBypassEnabled", true);
+        doReturn(List.of("admin", "GROUP_ALFRESCO_ADMINISTRATORS"))
+                .when(svc).getUserAuthorities("admin", "nuxeo-demo");
+
+        String filter = svc.buildPermissionFilter("admin", null, null);
+
+        assertThat(filter).doesNotContain("cin_sourceId = 'nuxeo:nuxeo-demo'");
+        assertThat(filter).contains("sys_racl = 'u:admin_#_nuxeo-demo'");
     }
 
     // -----------------------------------------------------------------------
