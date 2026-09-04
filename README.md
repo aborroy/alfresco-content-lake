@@ -28,6 +28,7 @@ Part of the **Content Lake** ecosystem -- a PoC for ingesting Alfresco and Nuxeo
 | Doc | Contents |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Module layout, SPI interfaces, dependency graph, data model, design decisions |
+| [docs/security-model.md](docs/security-model.md) | Where read permissions are enforced, what the model does not do, rejected alternatives, deployment hardening checklist |
 | [docs/sync-pipeline.md](docs/sync-pipeline.md) | Full/live sync flows, metadata-only path, path structure, idempotency, scope resolution |
 
 ## Overview
@@ -362,6 +363,10 @@ security change to protect it.
 **Note:** Bearer token authentication (OAuth2/OIDC with Keycloak) is not yet supported.
 
 ### Source-Native ACL Filtering
+
+Read permissions are enforced by `rag-service`, not by the index, and the index port must never be
+reachable by end users or agents. [docs/security-model.md](docs/security-model.md) explains why, what
+the model does not do, and how to harden a deployment.
 
 Current mixed-source filtering keeps Alfresco and Nuxeo principals source-native:
 

@@ -230,6 +230,9 @@ Both sides of that encoding come from `AclFilterBuilder` in
 the read path builds its `sys_racl` predicate from it at query time. Read access to every document
 depends on those two agreeing, so they share one implementation rather than two matching ones.
 
+[security-model.md](security-model.md) covers the trust boundary this sits inside: which component
+enforces read access, what the model does not do, and what a deployment has to get right.
+
 | Element | Value | Note |
 |---|---|---|
 | ACL field queried at read time | `sys_racl` | the engine's expansion of `sys_acl` |
