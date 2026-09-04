@@ -245,6 +245,20 @@ two unrelated populations and hand each the other's documents.
 HXQL literals are escaped with a backslash (`\'`), and a backslash is doubled before quotes are
 escaped. SQL-style quote doubling (`''`) is rejected by the engine with HTTP 400.
 
+Two inputs feed that predicate, and each fails closed independently:
+
+| Input | Source | On failure |
+|---|---|---|
+| Caller identity | `SecurityContextService.getCurrentUsername()` | throws `AuthenticationCredentialsNotFoundException`, which Spring Security translates into a 401 |
+| Group membership per source | Alfresco `GET /people/{user}/groups`, Nuxeo `GET /api/v1/user/{username}` | governed by `rag.security.group-resolution-failure` |
+
+`rag.security.group-resolution-failure` takes `fail-closed` (the default) or `degrade`. Under
+`fail-closed` a source whose directory cannot be reached is dropped from the predicate entirely, so
+the caller sees nothing from it; under `degrade` the caller keeps their own name plus
+`GROUP_EVERYONE` and silently loses only group-granted documents. Both modes log at WARN, and an
+unrecognised value reads as `fail-closed`. When every source drops out, `AclFilterBuilder.query`
+emits the `__unresolved_permission_source__` sentinel rather than no clause at all.
+
 ### `Chunk` -- unit of embedding
 
 Text is split into `Chunk` records before embedding. Beyond the text and offsets, each chunk carries
@@ -285,6 +299,13 @@ prose noise.
   caller and another caller's documents. It therefore lives in exactly one class, which both search
   services and the ingest write path call: one place to audit, one place to test. A per-request
   identity on the engine side would need a delegation primitive the engine does not have
+- **An unresolved authorization input is never encoded as a missing filter** -- there is no anonymous
+  or placeholder principal: a request with no authenticated caller is rejected rather than answered
+  under a synthetic name, and a source whose group directory is unreachable is excluded from the
+  predicate instead of falling back to a permissive default. The failure mode is a caller seeing too
+  few documents and a WARN in the log, never too many. `rag.security.group-resolution-failure=degrade`
+  exists for deployments that would rather lose group-granted results than lose a whole source, and it
+  is opt-in for that reason
 - **`filesystem-batch-ingester` authenticates against one configured account** -- the other ingesters
   validate callers against their source repository, but a filesystem has no user directory. Both
   `filesystem.batch.security.username` and `.password` are required and startup fails when either is

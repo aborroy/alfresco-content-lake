@@ -170,6 +170,74 @@ class SemanticSearchServiceTest {
     }
 
     // -----------------------------------------------------------------------
+    // Group resolution failure policy
+    // -----------------------------------------------------------------------
+
+    @Test
+    void getUserAuthorities_lookupFails_failClosed_resolvesNoAuthorities() {
+        // alfrescoUrl points at a closed port, so the group lookup throws.
+        ReflectionTestUtils.setField(service, "groupResolutionFailureMode", "fail-closed");
+
+        assertThat(service.getUserAuthorities("alice", "test-repo")).isEmpty();
+    }
+
+    @Test
+    void getUserAuthorities_lookupFails_degrade_keepsUsernameAndEveryone() {
+        ReflectionTestUtils.setField(service, "groupResolutionFailureMode", "degrade");
+
+        assertThat(service.getUserAuthorities("alice", "test-repo"))
+                .containsExactly("alice", "GROUP_EVERYONE");
+    }
+
+    @Test
+    void getUserAuthorities_unsetMode_defaultsToFailClosed() {
+        ReflectionTestUtils.setField(service, "groupResolutionFailureMode", null);
+
+        assertThat(service.getUserAuthorities("alice", "test-repo")).isEmpty();
+    }
+
+    @Test
+    void buildPermissionFilter_unresolvedAuthorities_excludesTheSourceAndMatchesNothing() {
+        SemanticSearchService svc = spy(service);
+        doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+
+        String filter = svc.buildPermissionFilter("alice", null);
+
+        // No clause at all would match every document, so the sentinel has to take its place.
+        assertThat(filter).contains("cin_sourceId = '__unresolved_permission_source__'");
+        assertThat(filter).doesNotContain("sys_racl");
+    }
+
+    @Test
+    void buildPermissionFilter_oneSourceUnresolved_keepsTheOtherAndDropsOnlyThatSource() {
+        SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
+        ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+        doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+        doReturn(List.of("alice", "GROUP_MEMBERS")).when(svc).getUserAuthorities("alice", "nuxeo-demo");
+
+        String filter = svc.buildPermissionFilter("alice", null);
+
+        assertThat(filter).contains("sys_racl = 'u:alice_#_nuxeo-demo'");
+        assertThat(filter).contains("sys_racl = 'g:GROUP_MEMBERS_#_nuxeo-demo'");
+        assertThat(filter).doesNotContain("test-repo");
+    }
+
+    @Test
+    void buildPermissionFilter_dualAuth_unresolvedSourceIsNotGivenDefaultAuthorities() {
+        SemanticSearchService svc = spy(service);
+        ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
+        ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+        doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+        doReturn(List.of("bob")).when(svc).getUserAuthorities("bob", "nuxeo-demo");
+
+        String filter = svc.buildPermissionFilter("alice", "bob", null, null);
+
+        assertThat(filter).contains("sys_racl = 'u:bob_#_nuxeo-demo'");
+        assertThat(filter).doesNotContain("u:alice_#_test-repo");
+    }
+
+    // -----------------------------------------------------------------------
     // logPermissionSourceIdConfiguration (startup validation)
     // -----------------------------------------------------------------------
 

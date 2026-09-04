@@ -375,6 +375,12 @@ Current mixed-source filtering keeps Alfresco and Nuxeo principals source-native
 - Alfresco repository admins keep repository-admin discoverability for Alfresco sources without storing synthetic `admin` ACEs in `sys_acl`.
 - This mode assumes the authenticated username is the same login string in each source you want to query.
 - Nuxeo group expansion in `rag-service` uses the configured `NUXEO_USERNAME` and `NUXEO_PASSWORD` service credentials to read `/api/v1/user/{username}`.
+- A request with no authenticated caller is rejected with 401; there is no anonymous or placeholder
+  principal that a permission filter could be built for.
+- When a source's group directory cannot be reached, `rag.security.group-resolution-failure`
+  (`RAG_SECURITY_GROUP_RESOLUTION_FAILURE`) decides what happens. `fail-closed`, the default, drops
+  that source from the filter so the caller sees nothing from it. `degrade` keeps the caller's own
+  name plus `GROUP_EVERYONE`, so only group-granted documents are lost. Both log at WARN.
 
 ### Quick Example
 

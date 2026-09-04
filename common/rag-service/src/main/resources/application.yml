@@ -176,6 +176,13 @@ rag:
     enabled: ${RAG_CACHE_ENABLED:false}
     ttl-seconds: ${RAG_CACHE_TTL_SECONDS:60}
     max-size: ${RAG_CACHE_MAX_SIZE:1000}
+  # What to do when a caller's group membership cannot be resolved against a source repository.
+  # fail-closed (the default) excludes that source from the permission filter, so a directory outage
+  # narrows results; degrade proceeds with the caller's own name plus GROUP_EVERYONE, so the caller
+  # silently loses group-granted documents instead. Both modes log at WARN. An unrecognised value is
+  # read as fail-closed.
+  security:
+    group-resolution-failure: ${RAG_SECURITY_GROUP_RESOLUTION_FAILURE:fail-closed}
   # User feedback capture (#74). Enabled by default; POST /api/rag/feedback persists a rating for an
   # answer as an hxpr document under base-path, feeding the offline evaluation corpus.
   feedback:

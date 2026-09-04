@@ -12,6 +12,7 @@ import org.hyland.contentlake.rag.model.SemanticSearchResponse.ChunkMetadata;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SourceDocument;
 import org.hyland.contentlake.security.AclFilterBuilder;
+import org.hyland.contentlake.security.GroupResolutionFailurePolicy;
 import org.hyland.contentlake.security.SecurityContextService;
 import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.client.NamedQueryService;
@@ -82,6 +83,9 @@ public class SemanticSearchService {
 
     @Value("${rag.permission.source-ids:}")
     private String permissionSourceIds;
+
+    @Value("${rag.security.group-resolution-failure:fail-closed}")
+    private String groupResolutionFailureMode;
 
     @Value("${nuxeo.source-id:}")
     private String nuxeoSourceId;
@@ -389,8 +393,14 @@ public class SemanticSearchService {
                 // Not authenticated against this source, so exclude it from results entirely.
                 continue;
             }
-            List<String> authorities = authoritiesBySource.getOrDefault(
-                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            List<String> authorities = authoritiesBySource.get(sourceId);
+            if (authorities == null || authorities.isEmpty()) {
+                // Authorities unresolved rather than empty. Substituting a default here would undo the
+                // fail-closed decision taken in getUserAuthorities.
+                log.warn("Excluding source {} from the permission filter for user {}: no authorities resolved",
+                        sourceId, username);
+                continue;
+            }
             sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
@@ -423,8 +433,12 @@ public class SemanticSearchService {
 
         List<String> sourceClauses = new ArrayList<>();
         for (String sourceId : sourceIds) {
-            List<String> authorities = authoritiesBySource.getOrDefault(
-                    sourceId, AclFilterBuilder.defaultAuthorities(username));
+            List<String> authorities = authoritiesBySource.get(sourceId);
+            if (authorities == null || authorities.isEmpty()) {
+                log.warn("Excluding source {} from the permission filter for user {}: no authorities resolved",
+                        sourceId, username);
+                continue;
+            }
             sourceClauses.add(sourcePermissionClause(sourceId, authorities));
         }
 
@@ -446,6 +460,12 @@ public class SemanticSearchService {
         return authoritiesBySource;
     }
 
+    /**
+     * The caller's authorities on one source, or an empty list when they could not be resolved and the
+     * configured policy is to fail closed. An empty list is not "no groups": it means the answer is
+     * unknown, and {@link #buildPermissionFilter(String, String, String)} drops the source instead of
+     * guessing.
+     */
     List<String> getUserAuthorities(String username, String sourceId) {
         LinkedHashSet<String> authorities =
                 new LinkedHashSet<>(AclFilterBuilder.defaultAuthorities(username));
@@ -457,11 +477,30 @@ public class SemanticSearchService {
             }
             log.debug("Resolved {} authorities for user {} on source {}", authorities.size(), username, sourceId);
         } catch (Exception e) {
-            log.warn("Failed to retrieve authorities for user {} on source {} (proceeding with username + GROUP_EVERYONE): {}",
-                    username, sourceId, e.getMessage());
+            return onGroupResolutionFailure(username, sourceId, e);
         }
 
         return List.copyOf(authorities);
+    }
+
+    /**
+     * Applies {@code rag.security.group-resolution-failure}. Both modes log at WARN: a directory outage
+     * is worth knowing about whichever behaviour is configured, because in one mode the caller silently
+     * loses group-granted documents and in the other they lose the source.
+     */
+    private List<String> onGroupResolutionFailure(String username, String sourceId, Exception cause) {
+        GroupResolutionFailurePolicy policy =
+                GroupResolutionFailurePolicy.parse(groupResolutionFailureMode);
+        if (policy == GroupResolutionFailurePolicy.DEGRADE) {
+            log.warn("Failed to resolve authorities for user {} on source {}; policy is {}, so proceeding "
+                            + "with username + GROUP_EVERYONE and no group-granted access: {}",
+                    username, sourceId, policy, cause.getMessage());
+            return AclFilterBuilder.defaultAuthorities(username);
+        }
+        log.warn("Failed to resolve authorities for user {} on source {}; policy is {}, so the source is "
+                        + "excluded from the permission filter and the caller sees nothing from it: {}",
+                username, sourceId, policy, cause.getMessage());
+        return List.of();
     }
 
     @SuppressWarnings("unchecked")

@@ -622,11 +622,9 @@ public class RagService {
         if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
             return request.getSessionId().trim();
         }
-        String username = securityContextService.getCurrentUsername();
-        if (username == null || username.isBlank()) {
-            return "user:anonymous";
-        }
-        return "user:" + username.trim();
+        // Never null or blank: getCurrentUsername throws when there is no authenticated principal, so a
+        // conversation session is always attributable to a caller.
+        return "user:" + securityContextService.getCurrentUsername().trim();
     }
 
     // ---------------------------------------------------------------

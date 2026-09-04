@@ -494,6 +494,72 @@ class HybridSearchServiceTest {
     // -----------------------------------------------------------------------
 
     @Nested
+    class GroupResolutionFailure {
+
+        @Test
+        void failClosed_resolvesNoAuthoritiesWhenTheLookupThrows() {
+            // alfrescoUrl points at a closed port, so the group lookup throws.
+            ReflectionTestUtils.setField(service, "groupResolutionFailureMode", "fail-closed");
+
+            assertThat(service.getUserAuthorities("alice", "test-repo")).isEmpty();
+        }
+
+        @Test
+        void degrade_keepsUsernameAndEveryoneWhenTheLookupThrows() {
+            ReflectionTestUtils.setField(service, "groupResolutionFailureMode", "degrade");
+
+            assertThat(service.getUserAuthorities("alice", "test-repo"))
+                    .containsExactly("alice", "GROUP_EVERYONE");
+        }
+
+        @Test
+        void unsetMode_defaultsToFailClosed() {
+            ReflectionTestUtils.setField(service, "groupResolutionFailureMode", null);
+
+            assertThat(service.getUserAuthorities("alice", "test-repo")).isEmpty();
+        }
+
+        @Test
+        void unresolvedAuthorities_excludeTheSourceAndMatchNothing() {
+            HybridSearchService svc = spy(service);
+            doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+
+            String filter = svc.buildPermissionFilter("alice", null);
+
+            assertThat(filter).contains("cin_sourceId = '__unresolved_permission_source__'");
+            assertThat(filter).doesNotContain("sys_racl");
+        }
+
+        @Test
+        void oneSourceUnresolved_keepsTheOther() {
+            HybridSearchService svc = spy(service);
+            ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
+            ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+            doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+            doReturn(List.of("alice", "GROUP_MEMBERS")).when(svc).getUserAuthorities("alice", "nuxeo-demo");
+
+            String filter = svc.buildPermissionFilter("alice", null);
+
+            assertThat(filter).contains("sys_racl = 'g:GROUP_MEMBERS_#_nuxeo-demo'");
+            assertThat(filter).doesNotContain("test-repo");
+        }
+
+        @Test
+        void dualAuth_unresolvedSourceIsNotGivenDefaultAuthorities() {
+            HybridSearchService svc = spy(service);
+            ReflectionTestUtils.setField(svc, "permissionSourceIds", "test-repo,nuxeo-demo");
+            ReflectionTestUtils.setField(svc, "nuxeoSourceId", "nuxeo-demo");
+            doReturn(List.of()).when(svc).getUserAuthorities("alice", "test-repo");
+            doReturn(List.of("bob")).when(svc).getUserAuthorities("bob", "nuxeo-demo");
+
+            String filter = svc.buildPermissionFilter("alice", "bob", null, null);
+
+            assertThat(filter).contains("sys_racl = 'u:bob_#_nuxeo-demo'");
+            assertThat(filter).doesNotContain("u:alice_#_test-repo");
+        }
+    }
+
+    @Nested
     class PermissionFilter {
 
         @Test
