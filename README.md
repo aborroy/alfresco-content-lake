@@ -322,11 +322,12 @@ curl http://localhost:9093/api/sync/status/{jobId} -u Administrator:Administrato
 ```
 
 The live listener has no manual sync API. Use the actuator endpoints for
-health and metrics:
+health and metrics. `health` and `info` are public so the container orchestrator can probe them;
+`metrics` needs the configured Nuxeo service credentials, like every other path:
 
 ```bash
 curl http://localhost:9094/actuator/health
-curl http://localhost:9094/actuator/metrics
+curl http://localhost:9094/actuator/metrics -u Administrator:Administrator
 ```
 
 When using the deployment repo's reverse proxy, the public sync API remains `/api/sync/*`.
@@ -339,6 +340,16 @@ REST API authentication is source-specific:
 - Alfresco ingesters validate incoming credentials or tickets against Alfresco.
 - `nuxeo-batch-ingester` uses HTTP Basic auth with the configured Nuxeo service credentials.
 - `nuxeo-live-ingester` does not expose sync APIs; health and metrics come from Spring Actuator.
+- `filesystem-batch-ingester` has no source repository to authenticate against, so it uses one
+  configured account (`filesystem.batch.security.username` / `.password`, from
+  `FILESYSTEM_SYNC_USERNAME` / `FILESYSTEM_SYNC_PASSWORD`). Both are required: startup fails when
+  either is blank rather than falling back to a default credential on an endpoint that triggers a
+  full re-ingest.
+
+Every service denies by default. `/actuator/health` and `/actuator/info` are public so a container
+orchestrator can probe them without credentials; every other path, including unmapped ones and
+`/actuator/metrics`, returns 401 without authentication. Adding a controller therefore needs no
+security change to protect it.
 
 ### Supported Methods
 
@@ -873,6 +884,10 @@ The response reports `totalSamples`, `retrievalHits`, and `retrievalHitRate` acr
 
 ### Health Checks
 
+Every service publishes `/actuator/health` and `/actuator/info` without credentials, so a container
+orchestrator can probe them. Everything else on every service, `/actuator/metrics` included, requires
+authentication.
+
 ```bash
 # Batch ingester (no auth required)
 curl http://localhost:9090/actuator/health
@@ -885,6 +900,9 @@ curl http://localhost:9091/actuator/health
 
 # RAG service detailed health (auth required)
 curl http://localhost:9091/api/rag/health -u admin:admin
+
+# Metrics on any service (auth required)
+curl http://localhost:9091/actuator/metrics -u admin:admin
 ```
 
 ### Live Ingester (port 9092)

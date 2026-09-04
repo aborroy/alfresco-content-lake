@@ -37,8 +37,8 @@ public class SecurityConfig {
     /**
      * Configures the security filter chain.
      * - CSRF disabled (stateless API)
-     * - Actuator endpoints public
-     * - All /api/** endpoints require authentication
+     * - Only the health and info probes are public
+     * - Every other request requires authentication, including unmapped paths
      * - Supports both Basic Auth and Alfresco tickets
      */
     @Bean
@@ -52,8 +52,10 @@ public class SecurityConfig {
                         // authenticated request has already started streaming.
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers("/api/**").authenticated()
-                        .anyRequest().permitAll()
+                        // INVARIANT: default deny. Only the container probes above are public, so a new
+                        // endpoint is authenticated unless someone deliberately exempts it here. Do not
+                        // reintroduce anyRequest().permitAll(): it silently published /actuator/metrics.
+                        .anyRequest().authenticated()
                 )
                 .addFilterBefore(
                         new AlfrescoTicketAuthenticationFilter(authenticationManager),

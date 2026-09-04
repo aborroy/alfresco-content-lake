@@ -31,6 +31,12 @@ filesystem:
     - node_modules
   page-size: ${FILESYSTEM_PAGE_SIZE:100}
   batch:
+    # Credentials for this ingester's own REST API. No defaults: startup fails when either is unset,
+    # because a default here would be a published credential on an endpoint that triggers a full
+    # re-ingest.
+    security:
+      username: ${FILESYSTEM_SYNC_USERNAME:}
+      password: ${FILESYSTEM_SYNC_PASSWORD:}
     executor:
       core-size: ${FILESYSTEM_BATCH_CORE_SIZE:1}
       max-size: ${FILESYSTEM_BATCH_MAX_SIZE:1}

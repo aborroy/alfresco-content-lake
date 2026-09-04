@@ -253,7 +253,16 @@ prose noise.
 - **Nuxeo scope** -- config-only for MVP (`nuxeo.scope.includedRoots` + `includedTypes`); schema-based facet is a follow-up
 - **Nuxeo auth** -- Basic auth for MVP, wrapped in an abstraction for future token/OAuth2
 - **Nuxeo discovery** -- NXQL query preferred over `@children` tree walk for scalability
-- **`rag-service` security** -- needs its own `SecurityConfig`; options are permit-all behind network policy or OAuth2/OIDC via hxpr IDP
+- **Every runnable module defines its own filter chain, and every chain denies by default** -- the
+  only public paths are `/actuator/health` and `/actuator/info`, so a container orchestrator can probe
+  a service without credentials while an endpoint added later is authenticated without anyone
+  configuring it. `rag-service` additionally exempts `/api/rag/health`. Each chain carries a negative
+  test asserting that an unmapped path and `/actuator/metrics` both return 401: the guarantee is that
+  forgetting to secure a route is not a way to publish it
+- **`filesystem-batch-ingester` authenticates against one configured account** -- the other ingesters
+  validate callers against their source repository, but a filesystem has no user directory. Both
+  `filesystem.batch.security.username` and `.password` are required and startup fails when either is
+  blank, because the alternative is a default credential on an endpoint that triggers a full re-ingest
 - **Query expansion in the search services, not the RAG advisor** -- multi-query, HyDE and decomposition
   all run inside `SemanticSearchService`/`HybridSearchService`, which both the search controllers and
   `HxprDocumentRetriever` go through. Placing them in `ContentLakeRetrievalAdvisor` instead would hide

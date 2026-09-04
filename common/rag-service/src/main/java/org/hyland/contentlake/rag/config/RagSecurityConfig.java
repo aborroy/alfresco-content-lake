@@ -51,7 +51,10 @@ public class RagSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/rag/health").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
+                        // Only the container probes are public. /actuator/metrics stays exposed over HTTP
+                        // but requires credentials: it enumerates endpoints and reveals request volumes
+                        // and timings, which is free reconnaissance on a public reference deployment.
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // INVARIANT: the MCP endpoint (#61) and every other route stay authenticated.
                         // MCP tools derive the ACL identity from the authenticated request thread, so
                         // the endpoint must NEVER be added to the permit-all list above.

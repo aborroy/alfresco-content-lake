@@ -13,12 +13,11 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Secures actuator endpoints for the Nuxeo live ingester.
+ * Secures the Nuxeo live ingester.
  *
- * <p>The live ingester exposes no user-facing REST API, so only the sensitive
- * actuator endpoints (env, beans, etc.) are locked down. The health and info
- * probes remain public so that the container orchestrator can reach them without
- * credentials.</p>
+ * <p>The live ingester exposes no user-facing REST API. Everything is authenticated
+ * except the health and info probes, which remain public so that the container
+ * orchestrator can reach them without credentials.</p>
  */
 @Configuration
 @EnableWebSecurity
@@ -32,8 +31,10 @@ public class NuxeoLiveSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers("/actuator/**").authenticated()
-                        .anyRequest().permitAll()
+                        // INVARIANT: default deny. Only the container probes above are public, so a new
+                        // endpoint is authenticated unless someone deliberately exempts it here. Do not
+                        // reintroduce anyRequest().permitAll().
+                        .anyRequest().authenticated()
                 )
                 .httpBasic(httpBasic -> {})
                 .build();

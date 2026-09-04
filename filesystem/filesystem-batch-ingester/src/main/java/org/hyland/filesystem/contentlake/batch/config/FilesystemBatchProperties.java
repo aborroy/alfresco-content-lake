@@ -12,6 +12,21 @@ public class FilesystemBatchProperties {
 
     private Executor executor = new Executor();
     private Embedding embedding = new Embedding();
+    private Security security = new Security();
+
+    /**
+     * Credentials for the ingester's own REST API. A filesystem source has no user directory to
+     * authenticate against, so a single configured account guards the sync trigger.
+     *
+     * <p>Both fields are deliberately without defaults. {@code FilesystemBatchSecurityConfig} fails
+     * startup when either is blank, so the service can neither run open nor run unreachable behind a
+     * password generated at boot.</p>
+     */
+    @Data
+    public static class Security {
+        private String username;
+        private String password;
+    }
 
     @Data
     public static class Executor {

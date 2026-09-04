@@ -46,8 +46,10 @@ public class NuxeoBatchSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers("/api/**").authenticated()
-                        .anyRequest().permitAll()
+                        // INVARIANT: default deny. Only the container probes above are public, so a new
+                        // endpoint is authenticated unless someone deliberately exempts it here. Do not
+                        // reintroduce anyRequest().permitAll(): it silently published /actuator/metrics.
+                        .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
                 .httpBasic(httpBasic -> httpBasic.authenticationEntryPoint(authenticationEntryPoint))
