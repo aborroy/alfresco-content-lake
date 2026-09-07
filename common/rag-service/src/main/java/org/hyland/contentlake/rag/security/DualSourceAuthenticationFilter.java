@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.security.AlfrescoTicketHeader;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -103,22 +104,7 @@ public class DualSourceAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String extractAlfrescoTicket(String authHeader) {
-        if (!authHeader.startsWith("Basic ")) {
-            return null;
-        }
-        try {
-            String decoded = new String(
-                    Base64.getDecoder().decode(authHeader.substring(6).trim()),
-                    StandardCharsets.UTF_8);
-            if (!decoded.startsWith("TICKET_")) {
-                return null;
-            }
-            int colon = decoded.indexOf(':');
-            return colon >= 0 ? decoded.substring(0, colon) : decoded;
-        } catch (IllegalArgumentException e) {
-            log.debug("Could not decode Authorization header as Alfresco ticket: {}", e.getMessage());
-            return null;
-        }
+        return AlfrescoTicketHeader.extractTicket(authHeader);
     }
 
     private String[] extractBasicCredentials(String header) {

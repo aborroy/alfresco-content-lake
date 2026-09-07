@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.security.AlfrescoTicketHeader;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -14,9 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
@@ -28,6 +27,10 @@ import java.util.List;
  * While this resembles Basic auth, it is not a normal username/password pair, so
  * the request is normalized here and the Authorization header is stripped after
  * successful authentication to avoid double-processing later in the chain.</p>
+ *
+ * <p>The accepted header encodings are defined by {@link AlfrescoTicketHeader}, shared with the
+ * Alfresco batch ingester so the two services cannot drift apart on what a ticket header looks
+ * like.</p>
  */
 @Slf4j
 public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
@@ -63,7 +66,7 @@ public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
                 ticketFromAuthorizationHeader = ticket != null;
             }
 
-            if (ticket != null && ticket.startsWith("TICKET_")) {
+            if (ticket != null && ticket.startsWith(AlfrescoTicketHeader.TICKET_PREFIX)) {
                 try {
                     Authentication authentication = authenticationManager.authenticate(
                             new UsernamePasswordAuthenticationToken(ticket, "")
@@ -86,24 +89,7 @@ public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private String extractTicketFromAuthorizationHeader(HttpServletRequest request) {
-        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (authHeader == null || !authHeader.startsWith("Basic ")) {
-            return null;
-        }
-
-        try {
-            String base64Credentials = authHeader.substring(6).trim();
-            String credentials = new String(Base64.getDecoder().decode(base64Credentials), StandardCharsets.UTF_8);
-            if (!credentials.startsWith("TICKET_")) {
-                return null;
-            }
-
-            int separator = credentials.indexOf(':');
-            return separator >= 0 ? credentials.substring(0, separator) : credentials;
-        } catch (IllegalArgumentException e) {
-            log.debug("Failed to decode Authorization header as Alfresco ticket: {}", e.getMessage());
-            return null;
-        }
+        return AlfrescoTicketHeader.extractTicket(request.getHeader(HttpHeaders.AUTHORIZATION));
     }
 
     private static class AuthorizationHeaderStrippingRequest extends HttpServletRequestWrapper {

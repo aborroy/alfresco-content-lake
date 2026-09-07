@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.security.AlfrescoTicketHeader;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -13,18 +14,20 @@ import org.springframework.security.web.authentication.preauth.PreAuthenticatedA
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
  * Filter that extracts Alfresco tickets from requests.
  * Checks both query parameters (?alf_ticket=...) and Authorization header.
  *
+ * The accepted header encodings are defined by {@link AlfrescoTicketHeader}, shared with
+ * rag-service so the two services cannot drift apart on what a ticket header looks like.
+ *
  * When a ticket is extracted from the Authorization header and authentication
  * succeeds, the header is stripped from the request before continuing the
  * filter chain. This prevents Spring's BasicAuthenticationFilter from
- * re-processing the header (which would fail because a bare ticket has no
- * colon separator, causing a 401 + WWW-Authenticate response).
+ * re-processing the header, which would fail: a ticket is not a username, so
+ * authenticating it as one yields a 401 + WWW-Authenticate response.
  */
 @Slf4j
 public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
@@ -48,7 +51,7 @@ public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
         }
 
         boolean authenticated = false;
-        if (ticket != null && ticket.startsWith("TICKET_")) {
+        if (ticket != null && ticket.startsWith(AlfrescoTicketHeader.TICKET_PREFIX)) {
             try {
                 log.debug("Found Alfresco ticket in request");
                 PreAuthenticatedAuthenticationToken authRequest =
@@ -72,26 +75,11 @@ public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Extracts ticket from Authorization header if it's in Basic auth format
-     * with just a ticket (no colon separator).
+     * Extracts the ticket from a Basic Authorization header, in whichever encodings
+     * {@link AlfrescoTicketHeader} accepts.
      */
     private String extractTicketFromHeader(HttpServletRequest request) {
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader != null && authHeader.startsWith("Basic ")) {
-            try {
-                String base64Credentials = authHeader.substring(6);
-                byte[] decodedBytes = Base64.getDecoder().decode(base64Credentials);
-                String credentials = new String(decodedBytes, StandardCharsets.UTF_8);
-                if (!credentials.contains(":") && credentials.startsWith("TICKET_")) {
-                    return credentials;
-                }
-            } catch (Exception e) {
-                log.debug("Failed to extract ticket from header: {}", e.getMessage());
-            }
-        }
-
-        return null;
+        return AlfrescoTicketHeader.extractTicket(request.getHeader("Authorization"));
     }
 
     /**
