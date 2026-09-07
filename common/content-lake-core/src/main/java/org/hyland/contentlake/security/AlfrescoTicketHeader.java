@@ -12,12 +12,13 @@ import java.util.Base64;
  * is defined in exactly one place. Two independent copies of this parsing are what let the clients
  * drift onto two different encodings to begin with.</p>
  *
- * <h2>Accepted encodings</h2>
+ * <h2>The accepted encoding</h2>
  *
- * <p>{@code base64(TICKET_xxx:)} is the form every client should send: the ticket as the username,
- * with an empty password. {@code base64(TICKET_xxx)}, the bare ticket with no separator, is also
- * accepted for now, because a deployed ACA extension bundle may predate the switch to the first
- * form. Once no such bundle can still be running, drop it and accept one encoding only.</p>
+ * <p>Exactly one: {@code base64(TICKET_xxx:)}, the ticket as the username with an empty password.
+ * The bare {@code base64(TICKET_xxx)} is rejected, as is a ticket with a non-empty password, which
+ * {@code MultiSourceAuthenticationProvider} would refuse anyway. A rejected value is not an error
+ * here; it is simply not a ticket, and the caller leaves the header for Spring's Basic auth filter,
+ * which answers 401.</p>
  */
 public final class AlfrescoTicketHeader {
 
@@ -34,7 +35,7 @@ public final class AlfrescoTicketHeader {
      *
      * @param authorizationHeader raw header value, may be {@code null}
      * @return the ticket, or {@code null} when the header is absent, is not Basic, is not valid
-     *         base64, or does not carry a ticket in an accepted encoding
+     *         base64, or does not carry a ticket in the accepted encoding
      */
     public static String extractTicket(String authorizationHeader) {
         if (authorizationHeader == null || !authorizationHeader.startsWith(BASIC_PREFIX)) {
@@ -53,7 +54,13 @@ public final class AlfrescoTicketHeader {
             return null;
         }
 
+        // The separator must be the last character: a ticket carries no colon of its own, and the
+        // password half has to be empty. Anything else is a different encoding, not this one.
         int separator = decoded.indexOf(':');
-        return separator >= 0 ? decoded.substring(0, separator) : decoded;
+        if (separator != decoded.length() - 1) {
+            return null;
+        }
+
+        return decoded.substring(0, separator);
     }
 }

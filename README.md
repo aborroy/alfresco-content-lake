@@ -358,7 +358,11 @@ security change to protect it.
 |--------|---------|
 | **Basic Auth** | `curl -u admin:password http://localhost:9090/api/sync/status` |
 | **Ticket (query)** | `curl "http://localhost:9090/api/sync/status?alf_ticket=TICKET_xxx"` |
-| **Ticket (header)** | `curl -H "Authorization: Basic BASE64(TICKET_xxx)" ...` |
+| **Ticket (header)** | `curl -H "Authorization: Basic BASE64(TICKET_xxx:)" ...` |
+
+The trailing colon in the ticket header is required: the ticket is the username of a Basic header and
+the password is empty. Every service reads it the same way, through `AlfrescoTicketHeader` in
+`content-lake-core`, and the bare `BASE64(TICKET_xxx)` form is rejected with 401.
 
 **Note:** Bearer token authentication (OAuth2/OIDC with Keycloak) is not yet supported.
 

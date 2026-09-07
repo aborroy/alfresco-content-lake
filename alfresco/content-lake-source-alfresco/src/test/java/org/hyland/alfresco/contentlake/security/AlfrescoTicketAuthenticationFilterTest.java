@@ -47,14 +47,16 @@ class AlfrescoTicketAuthenticationFilterTest {
     }
 
     @Test
-    void bareTicketStillAuthenticatesForBundlesThatPredateTheSwitch() throws Exception {
+    void bareTicketIsNoLongerRecognisedAsATicket() throws Exception {
         MockHttpServletRequest request = requestWithAuthorization(basic("TICKET_aca-demo"));
 
         String forwardedAuthorization = runFilter(request);
 
-        assertThat(authenticationManager.presentedPrincipals).containsExactly("TICKET_aca-demo");
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
-        assertThat(forwardedAuthorization).isNull();
+        // Left for BasicAuthenticationFilter, which cannot authenticate a ticket as a username and
+        // answers 401. One encoding is accepted, and this is not it.
+        assertThat(authenticationManager.presentedPrincipals).isEmpty();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(forwardedAuthorization).isEqualTo(basic("TICKET_aca-demo"));
     }
 
     @Test

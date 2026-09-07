@@ -28,7 +28,7 @@ import java.util.List;
  * the request is normalized here and the Authorization header is stripped after
  * successful authentication to avoid double-processing later in the chain.</p>
  *
- * <p>The accepted header encodings are defined by {@link AlfrescoTicketHeader}, shared with the
+ * <p>The one accepted header encoding is defined by {@link AlfrescoTicketHeader}, shared with the
  * Alfresco batch ingester so the two services cannot drift apart on what a ticket header looks
  * like.</p>
  */

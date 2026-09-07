@@ -53,15 +53,13 @@ class DualSourceAuthenticationFilterTest {
     }
 
     @Test
-    void acceptsABareTicketForBundlesThatPredateTheSwitch() throws Exception {
-        when(provider.validateAlfrescoTicket("TICKET_ui-demo")).thenReturn("alice");
-        when(provider.validateNuxeoCredentials("jdoe", "secret")).thenReturn("jdoe");
-
+    void fallsThroughOnABareTicketSoOnlyOneEncodingIsAccepted() throws Exception {
         MockHttpServletRequest request = dualRequest(basic("TICKET_ui-demo"), basic("jdoe:secret"));
+
         runFilter(request);
 
-        assertThat(SecurityContextHolder.getContext().getAuthentication())
-                .isInstanceOf(DualSourceAuthentication.class);
+        verify(provider, never()).validateAlfrescoTicket(any());
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test

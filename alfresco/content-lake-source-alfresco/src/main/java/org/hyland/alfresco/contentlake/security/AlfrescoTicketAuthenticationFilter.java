@@ -20,7 +20,7 @@ import java.util.*;
  * Filter that extracts Alfresco tickets from requests.
  * Checks both query parameters (?alf_ticket=...) and Authorization header.
  *
- * The accepted header encodings are defined by {@link AlfrescoTicketHeader}, shared with
+ * The one accepted header encoding is defined by {@link AlfrescoTicketHeader}, shared with
  * rag-service so the two services cannot drift apart on what a ticket header looks like.
  *
  * When a ticket is extracted from the Authorization header and authentication
@@ -75,7 +75,7 @@ public class AlfrescoTicketAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Extracts the ticket from a Basic Authorization header, in whichever encodings
+     * Extracts the ticket from a Basic Authorization header, in the encoding
      * {@link AlfrescoTicketHeader} accepts.
      */
     private String extractTicketFromHeader(HttpServletRequest request) {

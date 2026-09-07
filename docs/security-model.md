@@ -46,6 +46,14 @@ flowchart TD
 Authentication answers a different question from authorization here, and the two live in different
 systems: the source repository authenticates, `rag-service` authorizes.
 
+An Alfresco ticket is carried as `Authorization: Basic base64(TICKET_xxx:)`, the ticket as the
+username with an empty password. That is the only accepted encoding, in every service, defined once
+by `AlfrescoTicketHeader` in `content-lake-core`. The bare `base64(TICKET_xxx)` form is rejected. A
+second encoding is worth avoiding because the failure is quiet: a header a service does not recognise
+as a ticket falls through to Spring's Basic auth filter, which tries to authenticate the ticket as a
+username and returns 401, so the symptom is a feature that stops working rather than a message
+naming the cause.
+
 ## Why the enforcement point is the service
 
 The community index engine offers no delegation primitive. Authentication is HTTP Basic against a

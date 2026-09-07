@@ -52,22 +52,21 @@ class AlfrescoTicketAuthenticationFilterTest {
     }
 
     @Test
-    void authenticatesBareTicketHeaderForBundlesThatPredateTheSwitch() throws Exception {
+    void rejectsBareTicketHeaderSoOnlyOneEncodingIsAccepted() throws Exception {
         AuthenticationManager authenticationManager = mock(AuthenticationManager.class);
-        var authenticated = new UsernamePasswordAuthenticationToken("rag-user", null);
-        when(authenticationManager.authenticate(any())).thenReturn(authenticated);
-
         AlfrescoTicketAuthenticationFilter filter = new AlfrescoTicketAuthenticationFilter(authenticationManager);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/rag/search/semantic");
         request.addHeader("Authorization", "Basic " + encode("TICKET_ui-demo"));
         MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicReference<String> forwardedAuthorization = new AtomicReference<>();
 
-        filter.doFilter(request, response, (req, res) -> { });
+        filter.doFilter(request, response, (req, res) ->
+                forwardedAuthorization.set(((jakarta.servlet.http.HttpServletRequest) req).getHeader("Authorization")));
 
-        var captor = org.mockito.ArgumentCaptor.forClass(UsernamePasswordAuthenticationToken.class);
-        verify(authenticationManager).authenticate(captor.capture());
-        assertThat(captor.getValue().getName()).isEqualTo("TICKET_ui-demo");
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isEqualTo(authenticated);
+        // The header survives for BasicAuthenticationFilter, which answers 401 for it.
+        verify(authenticationManager, never()).authenticate(any());
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(forwardedAuthorization.get()).isEqualTo("Basic " + encode("TICKET_ui-demo"));
     }
 
     @Test

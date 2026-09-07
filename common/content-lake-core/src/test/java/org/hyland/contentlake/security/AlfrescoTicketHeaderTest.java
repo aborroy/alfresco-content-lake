@@ -20,23 +20,38 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AlfrescoTicketHeaderTest {
 
     @Nested
-    @DisplayName("accepted encodings")
+    @DisplayName("the accepted encoding")
     class Accepted {
 
         @Test
-        void ticketWithEmptyPasswordIsTheFormEveryClientSends() {
+        void ticketWithEmptyPasswordIsTheOneFormEveryClientSends() {
             assertThat(AlfrescoTicketHeader.extractTicket(basic("TICKET_abc123:"))).isEqualTo("TICKET_abc123");
-        }
-
-        @Test
-        void bareTicketIsStillAcceptedForBundlesThatPredateTheSwitch() {
-            assertThat(AlfrescoTicketHeader.extractTicket(basic("TICKET_abc123"))).isEqualTo("TICKET_abc123");
         }
 
         @Test
         void surroundingWhitespaceInTheEncodedValueIsIgnored() {
             assertThat(AlfrescoTicketHeader.extractTicket("Basic  " + encode("TICKET_abc123:") + " "))
                     .isEqualTo("TICKET_abc123");
+        }
+    }
+
+    @Nested
+    @DisplayName("rejected ticket encodings")
+    class RejectedEncodings {
+
+        @Test
+        void bareTicketWithNoSeparatorIsRejected() {
+            assertThat(AlfrescoTicketHeader.extractTicket(basic("TICKET_abc123"))).isNull();
+        }
+
+        @Test
+        void ticketWithANonEmptyPasswordIsRejected() {
+            assertThat(AlfrescoTicketHeader.extractTicket(basic("TICKET_abc123:pass"))).isNull();
+        }
+
+        @Test
+        void ticketWithATrailingSecondSeparatorIsRejected() {
+            assertThat(AlfrescoTicketHeader.extractTicket(basic("TICKET_abc:123:"))).isNull();
         }
     }
 
