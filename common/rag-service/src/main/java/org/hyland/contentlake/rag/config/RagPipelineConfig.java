@@ -1,5 +1,8 @@
 package org.hyland.contentlake.rag.config;
 
+import io.micrometer.observation.ObservationRegistry;
+import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
 import org.hyland.contentlake.rag.service.ContentLakeRetrievalAdvisor;
 import org.hyland.contentlake.rag.service.DiversitySelector;
 import org.hyland.contentlake.rag.service.HxprDocumentRetriever;
@@ -12,6 +15,7 @@ import org.hyland.contentlake.rag.service.SemanticSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -41,10 +45,12 @@ public class RagPipelineConfig {
                                                                    RetrievalGrader retrievalGrader,
                                                                    RagProperties ragProperties,
                                                                    SectionExpansionService sectionExpansionService,
-                                                                   PromptInjectionScanner promptInjectionScanner) {
+                                                                   PromptInjectionScanner promptInjectionScanner,
+                                                                   RagObservations ragObservations,
+                                                                   RetrievalFeatureSet retrievalFeatureSet) {
         return new ContentLakeRetrievalAdvisor(
                 hxprDocumentRetriever, diversitySelector, rerankService, retrievalGrader, ragProperties,
-                sectionExpansionService, promptInjectionScanner);
+                sectionExpansionService, promptInjectionScanner, ragObservations, retrievalFeatureSet);
     }
 
     /**
@@ -52,10 +58,20 @@ public class RagPipelineConfig {
      * The retrieval/rerank/augment pipeline is composed as a default advisor, so
      * {@code RagService} no longer branches between {@code chatModel.call()} and
      * {@code ChatClient.stream()} with hand-wired retrieval.
+     *
+     * <p>The application's {@link ObservationRegistry} must be handed to the builder. Without it
+     * Spring AI wraps the advisor chain in a noop-but-scope-handling observation, which replaces the
+     * current observation for the duration of the call: every span the advisor then creates is
+     * parented to that noop instead of to the request span, so retrieval, augmentation and generation
+     * appear as unrelated roots rather than as one trace (#116).</p>
      */
     @Bean
-    public ChatClient ragChatClient(ChatModel chatModel, ContentLakeRetrievalAdvisor contentLakeRetrievalAdvisor) {
-        return ChatClient.builder(chatModel)
+    public ChatClient ragChatClient(ChatModel chatModel,
+                                    ContentLakeRetrievalAdvisor contentLakeRetrievalAdvisor,
+                                    ObjectProvider<ObservationRegistry> observationRegistryProvider) {
+        ObservationRegistry observationRegistry =
+                observationRegistryProvider.getIfAvailable(() -> ObservationRegistry.NOOP);
+        return ChatClient.builder(chatModel, observationRegistry, null, null)
                 .defaultAdvisors(contentLakeRetrievalAdvisor)
                 .build();
     }

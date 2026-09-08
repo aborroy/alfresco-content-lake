@@ -10,6 +10,8 @@ import org.hyland.contentlake.config.HxprProperties;
 import org.hyland.alfresco.contentlake.config.TransformProperties;
 import org.hyland.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
+import org.hyland.contentlake.service.IndexProofService;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.NoiseReductionService;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
@@ -68,8 +70,9 @@ public class LiveIngesterConfig {
 
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi, HxprQueryApi queryApi,
-                                   RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+                                   RestClient hxprRestClient, EmbeddingProperties props) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(props.getModelName()));
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -88,6 +91,16 @@ public class LiveIngesterConfig {
     @Bean
     public EmbeddingService embeddingService(EmbeddingModel embeddingModel, EmbeddingProperties props) {
         return new EmbeddingService(embeddingModel, props.getModelName());
+    }
+
+    /**
+     * Required even though this ingester exposes no index-proof route: it shares
+     * {@code ContentLakeNodeStatusService} with the batch ingester, and that service takes this
+     * collaborator, so the context does not start without it.
+     */
+    @Bean
+    public IndexProofService indexProofService(HxprService hxprService, EmbeddingService embeddingService) {
+        return new IndexProofService(hxprService, embeddingService);
     }
 
     @Bean

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.hyland.contentlake.service.IndexReconciliationService;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,6 +41,19 @@ public class IngestionJob {
 
     public void incrementFailed() {
         failedCount.incrementAndGet();
+    }
+
+    /**
+     * What the post-sync reconciliation sweep did, or {@code null} when it did not run (#115).
+     *
+     * <p>Reported on the job because the sync status API is what an operator and the end-to-end suite
+     * read; a sweep result that is not here is invisible to both.</p>
+     */
+    @JsonProperty("reconciliation")
+    private volatile IndexReconciliationService.Report reconciliation;
+
+    public void recordReconciliation(IndexReconciliationService.Report report) {
+        this.reconciliation = report;
     }
 
     public void complete() {

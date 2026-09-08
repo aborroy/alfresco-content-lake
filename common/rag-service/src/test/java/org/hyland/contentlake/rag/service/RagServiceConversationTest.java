@@ -1,6 +1,9 @@
 package org.hyland.contentlake.rag.service;
 
+import org.hyland.contentlake.rag.config.HybridSearchProperties;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
 import org.hyland.contentlake.rag.conversation.ConversationMemoryService;
 import org.hyland.contentlake.rag.conversation.ConversationTurn;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
@@ -94,7 +97,8 @@ class RagServiceConversationTest {
                 new SectionExpansionService(hxprDocumentApi, properties);
         ContentLakeRetrievalAdvisor advisor = new ContentLakeRetrievalAdvisor(
                 retriever, diversitySelector, rerankService, new NoOpRetrievalGrader(), properties,
-                sectionExpansionService, new PromptInjectionScanner());
+                sectionExpansionService, new PromptInjectionScanner(),
+                RagObservations.NOOP, new RetrievalFeatureSet(properties, new HybridSearchProperties()));
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultAdvisors(advisor)
                 .build();
@@ -112,6 +116,8 @@ class RagServiceConversationTest {
                 // Agentic tools are disabled by default in these tests, so the toolset is never invoked.
                 null,
                 // Tracing collaborator (#73) is optional; null falls back to running steps untraced.
+                null,
+                // Feature-set tag (#116): unused without an observation registry.
                 null
         );
     }

@@ -121,6 +121,9 @@ public class RagProperties {
     /** User feedback capture on generated answers (#74). Enabled by default. */
     private FeedbackProperties feedback = new FeedbackProperties();
 
+    /** Span payloads and content capture on the RAG pipeline spans (#116). Both off by default. */
+    private ObservabilityProperties observability = new ObservabilityProperties();
+
     @Data
     public static class RerankerProperties {
 
@@ -462,5 +465,57 @@ public class RagProperties {
          * default, so the aggregate view is closed until a deployment names an operator.
          */
         private List<String> operatorUsers = new ArrayList<>();
+    }
+
+    /**
+     * Payloads on the RAG pipeline spans (#116).
+     *
+     * <p>#73 named the spans; this controls what travels on them. Two independent switches, because
+     * they are different decisions: {@code payloadsEnabled} is an operational verbosity choice, while
+     * {@code captureContent} is a data-protection one. Both default off, and the second stays off when
+     * the first is turned on.</p>
+     *
+     * <p>Sampling is <strong>not</strong> configured here. {@code management.tracing.sampling.
+     * probability} already governs it and is honoured by the Micrometer OpenTelemetry bridge; a second
+     * knob would interact multiplicatively with it and would not be the one an operator reaches for.
+     * The two are orthogonal: sampling bounds how many spans are exported, these flags bound what each
+     * span costs to build and what it carries.</p>
+     */
+    @Data
+    public static class ObservabilityProperties {
+
+        /**
+         * Attaches ids, scores, counts and token usage to the RAG spans.
+         *
+         * <p>Off by default. Note that "off" here does not mean the spans are absent: with actuator on
+         * the classpath the {@code ObservationRegistry} is never a no-op, so the spans #73 introduced
+         * exist on every request regardless. What this flag governs is whether each one pays an
+         * O(hits) payload build, which is wasted work when nothing is exported. Turn it on together
+         * with {@code management.otlp.tracing.endpoint}.</p>
+         */
+        private boolean payloadsEnabled = false;
+
+        /**
+         * Also attaches the question, its reformulated and expanded variants, retrieved chunk text,
+         * source names and paths, and the answer.
+         *
+         * <p>This copies ACL-protected user content into the trace backend, whose readers are whoever
+         * can reach it rather than the ACL that governed the retrieval. See
+         * {@code docs/security-model.md}. Independent of {@code payloadsEnabled}, so a deployment that
+         * wants ids and counts does not get content by asking; no effect when that flag is false.</p>
+         */
+        private boolean captureContent = false;
+
+        /**
+         * Maximum hits whose id, rank and score are recorded on a span. Bounds span size on a large
+         * {@code topK}.
+         */
+        private int maxChunksRecorded = 20;
+
+        /**
+         * Maximum characters per content attribute. Only read when {@code captureContent} is true, and
+         * the reason an enabled deployment cannot ship a full context block on every span.
+         */
+        private int maxContentChars = 2000;
     }
 }

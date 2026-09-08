@@ -200,6 +200,25 @@ rag:
     # the answer they were given.
     operator-users: ${RAG_FEEDBACK_OPERATOR_USERS:}
 
+  # Span payloads (#116). Both switches off by default, and they are different decisions.
+  #
+  # payloads-enabled is operational verbosity: note that "off" does not mean the spans are absent,
+  # because with actuator on the classpath the ObservationRegistry is never a no-op and the spans exist
+  # on every request regardless. What this governs is whether each one pays an O(hits) payload build,
+  # which is wasted work when nothing is exported. Turn it on together with
+  # management.otlp.tracing.endpoint.
+  #
+  # capture-content is a data-protection decision, not a verbosity one: it copies the question, the
+  # retrieved chunk text, source names and paths, and the answer into the trace backend, whose readers
+  # are whoever can reach it rather than the ACL that governed the retrieval. See
+  # docs/security-model.md. Leave it false unless the backend is inside the same trust boundary as the
+  # index.
+  observability:
+    payloads-enabled: ${RAG_OBSERVABILITY_PAYLOADS_ENABLED:false}
+    capture-content: ${RAG_OBSERVABILITY_CAPTURE_CONTENT:false}
+    max-chunks-recorded: ${RAG_OBSERVABILITY_MAX_CHUNKS_RECORDED:20}
+    max-content-chars: ${RAG_OBSERVABILITY_MAX_CONTENT_CHARS:2000}
+
 # Semantic Search configuration
 semantic-search:
   default-min-score: ${SEMANTIC_SEARCH_MIN_SCORE:0.2}
@@ -228,10 +247,17 @@ management:
       # Surface the custom hxpr / modelRunner health contributors on /actuator/health.
       show-components: always
       show-details: when-authorized
-  # Distributed tracing (#73). Micrometer Tracing (OpenTelemetry bridge) spans the retrieve, rerank,
-  # embed and generate steps. Sampling is low in production and can be raised to 1.0 in dev. The OTLP
-  # exporter endpoint is blank by default, so spans are created (and trace/span ids reach the logs via
-  # MDC) but nothing is exported until a collector endpoint is configured.
+  # Distributed tracing (#73, payloads #116). Micrometer Tracing (OpenTelemetry bridge) spans the
+  # request, the retrieve and augment phases, the embedding and search calls, and generation.
+  #
+  # This is the only sampling knob: rag.observability.* deliberately does not add a second one, which
+  # would interact multiplicatively with this and would not be the key an operator reaches for. The two
+  # are orthogonal -- this bounds how many spans are exported, rag.observability.payloads-enabled
+  # bounds what each span costs to build and what it carries.
+  #
+  # Sampling is low in production and can be raised to 1.0 in dev. The OTLP exporter endpoint is blank
+  # by default, so spans are created (and trace/span ids reach the logs via MDC) but nothing is
+  # exported until a collector endpoint is configured.
   tracing:
     sampling:
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:0.1}

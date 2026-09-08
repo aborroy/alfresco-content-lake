@@ -1,6 +1,7 @@
 package org.hyland.alfresco.contentlake.batch.config;
 
 import lombok.Data;
+import org.hyland.contentlake.service.ReconcileProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
@@ -20,6 +21,9 @@ public class IngestionProperties {
     private Transform transform = new Transform();
     private Embedding embedding = new Embedding();
     private Discovery discovery = new Discovery();
+
+    /** Post-discovery reconciliation sweep (#115). Off by default. */
+    private ReconcileProperties reconcile = new ReconcileProperties();
 
     /**
      * Discovery-time retry to absorb the Solr ANCESTOR-commit lag (issue #78).

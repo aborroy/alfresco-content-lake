@@ -10,6 +10,9 @@ import org.hyland.alfresco.contentlake.config.TransformProperties;
 import org.hyland.alfresco.contentlake.service.ContentLakeScopeResolver;
 import org.hyland.contentlake.service.Chunker;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
+import org.hyland.contentlake.service.IndexProofService;
+import org.hyland.contentlake.service.IndexReconciliationService;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.*;
 import org.hyland.contentlake.service.chunking.strategy.ChunkingStrategy.ChunkingConfig;
@@ -63,8 +66,10 @@ public class AppConfig {
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi,
                                    HxprQueryApi queryApi,
-                                   RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+                                   RestClient hxprRestClient,
+                                   IngestionProperties props) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(props.getEmbedding().getModelName()));
     }
 
     // ----------------------------------------------------------------------
@@ -91,6 +96,18 @@ public class AppConfig {
     @Bean
     public EmbeddingService embeddingService(EmbeddingModel embeddingModel, IngestionProperties props) {
         return new EmbeddingService(embeddingModel, props.getEmbedding().getModelName());
+    }
+
+    @Bean
+    public IndexProofService indexProofService(HxprService hxprService, EmbeddingService embeddingService) {
+        return new IndexProofService(hxprService, embeddingService);
+    }
+
+    @Bean
+    public IndexReconciliationService indexReconciliationService(HxprService hxprService,
+                                                                NodeSyncService nodeSyncService,
+                                                                AlfrescoClient alfrescoClient) {
+        return new IndexReconciliationService(hxprService, nodeSyncService, alfrescoClient);
     }
 
     // ----------------------------------------------------------------------

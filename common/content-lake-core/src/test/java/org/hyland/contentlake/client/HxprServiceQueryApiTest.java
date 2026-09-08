@@ -38,7 +38,7 @@ class HxprServiceQueryApiTest {
     private RestClient restClient;
 
     private HxprService service() {
-        return new HxprService(documentApi, queryApi, restClient);
+        return new HxprService(documentApi, queryApi, restClient, "ai-mxbai-embed-large");
     }
 
     @Test

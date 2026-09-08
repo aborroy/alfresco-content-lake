@@ -1,6 +1,7 @@
 package org.hyland.filesystem.contentlake.batch.config;
 
 import lombok.Data;
+import org.hyland.contentlake.service.ReconcileProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -12,6 +13,9 @@ public class FilesystemBatchProperties {
 
     private Executor executor = new Executor();
     private Embedding embedding = new Embedding();
+
+    /** Post-discovery reconciliation sweep (#115). Off by default. */
+    private ReconcileProperties reconcile = new ReconcileProperties();
     private Security security = new Security();
 
     /**

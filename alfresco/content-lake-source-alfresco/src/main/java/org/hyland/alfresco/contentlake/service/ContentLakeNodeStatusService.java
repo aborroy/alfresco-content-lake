@@ -7,6 +7,8 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.model.ContentLakeIngestProperties;
 import org.hyland.contentlake.model.ContentLakeNodeStatus;
 import org.hyland.contentlake.model.HxprDocument;
+import org.hyland.contentlake.model.IndexProof;
+import org.hyland.contentlake.service.IndexProofService;
 import org.alfresco.core.model.Node;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -28,17 +30,56 @@ public class ContentLakeNodeStatusService {
     private final ContentLakeScopeResolver scopeResolver;
     private final AlfrescoSearchService searchService;
     private final Executor statusLookupExecutor;
+    private final IndexProofService indexProofService;
 
     public ContentLakeNodeStatusService(AlfrescoClient alfrescoClient,
                                         HxprService hxprService,
                                         ContentLakeScopeResolver scopeResolver,
                                         AlfrescoSearchService searchService,
-                                        @Qualifier("statusLookupExecutor") Executor statusLookupExecutor) {
+                                        @Qualifier("statusLookupExecutor") Executor statusLookupExecutor,
+                                        IndexProofService indexProofService) {
         this.alfrescoClient = alfrescoClient;
         this.hxprService = hxprService;
         this.scopeResolver = scopeResolver;
         this.searchService = searchService;
         this.statusLookupExecutor = statusLookupExecutor;
+        this.indexProofService = indexProofService;
+    }
+
+    /**
+     * Returns measured evidence that a node is retrievable, rather than the status a writer recorded.
+     *
+     * <p>The status this service returns elsewhere is a claim: on its fast path it reads
+     * {@code cl:syncStatusValue} off the Alfresco node and never consults hxpr at all, so a document
+     * present with zero embeddings reports {@code INDEXED} while being invisible to search. This
+     * method counts the chunks instead, and returns the claims alongside so the two can be compared.
+     * </p>
+     *
+     * <p>The node is resolved on the caller's Alfresco credentials first. When that fails, whether
+     * because the node is gone or because the caller cannot read it, the index is still measured but the
+     * chunk sample is withheld: {@code claimed.sourceNodeResolved} is false and no chunk text is
+     * returned.</p>
+     *
+     * @param nodeId     Alfresco node identifier
+     * @param sampleSize requested chunk sample, clamped by {@link IndexProofService}
+     */
+    public IndexProof getIndexProof(String nodeId, int sampleSize) {
+        Node node = alfrescoClient.getAlfrescoNode(nodeId);
+        String sourceId = formatSourceId(alfrescoClient.getSourceType(), alfrescoClient.getSourceId());
+
+        if (node == null) {
+            // Either the node is gone or the caller cannot read it, and the two stay deliberately
+            // indistinguishable: telling an unauthorised caller that a node exists is a disclosure.
+            // The index is still measured, because a document whose source node is gone is precisely
+            // the phantom result this endpoint exists to find, and reporting ABSENT without looking
+            // would hide it. What is withheld is the chunk sample, since the caller's right to read
+            // that content could not be established.
+            return indexProofService.prove(nodeId, sourceId, sampleSize,
+                    IndexProofService.NodeClaims.unresolved());
+        }
+
+        return indexProofService.prove(nodeId, sourceId, sampleSize,
+                IndexProofService.NodeClaims.resolved(readNodeProperty(node, "cl:syncStatusValue")));
     }
 
     public ContentLakeNodeStatus getNodeStatus(String nodeId) {

@@ -1,6 +1,9 @@
 package org.hyland.contentlake.rag.service;
 
+import org.hyland.contentlake.rag.config.HybridSearchProperties;
 import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +60,8 @@ class ContentLakeRetrievalAdvisorTest {
                 new SectionExpansionService(mock(org.hyland.contentlake.client.HxprDocumentApi.class), properties);
         advisor = new ContentLakeRetrievalAdvisor(
                 documentRetriever, diversitySelector, rerankService, retrievalGrader, properties,
-                sectionExpansionService, new PromptInjectionScanner());
+                sectionExpansionService, new PromptInjectionScanner(),
+                RagObservations.NOOP, new RetrievalFeatureSet(properties, new HybridSearchProperties()));
     }
 
     private static SearchHit hit(String text) {

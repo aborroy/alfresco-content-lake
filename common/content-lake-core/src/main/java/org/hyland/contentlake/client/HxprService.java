@@ -27,6 +27,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -45,22 +46,49 @@ public class HxprService {
     private static final String SYS_FOLDER = "SysFolder";
     private static final String SYS_FILE = "SysFile";
     private static final String DEFAULT_QUERY = "SELECT * FROM SysContent";
-    private static final int EMBEDDING_BATCH_SIZE = 500;
-    private static final String DEFAULT_EMBEDDING_TYPE = "mxbai-embed-large";
     private static final int INDEX_WAIT_TIMEOUT_SECONDS = 30;
+
+    /** Name prefix every embedding child carries, per the hxpr Content Lake specification. */
+    private static final String EMBEDDING_CHILD_PREFIX = "_e_";
+
+    /** Page size for the embedding-child lookup. Children per document are few; paging is a guard. */
+    private static final int EMBEDDING_CHILD_PAGE_SIZE = 100;
+
+    /** Upper bound on embedding-child pages, so a non-advancing offset cannot spin forever. */
+    private static final int EMBEDDING_CHILD_MAX_PAGES = 20;
+
+    /** Page cap for a whole-source scan when hxpr reports no total count. */
+    private static final int MAX_SOURCE_SCAN_PAGES = 5_000;
 
     private final HxprDocumentApi documentApi;
     private final HxprQueryApi queryApi;
     private final RestClient restClient;
 
+    /**
+     * Embedding type derived from the configured model, used to name embedding children.
+     *
+     * <p>Derived rather than constant: a hardcoded type does not follow the configured model, so
+     * children written under a previous configuration could no longer be named by the clear path.
+     * They survived a re-sync and kept answering queries through the {@code *} wildcard the read
+     * path substitutes, letting a retired model's vectors compete with the current ones (#113).</p>
+     */
+    private final String embeddingType;
+
     public HxprService(
             HxprDocumentApi documentApi,
             HxprQueryApi queryApi,
-            RestClient restClient
+            RestClient restClient,
+            String embeddingType
     ) {
         this.documentApi = documentApi;
         this.queryApi = queryApi;
         this.restClient = restClient;
+        this.embeddingType = embeddingType;
+    }
+
+    /** The embedding type this instance writes under, derived from the configured model. */
+    public String getEmbeddingType() {
+        return embeddingType;
     }
 
     /**
@@ -223,8 +251,6 @@ public class HxprService {
      * @param embeddings complete list of embeddings to store
      */
     private void updateEmbeddingsInBatches(String documentId, List<HxprEmbedding> embeddings) {
-        String embeddingType = DEFAULT_EMBEDDING_TYPE;
-
         log.info("Document {} has {} embeddings. Storing as Parquet file in child document (embedding type: {})",
                 documentId, embeddings.size(), embeddingType);
 
@@ -236,7 +262,7 @@ public class HxprService {
             ensureEmbeddingParentMixin(documentId);
 
             // 3. Delete old embedding child if exists
-            deleteEmbeddingChild(documentId, embeddingType);
+            deleteEmbeddingChildren(documentId, embeddingType);
 
             // 4. Create child document with Parquet file
             createEmbeddingChild(documentId, embeddingType, parquetContent);
@@ -272,19 +298,32 @@ public class HxprService {
     }
 
     /**
-     * Deletes every existing embedding child of a document for the given embedding type.
+     * One embedding child of a document.
      *
-     * <p>Matches the canonical child name ({@code _e_{embeddingType}}) as well as any
-     * auto-suffixed siblings hxpr may have created for name collisions
-     * (e.g. {@code _e_mxbai-embed-large.<n>}). All matches are removed so a re-sync
-     * nets to a single fresh child rather than accumulating duplicates.</p>
-     *
-     * @throws RuntimeException if the lookup or any delete fails; the caller must abort
-     *         before creating a new child, otherwise duplicates would survive.
+     * @param sysId         hxpr identifier of the child document
+     * @param sysName       child name, always {@code _e_{embeddingType}} possibly with an
+     *                      auto-suffix hxpr appended for a name collision
+     * @param embeddingType the type recovered from {@code sysName}
      */
-    private void deleteEmbeddingChild(String documentId, String embeddingType) {
-        String childName = "_e_" + embeddingType;
+    public record EmbeddingChild(String sysId, String sysName, String embeddingType) {
+    }
 
+    /**
+     * Lists every embedding child of a document, whatever embedding type it was written under.
+     *
+     * <p>Type-agnostic on purpose: it is what makes an orphaned child from a retired model visible,
+     * and what lets the clear path remove children it did not write. Children are matched on the
+     * {@code _e_} name prefix client-side rather than through an HXQL {@code LIKE}, because
+     * {@code _} is a single-character wildcard in {@code LIKE} and
+     * {@link AclFilterBuilder#escapeLiteral} escapes only {@code \} and {@code '} -- so
+     * {@code LIKE '_e_%'} matches any three-characters-then-anything name.</p>
+     *
+     * @param documentId hxpr document identifier
+     * @return the document's embedding children, empty when it has none
+     * @throws RuntimeException if the lookup fails. Callers about to write a replacement child must
+     *         abort, otherwise a stale child would survive alongside the new one.
+     */
+    public List<EmbeddingChild> listEmbeddingChildren(String documentId) {
         // hxpr's query index is eventually consistent: a child created on a prior sync may not yet
         // be visible here, so the lookup would miss it and a re-sync would create a duplicate. Wait
         // for the index to catch up before querying (same eventual-consistency class as #78).
@@ -295,25 +334,67 @@ public class HxprService {
                     documentId, e.getMessage());
         }
 
-        // hxpr treats limit=0 (the Query default) as "return no rows", so an explicit
-        // positive limit is required or the lookup silently matches nothing and the old
-        // child is never deleted -- the root cause of duplicated embeddings on re-sync.
         String hxql = String.format(
-                "SELECT * FROM SysContent WHERE sys_parentId = '%s' AND sys_name LIKE '%s%%'",
-                AclFilterBuilder.escapeLiteral(documentId), AclFilterBuilder.escapeLiteral(childName)
+                "SELECT * FROM SysContent WHERE sys_parentId = '%s'",
+                AclFilterBuilder.escapeLiteral(documentId)
         );
 
-        HxprDocument.QueryResult queryResult = queryApi.query(newQuery(hxql, 100, 0));
-        List<HxprDocument> results = queryResult.getDocuments();
+        List<EmbeddingChild> children = new ArrayList<>();
+        for (int page = 0; page < EMBEDDING_CHILD_MAX_PAGES; page++) {
+            // hxpr treats limit=0 (the Query default) as "return no rows", so an explicit
+            // positive limit is required or the lookup silently matches nothing and the old
+            // child is never deleted -- the root cause of duplicated embeddings on re-sync.
+            HxprDocument.QueryResult queryResult = queryApi.query(
+                    newQuery(hxql, EMBEDDING_CHILD_PAGE_SIZE, page * EMBEDDING_CHILD_PAGE_SIZE));
+            List<HxprDocument> results = queryResult == null ? null : queryResult.getDocuments();
 
-        if (results == null || results.isEmpty()) {
-            return;
+            if (results == null || results.isEmpty()) {
+                break;
+            }
+
+            for (HxprDocument child : results) {
+                String name = child.getSysName();
+                if (name != null && name.startsWith(EMBEDDING_CHILD_PREFIX)) {
+                    children.add(new EmbeddingChild(child.getSysId(), name,
+                            name.substring(EMBEDDING_CHILD_PREFIX.length())));
+                }
+            }
+
+            if (results.size() < EMBEDDING_CHILD_PAGE_SIZE) {
+                break;
+            }
         }
 
-        for (HxprDocument child : results) {
-            String childId = child.getSysId();
-            log.debug("Deleting existing embedding child: {} ({})", childId, child.getSysName());
-            documentApi.deleteById(childId);
+        return children;
+    }
+
+    /**
+     * Deletes every embedding child of a document, whatever type it was written under.
+     *
+     * @throws RuntimeException if the lookup or any delete fails; the caller must abort
+     *         before creating a new child, otherwise duplicates would survive.
+     */
+    private void deleteEmbeddingChildren(String documentId) {
+        deleteEmbeddingChildren(documentId, null);
+    }
+
+    /**
+     * Deletes a document's embedding children, optionally narrowed to one embedding type.
+     *
+     * <p>A null {@code onlyType} removes every child. A non-null one removes the canonical child
+     * name ({@code _e_{onlyType}}) plus any auto-suffixed siblings hxpr created for a name
+     * collision, so a re-sync of an unchanged node nets to a single fresh child.</p>
+     *
+     * @throws RuntimeException if the lookup or any delete fails; the caller must abort
+     *         before creating a new child, otherwise duplicates would survive.
+     */
+    private void deleteEmbeddingChildren(String documentId, String onlyType) {
+        for (EmbeddingChild child : listEmbeddingChildren(documentId)) {
+            if (onlyType != null && !child.embeddingType().startsWith(onlyType)) {
+                continue;
+            }
+            log.debug("Deleting existing embedding child: {} ({})", child.sysId(), child.sysName());
+            documentApi.deleteById(child.sysId());
         }
     }
 
@@ -327,7 +408,7 @@ public class HxprService {
      */
     private void createEmbeddingChild(String documentId, String embeddingType, byte[] parquetContent) {
         // Child document name MUST start with "_e_" prefix per specification
-        String childName = "_e_" + embeddingType;
+        String childName = EMBEDDING_CHILD_PREFIX + embeddingType;
 
         try {
             // Step 1: Create upload slot (no request body needed)
@@ -384,33 +465,35 @@ public class HxprService {
     }
 
     /**
-     * Removes all stored embeddings for a document.
+     * Removes every stored embedding for a document, regardless of the embedding type it was
+     * written under.
      *
      * <p>Deletes the Parquet {@code SysEmbeddings} child document(s) where embeddings are stored,
      * and also clears the deprecated inline {@code sysembed_embeddings} array when the legacy
      * {@code SysEmbed} mixin is present, so documents indexed before the Parquet migration are
      * cleaned up too.</p>
      *
+     * <p>Type-agnostic deliberately: a document may carry children from a previously configured
+     * model, including the literal {@code _e_mxbai-embed-large} written before the type was derived.
+     * Naming only the current type would leave those behind, and an orphaned child stays searchable
+     * because the read path substitutes the {@code *} embedding-type wildcard (#113).</p>
+     *
      * @param documentId hxpr document identifier
+     * @throws RuntimeException if the lookup or any delete fails
      */
     public void deleteEmbeddings(String documentId) {
         log.info("Clearing embeddings for document: {}", documentId);
 
-        try {
-            // Current storage: Parquet child document(s).
-            deleteEmbeddingChild(documentId, DEFAULT_EMBEDDING_TYPE);
+        // Current storage: Parquet child document(s), any embedding type.
+        deleteEmbeddingChildren(documentId);
 
-            // Legacy storage: inline sysembed_embeddings array (pre-Parquet documents).
-            HxprDocument doc = documentApi.getById(documentId);
-            if (doc != null && hasSysEmbedMixin(doc)) {
-                documentApi.updateById(documentId, Map.of("sysembed_embeddings", List.of()));
-            }
-
-            log.info("Cleared embeddings for document: {}", documentId);
-
-        } catch (Exception e) {
-            log.warn("Failed to clear embeddings for document {}: {}", documentId, e.getMessage());
+        // Legacy storage: inline sysembed_embeddings array (pre-Parquet documents).
+        HxprDocument doc = documentApi.getById(documentId);
+        if (doc != null && hasSysEmbedMixin(doc)) {
+            documentApi.updateById(documentId, Map.of("sysembed_embeddings", List.of()));
         }
+
+        log.info("Cleared embeddings for document: {}", documentId);
     }
 
     /**
@@ -511,6 +594,68 @@ public class HxprService {
      */
     public HxprDocument findByNodeId(String nodeId) {
         return findByNodeId(nodeId, null);
+    }
+
+    /**
+     * Visits every indexed document of one source, paging by offset. For reconciliation sweeps that
+     * compare the index against what a discovery pass saw.
+     *
+     * <p>Matches on an <em>equality</em> clause over {@code cin_sourceId}: HXQL answers HTTP 400 for
+     * {@code LIKE} on keyword-mapped fields and most {@code cin_*} fields are keyword, so prefix
+     * matching is unavailable and the caller must supply its exact source id. Both the
+     * {@code type:rawId} form and the legacy bare raw id are matched, so documents indexed before
+     * that migration are visited too.</p>
+     *
+     * <p>{@code SysEmbeddings} children are never visited: they carry no {@code cin_sourceId}.</p>
+     *
+     * @param sourceId exact {@code "<sourceType>:<sourceId>"}
+     * @param pageSize documents per request
+     * @param consumer receives each document once
+     * @return the number of documents visited
+     * @throws RuntimeException if a page query fails. A sweep must not treat a partial scan as a
+     *         complete one: that would delete every document the failed pages would have covered.
+     */
+    public int forEachDocumentOfSource(String sourceId, int pageSize, Consumer<HxprDocument> consumer) {
+        int effectivePageSize = Math.max(1, pageSize);
+        int visited = 0;
+        long reportedTotal = -1;
+
+        for (int offset = 0; ; offset += effectivePageSize) {
+            HxprDocument.QueryResult result = advancedQuery(
+                    DEFAULT_QUERY, List.of(buildSourceIdPredicate(sourceId)), effectivePageSize, offset);
+
+            List<HxprDocument> documents = result == null ? null : result.getDocuments();
+            if (documents == null || documents.isEmpty()) {
+                return visited;
+            }
+
+            // QueryResult.totalCount is a primitive, so an untracked total is indistinguishable from
+            // zero. A zero alongside a non-empty page means "not reported", and the page cap below
+            // takes over as the loop bound.
+            if (reportedTotal < 0 && result.getTotalCount() > 0) {
+                reportedTotal = result.getTotalCount();
+            }
+
+            for (HxprDocument document : documents) {
+                consumer.accept(document);
+                visited++;
+            }
+
+            if (documents.size() < effectivePageSize) {
+                return visited;
+            }
+
+            // A non-advancing offset would otherwise loop forever. The reported total bounds the
+            // scan; without one, fall back to a page cap so the sweep cannot hang a sync.
+            if (reportedTotal >= 0 && visited >= reportedTotal) {
+                return visited;
+            }
+            if (reportedTotal < 0 && offset / effectivePageSize >= MAX_SOURCE_SCAN_PAGES) {
+                log.warn("Source scan for {} stopped after {} pages with no reported total; "
+                        + "treat the result as partial", sourceId, MAX_SOURCE_SCAN_PAGES);
+                return visited;
+            }
+        }
     }
 
     /**

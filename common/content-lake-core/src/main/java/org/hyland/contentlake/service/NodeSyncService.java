@@ -18,6 +18,7 @@ import org.hyland.contentlake.security.AclFilterBuilder;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
 import org.hyland.contentlake.spi.ContentSourceClient;
 import org.hyland.contentlake.spi.SourceNode;
+import org.hyland.contentlake.spi.SourceTombstone;
 import org.hyland.contentlake.spi.TextExtractor;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -265,27 +266,95 @@ public class NodeSyncService {
      * @return {@code true} if a record existed and was successfully deleted, {@code false} otherwise
      */
     public boolean deleteNode(String nodeId, OffsetDateTime deletedAt) {
+        return delete(new SourceTombstone(nodeId, deletedAt, SourceTombstone.Reason.DELETED))
+                == DeleteOutcome.DELETED;
+    }
+
+    /** What a delete attempt did. Distinguishes the three cases a boolean return conflates. */
+    public enum DeleteOutcome {
+        /** The document existed and was removed. */
+        DELETED,
+        /** No document existed for the node; nothing to do. */
+        NOT_FOUND,
+        /** A document existed but is newer than the event, so the event is stale and was ignored. */
+        SKIPPED_NEWER,
+        /** A document existed but could not be removed. */
+        FAILED
+    }
+
+    /**
+     * Removes the Content Lake document for a tombstoned node: clears its embedding children, then
+     * deletes the document itself.
+     *
+     * <p>The single delete implementation, so deletion is testable once rather than per source.
+     * {@link #deleteNode(String, OffsetDateTime)} delegates here.</p>
+     *
+     * <p>Never throws: a caller sweeping many nodes must be able to record a per-node outcome and
+     * continue.</p>
+     *
+     * @param tombstone the node to remove
+     * @return what happened
+     */
+    public DeleteOutcome delete(SourceTombstone tombstone) {
+        String nodeId = tombstone.nodeId();
         String sourceId = formatSourceId(sourceClient.getSourceType(), sourceClient.getSourceId());
         HxprDocument existing = hxprService.findByNodeId(nodeId, sourceId);
         if (existing == null) {
             log.debug("No Content Lake document found for deleted node {}", nodeId);
-            return false;
+            return DeleteOutcome.NOT_FOUND;
         }
 
+        OffsetDateTime deletedAt = tombstone.deletedAt();
         OffsetDateTime storedModifiedAt = getStoredModifiedAt(existing);
         if (deletedAt != null && storedModifiedAt != null && storedModifiedAt.isAfter(deletedAt)) {
-            log.info("Skipping delete for node {} — Content Lake document is newer than delete event", nodeId);
-            return false;
+            log.info("Skipping delete for node {}: Content Lake document is newer than delete event", nodeId);
+            return DeleteOutcome.SKIPPED_NEWER;
+        }
+
+        String documentId = existing.getSysId();
+
+        // Children first, and best effort. hxpr's cascade on document delete is not contractual, and
+        // an embedding child left behind is still searchable because the read path substitutes the
+        // '*' embedding-type wildcard -- the same phantom-result failure this delete exists to
+        // prevent, one level down. A failed child clear must not stop the parent delete, because a
+        // surviving parent is the worse of the two outcomes.
+        try {
+            hxprService.deleteEmbeddings(documentId);
+        } catch (Exception e) {
+            log.warn("Failed to clear embeddings for document {} before deleting it: {}",
+                    documentId, e.getMessage());
         }
 
         try {
-            documentApi.deleteById(existing.getSysId());
-            log.info("Deleted Content Lake document {} for node {}", existing.getSysId(), nodeId);
-            return true;
+            documentApi.deleteById(documentId);
+            log.info("Deleted Content Lake document {} for node {} ({})",
+                    documentId, nodeId, tombstone.reason());
+            return DeleteOutcome.DELETED;
         } catch (Exception e) {
             log.error("Failed to delete Content Lake document for node {}: {}", nodeId, e.getMessage());
-            return false;
+            return DeleteOutcome.FAILED;
         }
+    }
+
+    /**
+     * Maps a source path to the {@code cin_paths} prefix under which documents from it are indexed.
+     *
+     * <p>Reconciliation scope predicates need this because {@code cin_paths} holds the hxpr path
+     * ({@code <hxprTargetPath>/<repositoryId><sourcePath>}), not the raw source path. A predicate
+     * written against an Alfresco or Nuxeo root path directly matches nothing, deletes nothing, and
+     * looks like a working feature.</p>
+     *
+     * @param sourceId   raw source id, not the {@code type:id} form
+     * @param sourcePath source-system folder path, or {@code null}/blank for the repository root
+     * @return the {@code cin_paths} prefix, always absolute and without a trailing slash
+     */
+    public String contentLakePathPrefix(String sourceId, String sourcePath) {
+        String base = buildRepositoryRootPath(resolvePathRepositoryId(sourceId));
+        if (sourcePath == null || sourcePath.isBlank()) {
+            return base;
+        }
+        String normalized = normalizeAbsolutePath(sourcePath);
+        return "/".equals(base) ? normalized : base + normalized;
     }
 
     /**

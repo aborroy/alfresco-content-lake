@@ -2,7 +2,12 @@ package org.hyland.nuxeo.contentlake.batch.service;
 
 import org.hyland.nuxeo.contentlake.batch.model.IngestionJob;
 import org.hyland.nuxeo.contentlake.batch.model.NuxeoSyncRequest;
+import org.hyland.contentlake.service.DiscoveryOutcome;
+import org.hyland.contentlake.service.IndexReconciliationService;
 import org.hyland.contentlake.service.NodeSyncService;
+import org.hyland.nuxeo.contentlake.batch.config.NuxeoBatchProperties;
+import org.hyland.nuxeo.contentlake.client.NuxeoClient;
+import org.hyland.nuxeo.contentlake.config.NuxeoProperties;
 import org.hyland.contentlake.spi.SourceNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +39,12 @@ class NuxeoBatchIngestionServiceTest {
     @Mock
     private NodeSyncService nodeSyncService;
 
+    @Mock
+    private IndexReconciliationService reconciliationService;
+
+    @Mock
+    private NuxeoClient nuxeoClient;
+
     private NuxeoBatchIngestionService service;
 
     // Synchronous executor so tests can assert on state after the call returns.
@@ -41,13 +52,16 @@ class NuxeoBatchIngestionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new NuxeoBatchIngestionService(discoveryService, nodeSyncService, syncExecutor);
+        // Reconciliation is off by default (NuxeoBatchProperties.reconcile.enabled), so the sweep
+        // never runs in these cases and its collaborators are unused.
+        service = new NuxeoBatchIngestionService(discoveryService, nodeSyncService, syncExecutor,
+                reconciliationService, nuxeoClient, new NuxeoProperties(), new NuxeoBatchProperties());
     }
 
     @Test
     void startConfiguredSync_completesWithCorrectCounts() throws Exception {
         SourceNode node = fileNode("doc-1");
-        when(discoveryService.discoverFromConfig()).thenReturn(List.of(node));
+        when(discoveryService.discoverFromConfigTallied()).thenReturn(discovery(node));
         NodeSyncService.SyncResult syncResult = new NodeSyncService.SyncResult(
                 "hxpr-doc-1", "doc-1", "application/pdf", "Doc 1", "/nuxeo-sync", false, Map.of());
         when(nodeSyncService.ingestMetadata(node)).thenReturn(syncResult);
@@ -65,7 +79,7 @@ class NuxeoBatchIngestionServiceTest {
     @Test
     void startConfiguredSync_skippedNodeIncrementSkipCount() throws Exception {
         SourceNode node = fileNode("doc-2");
-        when(discoveryService.discoverFromConfig()).thenReturn(List.of(node));
+        when(discoveryService.discoverFromConfigTallied()).thenReturn(discovery(node));
         NodeSyncService.SyncResult skipped = new NodeSyncService.SyncResult(
                 null, null, null, null, null, true, null);
         when(nodeSyncService.ingestMetadata(node)).thenReturn(skipped);
@@ -81,7 +95,7 @@ class NuxeoBatchIngestionServiceTest {
     @Test
     void startConfiguredSync_failedNodeIncrementFailedCount() throws Exception {
         SourceNode node = fileNode("doc-3");
-        when(discoveryService.discoverFromConfig()).thenReturn(List.of(node));
+        when(discoveryService.discoverFromConfigTallied()).thenReturn(discovery(node));
         when(nodeSyncService.ingestMetadata(node)).thenThrow(new RuntimeException("HXPR unreachable"));
 
         IngestionJob job = service.startConfiguredSync();
@@ -93,7 +107,7 @@ class NuxeoBatchIngestionServiceTest {
 
     @Test
     void startConfiguredSync_discoveryFailureSetsJobFailed() {
-        when(discoveryService.discoverFromConfig()).thenThrow(new RuntimeException("Nuxeo unavailable"));
+        when(discoveryService.discoverFromConfigTallied()).thenThrow(new RuntimeException("Nuxeo unavailable"));
 
         IngestionJob job = service.startConfiguredSync();
 
@@ -108,7 +122,7 @@ class NuxeoBatchIngestionServiceTest {
 
     @Test
     void getJob_returnsJobAfterStart() {
-        when(discoveryService.discoverFromConfig()).thenReturn(List.of());
+        when(discoveryService.discoverFromConfigTallied()).thenReturn(discovery());
 
         IngestionJob job = service.startConfiguredSync();
 
@@ -117,7 +131,7 @@ class NuxeoBatchIngestionServiceTest {
 
     @Test
     void getAllJobs_returnsUnmodifiableSnapshot() {
-        when(discoveryService.discoverFromConfig()).thenReturn(List.of());
+        when(discoveryService.discoverFromConfigTallied()).thenReturn(discovery());
 
         IngestionJob firstJob = service.startConfiguredSync();
         Map<String, IngestionJob> snapshot = service.getAllJobs();
@@ -133,7 +147,7 @@ class NuxeoBatchIngestionServiceTest {
     void startBatchSync_usesRequestParameters() throws Exception {
         NuxeoSyncRequest request = new NuxeoSyncRequest();
         SourceNode node = fileNode("doc-4");
-        when(discoveryService.discover(request)).thenReturn(List.of(node));
+        when(discoveryService.discoverTallied(request)).thenReturn(discovery(node));
         NodeSyncService.SyncResult syncResult = new NodeSyncService.SyncResult(
                 "hxpr-doc-4", "doc-4", "text/plain", "Doc 4", "/nuxeo-sync", false, Map.of());
         when(nodeSyncService.ingestMetadata(node)).thenReturn(syncResult);
@@ -142,7 +156,12 @@ class NuxeoBatchIngestionServiceTest {
 
         assertThat(job.getStatus()).isEqualTo(IngestionJob.JobStatus.COMPLETED);
         assertThat(job.getSyncedCountValue()).isEqualTo(1);
-        verify(discoveryService).discover(request);
+        verify(discoveryService).discoverTallied(request);
+    }
+
+    private static NuxeoDiscoveryService.NuxeoDiscovery discovery(SourceNode... nodes) {
+        return new NuxeoDiscoveryService.NuxeoDiscovery(List.of(nodes),
+                DiscoveryOutcome.complete(List.of("/default-domain/workspaces/finance")));
     }
 
     private static SourceNode fileNode(String nodeId) {

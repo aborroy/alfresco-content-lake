@@ -479,6 +479,34 @@ curl "http://localhost:9090/api/content-lake/nodes/{folderId}/status?includeFold
   -u admin:admin
 ```
 
+#### Prove a Node Is Retrievable
+
+`status` reports a claim: it is read from the node's own `cl:syncStatusValue`, and a document can hold
+that value while holding no embeddings, in which case it is invisible to semantic and hybrid search but
+looks finished to monitoring. `index-proof` measures instead, by counting the document's chunks on the
+embeddings index:
+
+```bash
+curl "http://localhost:9090/api/content-lake/nodes/{nodeId}/index-proof" -u admin:admin
+
+# Include more sampled chunks (bounded; the response size does not grow with the document)
+curl "http://localhost:9090/api/content-lake/nodes/{nodeId}/index-proof?sampleSize=10" -u admin:admin
+```
+
+The response separates what was counted from what was claimed, and reduces to one `verdict`:
+
+| Verdict | Meaning |
+|---|---|
+| `INDEXED_WITH_EMBEDDINGS` | the document exists and the embeddings index holds chunks for it |
+| `METADATA_ONLY` | the document exists with zero chunks, so it cannot be retrieved |
+| `ABSENT` | no document exists for this node |
+
+`measured.embeddingTypes` lists every type the document has an embedding child for, so a child left
+behind by a previously configured embedding model is visible. `claimed.sectionMapChunks` is the chunk
+count ingestion believed it produced: a non-zero value against a measured `chunkCount` of zero is the
+signature of an embedding phase that never completed. A `null` verdict with a populated `error` means a
+measurement could not be taken, and is deliberately not a guess.
+
 ### RAG Service (port 9091)
 
 #### RAG Prompt

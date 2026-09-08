@@ -12,6 +12,7 @@ import org.hyland.nuxeo.contentlake.live.client.NuxeoAuditClient;
 import org.hyland.nuxeo.contentlake.live.service.AuditCursorStore;
 import org.hyland.nuxeo.contentlake.live.service.FileAuditCursorStore;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
 import org.hyland.nuxeo.contentlake.service.NuxeoScopeResolver;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.NoiseReductionService;
@@ -60,8 +61,10 @@ public class AppConfig {
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi,
                                    HxprQueryApi queryApi,
-                                   RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+                                   RestClient hxprRestClient,
+                                   NuxeoLiveProperties props) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(props.getEmbedding().getModelName()));
     }
 
     @Bean

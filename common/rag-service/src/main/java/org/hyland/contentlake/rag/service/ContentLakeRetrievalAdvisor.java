@@ -1,6 +1,9 @@
 package org.hyland.contentlake.rag.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
+import org.hyland.contentlake.rag.observability.TokenEstimator;
 import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.model.SemanticSearchResponse.SearchHit;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -23,6 +26,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Custom Spring AI {@link org.springframework.ai.chat.client.advisor.api.Advisor} that wraps
@@ -76,13 +80,28 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     /** Prompt-injection defense on retrieved content (#71). */
     private final PromptInjectionScanner promptInjectionScanner;
 
+    /**
+     * Span payloads (#116). Never null: normalised to
+     * {@link RagObservations#NOOP} so no call site needs a null check.
+     *
+     * <p>The advisor is the only code that sits between retrieval and the model call, which is why the
+     * generation span is created here rather than in {@code RagService}: wrapping
+     * {@code ChatClient.call()} there put retrieval <em>inside</em> the generation span, because this
+     * advisor's before-phase runs within it.</p>
+     */
+    private final RagObservations observations;
+
+    private final RetrievalFeatureSet retrievalFeatures;
+
     public ContentLakeRetrievalAdvisor(DocumentRetriever documentRetriever,
                                        DiversitySelector diversitySelector,
                                        RerankService rerankService,
                                        RetrievalGrader retrievalGrader,
                                        RagProperties ragProperties,
                                        SectionExpansionService sectionExpansionService,
-                                       PromptInjectionScanner promptInjectionScanner) {
+                                       PromptInjectionScanner promptInjectionScanner,
+                                       RagObservations observations,
+                                       RetrievalFeatureSet retrievalFeatures) {
         this.documentRetriever = documentRetriever;
         this.diversitySelector = diversitySelector;
         this.rerankService = rerankService;
@@ -90,6 +109,8 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         this.ragProperties = ragProperties;
         this.sectionExpansionService = sectionExpansionService;
         this.promptInjectionScanner = promptInjectionScanner;
+        this.observations = Objects.requireNonNullElse(observations, RagObservations.NOOP);
+        this.retrievalFeatures = retrievalFeatures;
     }
 
     @Override
@@ -108,11 +129,14 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
-        Retrieval retrieval = retrieveAndRerank(request);
+        Retrieval retrieval = observations.observe("rag.retrieve", this::tagRetrieve,
+                span -> retrieveAndRerank(request, span));
         if (retrieval.hits().isEmpty()) {
             return fallbackResponse(request);
         }
-        return chain.nextCall(augmentRequest(request, retrieval));
+        ChatClientRequest augmented = observations.observe("rag.augment",
+                span -> augmentRequest(request, retrieval, span));
+        return observations.observe("rag.generate", span -> chain.nextCall(augmented));
     }
 
     // ------------------------------------------------------------------
@@ -121,35 +145,143 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain chain) {
-        Retrieval retrieval = retrieveAndRerank(request);
+        // Retrieval and augmentation run eagerly on the subscribing thread, so they are correctly
+        // parented by whatever span is current there. Only the generation itself is deferred onto
+        // reactive threads, and a Flux cannot be wrapped in a try-with-resources span without
+        // closing it before the first element arrives -- so the generation span is left to the
+        // request-level span the caller opened.
+        Retrieval retrieval = observations.observe("rag.retrieve", this::tagRetrieve,
+                span -> retrieveAndRerank(request, span));
         if (retrieval.hits().isEmpty()) {
             return Flux.just(fallbackResponse(request));
         }
-        return chain.nextStream(augmentRequest(request, retrieval));
+        ChatClientRequest augmented = observations.observe("rag.augment",
+                span -> augmentRequest(request, retrieval, span));
+        return chain.nextStream(augmented);
+    }
+
+    /** Low-cardinality tags: bounded by deployment configuration, so safe as metric tags. */
+    private void tagRetrieve(RagObservations.Span span) {
+        span.tag("rag.search.mode", ragProperties.isUseHybridSearch() ? "hybrid" : "semantic")
+            .tag("rag.rerank.impl", rerankImpl());
+        if (retrievalFeatures != null) {
+            span.tag("rag.features", retrievalFeatures.value());
+        }
+    }
+
+    private String rerankImpl() {
+        String url = ragProperties.getReranker().getUrl();
+        if (url != null && !url.isBlank()) {
+            return "tei";
+        }
+        return ragProperties.getReranker().isEnabled() ? "llm" : "noop";
     }
 
     // ------------------------------------------------------------------
     // Core pipeline
     // ------------------------------------------------------------------
 
-    private Retrieval retrieveAndRerank(ChatClientRequest request) {
+    private Retrieval retrieveAndRerank(ChatClientRequest request, RagObservations.Span span) {
         Map<String, Object> context = request.context();
         String userText = userText(request);
         String retrievalQuery = stringParam(context.get(PARAM_RETRIEVAL_QUERY), userText);
 
         long searchStart = System.currentTimeMillis();
-        List<SearchHit> rerankedHits = retrievePass(retrievalQuery, context, false);
-        rerankedHits = applyRelevanceGate(retrievalQuery, context, rerankedHits);
+        List<SearchHit> rerankedHits = retrievePass(retrievalQuery, context, false, span);
+        int firstPassSize = rerankedHits.size();
+        rerankedHits = applyRelevanceGate(retrievalQuery, context, rerankedHits, span);
         long searchTimeMs = System.currentTimeMillis() - searchStart;
 
         final List<SearchHit> graded = rerankedHits;
         trace(context).ifPresent(t -> t.record(retrievalQuery, searchTimeMs, graded));
 
+        recordRetrievalPayload(span, retrievalQuery, graded, firstPassSize, searchTimeMs, context);
+
         return new Retrieval(graded);
     }
 
+    /**
+     * Attaches what was retrieved. Everything here is already materialised, so the cost is O(hits)
+     * over a list the pipeline built anyway; the whole block is skipped when payloads are off.
+     *
+     * <p>Chunk ids, scores and ranks are ungated because they are opaque identifiers. The query text
+     * and each chunk's text, name and path go through {@code content}, which drops them unless content
+     * capture is explicitly on: a filename like {@code /HR/Terminations/2026/jsmith.pdf} discloses more
+     * than most chunk bodies do.</p>
+     */
+    private void recordRetrievalPayload(RagObservations.Span span,
+                                        String retrievalQuery,
+                                        List<SearchHit> hits,
+                                        int firstPassSize,
+                                        long searchTimeMs,
+                                        Map<String, Object> context) {
+        if (!observations.payloadsEnabled()) {
+            return;
+        }
+
+        span.attr("rag.retrieve.hits", hits.size())
+            .attr("rag.retrieve.search_time_ms", searchTimeMs)
+            .attr("rag.retrieve.top_k",
+                    intValue(context.get(HxprDocumentRetriever.CTX_TOP_K), ragProperties.getDefaultTopK()))
+            .attr("rag.query.length", retrievalQuery == null ? 0 : retrievalQuery.length())
+            .attr("rag.retrieve.broadened", hits.size() != firstPassSize || firstPassSize == 0)
+            .content("rag.query.retrieval_text", retrievalQuery);
+
+        int max = Math.max(0, ragProperties.getObservability().getMaxChunksRecorded());
+        List<String> chunkIds = new ArrayList<>();
+        List<String> documentIds = new ArrayList<>();
+        List<String> scores = new ArrayList<>();
+        List<String> ranks = new ArrayList<>();
+        StringBuilder chunkText = new StringBuilder();
+        StringBuilder names = new StringBuilder();
+        StringBuilder paths = new StringBuilder();
+
+        for (SearchHit hit : hits) {
+            if (chunkIds.size() >= max) {
+                break;
+            }
+            chunkIds.add(hit.getChunkMetadata() != null && hit.getChunkMetadata().getEmbeddingId() != null
+                    ? hit.getChunkMetadata().getEmbeddingId() : "");
+            documentIds.add(hit.getSourceDocument() != null && hit.getSourceDocument().getDocumentId() != null
+                    ? hit.getSourceDocument().getDocumentId() : "");
+            scores.add(String.format("%.4f", hit.getScore()));
+            ranks.add(Integer.toString(hit.getRank()));
+            if (hit.getChunkText() != null) {
+                if (!chunkText.isEmpty()) {
+                    chunkText.append("\n---\n");
+                }
+                chunkText.append(hit.getChunkText());
+            }
+            if (hit.getSourceDocument() != null) {
+                appendCsv(names, hit.getSourceDocument().getName());
+                appendCsv(paths, hit.getSourceDocument().getPath());
+            }
+        }
+
+        span.attr("rag.chunks.embedding_ids", String.join(",", chunkIds))
+            .attr("rag.chunks.document_ids", String.join(",", documentIds))
+            .attr("rag.chunks.scores", String.join(",", scores))
+            .attr("rag.chunks.ranks", String.join(",", ranks))
+            .content("rag.chunks.text", chunkText.toString())
+            // Names and paths are gated with the chunk text, not left ungated with the ids: a path
+            // like /HR/Terminations/2026/jsmith-severance.pdf discloses more than most chunk bodies.
+            .content("rag.chunks.names", names.toString())
+            .content("rag.chunks.paths", paths.toString());
+    }
+
+    private static void appendCsv(StringBuilder target, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (!target.isEmpty()) {
+            target.append(',');
+        }
+        target.append(value);
+    }
+
     /** Retrieve, diversify, rerank. One pass over the hxpr search stack. */
-    private List<SearchHit> retrievePass(String retrievalQuery, Map<String, Object> context, boolean broadened) {
+    private List<SearchHit> retrievePass(String retrievalQuery, Map<String, Object> context,
+                                        boolean broadened, RagObservations.Span span) {
         Query query = Query.builder()
                 .text(retrievalQuery)
                 .context(broadened ? broaden(context) : context)
@@ -178,6 +310,13 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
         log.info("Retrieve phase complete: {} chunks retrieved (diversified={}, reranked={}, broadened={})",
                 hits.size(), diversified.size(), rerankedHits.size(), broadened);
 
+        if (observations.payloadsEnabled()) {
+            String suffix = broadened ? ".broadened" : "";
+            span.attr("rag.retrieve.candidates" + suffix, hits.size())
+                .attr("rag.retrieve.diversified" + suffix, diversified.size())
+                .attr("rag.retrieve.reranked" + suffix, rerankedHits.size());
+        }
+
         return rerankedHits;
     }
 
@@ -191,25 +330,32 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
      */
     private List<SearchHit> applyRelevanceGate(String retrievalQuery,
                                                Map<String, Object> context,
-                                               List<SearchHit> hits) {
+                                               List<SearchHit> hits,
+                                               RagObservations.Span span) {
         if (!ragProperties.getRetrievalGrading().isEnabled()) {
+            span.attr("rag.grade.verdict", "off");
             return hits;
         }
         if (retrievalGrader.grade(retrievalQuery, hits) == RetrievalGrader.Verdict.RELEVANT) {
+            span.attr("rag.grade.verdict", "relevant").attr("rag.retrieve.passes", 1);
             return hits;
         }
         if (!ragProperties.getRetrievalGrading().isBroaden()) {
             log.info("Retrieval graded weak and broadening is off; skipping generation");
+            span.attr("rag.grade.verdict", "weak").attr("rag.retrieve.passes", 1);
             return List.of();
         }
 
         log.info("Retrieval graded weak; retrying once with a broadened pass");
-        List<SearchHit> broadenedHits = retrievePass(retrievalQuery, context, true);
+        List<SearchHit> broadenedHits = retrievePass(retrievalQuery, context, true, span);
+        span.attr("rag.retrieve.passes", 2);
         if (retrievalGrader.grade(retrievalQuery, broadenedHits) == RetrievalGrader.Verdict.RELEVANT) {
+            span.attr("rag.grade.verdict", "relevant-after-broaden");
             return broadenedHits;
         }
 
         log.info("Broadened retrieval still graded weak; skipping generation");
+        span.attr("rag.grade.verdict", "weak-after-broaden");
         return List.of();
     }
 
@@ -227,7 +373,8 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
     }
 
     /** Rebuilds the user message with conversation history + grounded document context. */
-    private ChatClientRequest augmentRequest(ChatClientRequest request, Retrieval retrieval) {
+    private ChatClientRequest augmentRequest(ChatClientRequest request, Retrieval retrieval,
+                                             RagObservations.Span span) {
         String question = userText(request);
         String historyBlock = stringParam(request.context().get(PARAM_HISTORY_BLOCK), "");
         // Small-to-big: expand each hit to its parent section for context assembly only. The trace
@@ -241,6 +388,18 @@ public class ContentLakeRetrievalAdvisor implements CallAdvisor, StreamAdvisor {
 
         log.debug("Augment phase: context length={} chars, {} sources, historyBlock={} chars",
                 contextBlock.length(), retrieval.hits().size(), historyBlock.length());
+
+        if (observations.payloadsEnabled()) {
+            // The prompt-token estimate lives here because this is where the augmented prompt exists.
+            // It is labelled as an estimate on the request span, so it is never mistaken for the
+            // provider-reported count.
+            span.attr("rag.context.chars", contextBlock.length())
+                .attr("rag.context.sources", retrieval.hits().size())
+                .attr("rag.history.chars", historyBlock.length())
+                .attr("rag.prompt.chars", augmentedUserText.length())
+                .attr("rag.tokens.prompt.estimated", TokenEstimator.estimate(augmentedUserText))
+                .content("rag.prompt.text", augmentedUserText);
+        }
 
         return request.mutate().prompt(augmentedPrompt).build();
     }

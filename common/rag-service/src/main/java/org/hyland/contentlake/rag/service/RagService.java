@@ -8,6 +8,8 @@ import org.hyland.contentlake.rag.conversation.ConversationTurn;
 import org.hyland.contentlake.rag.conversation.SessionSummaryService;
 import org.hyland.contentlake.rag.config.RagProperties;
 import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
+import org.hyland.contentlake.rag.observability.TokenEstimator;
 import org.hyland.contentlake.rag.model.HybridSearchRequest;
 import org.hyland.contentlake.rag.model.RagPromptRequest;
 import org.hyland.contentlake.rag.model.RagPromptResponse;
@@ -73,6 +75,11 @@ public class RagService {
     private final RagToolset ragToolset;
     /** Optional (#73): null in unit tests that construct this service without the tracing collaborator. */
     private final RagObservations observations;
+    /**
+     * Which retrieval features configuration has enabled, as one low-cardinality span tag (#116).
+     * Optional for the same reason as {@code observations}.
+     */
+    private final RetrievalFeatureSet retrievalFeatures;
 
     /**
      * Executes the full RAG pipeline for a given question.
@@ -84,13 +91,109 @@ public class RagService {
         long totalStart = System.currentTimeMillis();
         String requestId = java.util.UUID.randomUUID().toString();
 
-        PromptContext promptContext = prepareContext(request);
-        GenerationResult generation = generateAnswer(promptContext);
-        long totalTimeMs = System.currentTimeMillis() - totalStart;
+        // rag.request is the root of the RAG span tree: retrieval, augmentation and generation are its
+        // descendants, created inside the advisor. Model name and token usage land here rather than on
+        // rag.generate because they are only available once the ChatClient call returns, and because a
+        // request can involve extra LLM calls (reformulation, HyDE, grading, citation verification)
+        // that rag.generate does not cover.
+        return obs().observe("rag.request",
+                span -> tagRequest(span, request, "sync"),
+                span -> {
+                    PromptContext promptContext = prepareContext(request);
+                    GenerationResult generation = generateAnswer(promptContext);
+                    long totalTimeMs = System.currentTimeMillis() - totalStart;
 
-        persistConversationTurn(request, promptContext, generation);
-        return buildPromptResponse(request, promptContext, generation, totalTimeMs, requestId,
-                resolveStructuredAnswer(request, promptContext, generation));
+                    persistConversationTurn(request, promptContext, generation);
+                    RagPromptResponse response = buildPromptResponse(request, promptContext, generation,
+                            totalTimeMs, requestId,
+                            resolveStructuredAnswer(request, promptContext, generation));
+
+                    enrichRequestSpan(span, requestId, request, promptContext, generation,
+                            generation.tokenCount(), null);
+                    return response;
+                });
+    }
+
+    /**
+     * Low-cardinality tags. Bounded by deployment configuration or by a small enum, so each is safe as
+     * a metric tag; anything per-request goes on as an attribute instead.
+     */
+    private void tagRequest(RagObservations.Span span, RagPromptRequest request, String path) {
+        span.tag("rag.path", path)
+            .tag("rag.model", configuredModel != null && !configuredModel.isBlank() ? configuredModel : "unknown")
+            .tag("rag.response.format", request.getResponseFormat() != null
+                    ? request.getResponseFormat().name() : "TEXT");
+        if (retrievalFeatures != null) {
+            span.tag("rag.features", retrievalFeatures.value());
+        }
+    }
+
+    /**
+     * Attaches what the request cost and what it returned.
+     *
+     * <p>Everything here reads already-computed values, so it is safe to call from the streaming
+     * completion callback <em>after</em> the metadata event has been sent.</p>
+     *
+     * @param usageTokens provider-reported total tokens, or null when the provider did not report any
+     * @param accumulator streaming accumulator, or null on the synchronous path
+     */
+    private void enrichRequestSpan(RagObservations.Span span,
+                                   String requestId,
+                                   RagPromptRequest request,
+                                   PromptContext promptContext,
+                                   GenerationResult generation,
+                                   Integer usageTokens,
+                                   StreamAccumulator accumulator) {
+        if (!obs().payloadsEnabled()) {
+            return;
+        }
+
+        span.attr("rag.request.id", requestId)
+            .attr("rag.answer.length", generation.answer() == null ? 0 : generation.answer().length())
+            .attr("rag.generate.time_ms", generation.generationTimeMs())
+            .attr("rag.retrieve.reranked", promptContext.trace().rerankedHits().size())
+            .attr("rag.outcome", promptContext.trace().rerankedHits().isEmpty() ? "no-context" : "answered")
+            .content("rag.query.text", request.getQuestion())
+            .content("rag.answer.text", generation.answer());
+
+        if (promptContext.retrievalQuery() != null
+                && !promptContext.retrievalQuery().equals(request.getQuestion())) {
+            span.attr("rag.query.reformulated", true)
+                .content("rag.query.retrieval_text", promptContext.retrievalQuery());
+        }
+
+        String sessionId = promptContext.conversation() != null ? promptContext.conversation().sessionId() : null;
+        if (sessionId != null) {
+            // Never the raw session id: it is "user:<username>", so exporting it would put a username
+            // in a third-party backend. A truncated hash still correlates a conversation's spans.
+            span.attr("rag.session.principal_hash", principalHash(sessionId));
+        }
+
+        // Token provenance is the point. getPromptTokens() is absent or zero on the streaming path with
+        // several local backends, so an unlabelled prompt-token number is a trap for anyone comparing a
+        // streamed run against a synchronous one and concluding the prompt grew.
+        if (usageTokens != null && usageTokens > 0) {
+            span.attr("rag.tokens.total", usageTokens)
+                .attr("rag.tokens.total.source", "usage");
+        } else {
+            span.attr("rag.tokens.total", TokenEstimator.estimate(generation.answer()))
+                .attr("rag.tokens.total.source", accumulator != null ? "estimated" : "unavailable");
+        }
+    }
+
+    /** SHA-256 of the session id, truncated. Correlates a conversation without exporting a username. */
+    private static String principalHash(String sessionId) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(sessionId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            return "unavailable";
+        }
     }
 
     /**
@@ -110,7 +213,7 @@ public class RagService {
      * </ul>
      */
     public SseEmitter streamPrompt(RagPromptRequest request) {
-        SseEmitter emitter = new SseEmitter(0L);
+        SseEmitter emitter = newEmitter();
         final long totalStart = System.currentTimeMillis();
         final String requestId = java.util.UUID.randomUUID().toString();
 
@@ -128,7 +231,18 @@ public class RagService {
         StreamAccumulator accumulator = new StreamAccumulator();
         long generationStart = System.currentTimeMillis();
 
-        Disposable subscription = requestSpec(promptContext)
+        // Opened manually rather than around a lambda: the answer arrives over a reactive stream, so
+        // the span has to outlive this method. openScope() makes it current on the subscribing thread,
+        // which is where the advisor runs retrieval and augmentation eagerly, so those spans are
+        // correctly parented. No Reactor context propagation is needed and none should be added: the
+        // token callbacks attach nothing, and the completion callback only enriches a span it holds a
+        // reference to. Span creation needs thread-local context; attribute attachment does not.
+        RagObservations.Span requestSpan = obs().start("rag.request",
+                span -> tagRequest(span, request, "stream"));
+
+        Disposable subscription;
+        try (AutoCloseable ignored = requestSpan.openScope()) {
+            subscription = requestSpec(promptContext)
                 .stream()
                 .chatResponse()
                 .subscribe(chatResponse -> {
@@ -146,6 +260,7 @@ public class RagService {
                         },
                         error -> {
                             log.error("RAG streaming generation failed: {}", error.getMessage(), error);
+                            requestSpan.error(error).close();
                             sendErrorEvent(emitter, error.getMessage());
                             emitter.complete();
                         },
@@ -170,6 +285,13 @@ public class RagService {
                             );
                             sendMetadataEvent(emitter, response);
 
+                            // Deliberately after the metadata send, so the streaming-latency
+                            // guarantee is structural rather than "the payload happens to be small".
+                            // Everything attached here reads already-computed values.
+                            enrichRequestSpan(requestSpan, requestId, request, promptContext, generation,
+                                    accumulator.tokenCount, accumulator);
+                            requestSpan.close();
+
                             // The typed view is a second LLM pass over the finished answer, so it
                             // gets its own event: holding the metadata back for it would leave the
                             // client with a complete answer and no sources for the whole call.
@@ -181,10 +303,24 @@ public class RagService {
                             sendDoneEvent(emitter);
                             emitter.complete();
                         });
+        } catch (Exception e) {
+            // openScope()'s close() is declared to throw; a failure there must not lose the request.
+            log.warn("RAG stream scope handling failed: {}", e.getMessage());
+            requestSpan.close();
+            sendErrorEvent(emitter, "Failed to start RAG stream: " + e.getMessage());
+            emitter.complete();
+            return emitter;
+        }
 
-        emitter.onCompletion(subscription::dispose);
+        final Disposable finalSubscription = subscription;
+        // close() is idempotent, so covering every terminal signal cannot double-stop the span.
+        emitter.onCompletion(() -> {
+            finalSubscription.dispose();
+            requestSpan.close();
+        });
         emitter.onTimeout(() -> {
-            subscription.dispose();
+            finalSubscription.dispose();
+            requestSpan.close();
             emitter.complete();
         });
 
@@ -232,8 +368,10 @@ public class RagService {
         long generationStart = System.currentTimeMillis();
 
         try {
-            ChatResponse chatResponse = traced("rag.generate",
-                    () -> requestSpec(promptContext).call().chatResponse());
+            // rag.generate is created by ContentLakeRetrievalAdvisor, which is the only code that
+            // sits between retrieval and the model call. Wrapping this call instead put retrieval
+            // inside the generation span, because the advisor's before-phase runs within it.
+            ChatResponse chatResponse = requestSpec(promptContext).call().chatResponse();
             long generationTimeMs = System.currentTimeMillis() - generationStart;
 
             boolean hasContext = !promptContext.trace().rerankedHits().isEmpty();
@@ -259,9 +397,21 @@ public class RagService {
         }
     }
 
-    /** Runs {@code work} inside a named tracing span (#73) when observation is wired; otherwise inline. */
-    private <T> T traced(String name, java.util.function.Supplier<T> work) {
-        return observations != null ? observations.observe(name, work) : work.get();
+    /**
+     * The SSE emitter for one streaming request. No timeout: generation over a local model routinely
+     * outlasts any default.
+     *
+     * <p>A factory method rather than a direct {@code new} so a test can observe the order in which
+     * events are sent. That ordering is the streaming-latency guarantee: span enrichment must happen
+     * after the {@code metadata} event, because the client cannot render sources until it arrives.</p>
+     */
+    protected SseEmitter newEmitter() {
+        return new SseEmitter(0L);
+    }
+
+    /** Observation collaborator, normalised so no call site branches on whether it is wired. */
+    private RagObservations obs() {
+        return observations != null ? observations : RagObservations.NOOP;
     }
 
     private String resolveModelName(ChatResponse chatResponse) {

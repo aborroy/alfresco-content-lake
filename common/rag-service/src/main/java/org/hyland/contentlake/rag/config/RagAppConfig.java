@@ -10,7 +10,9 @@ import org.hyland.contentlake.client.VocabularyService;
 import org.hyland.contentlake.rag.conversation.ConversationMemoryStore;
 import org.hyland.contentlake.rag.conversation.InMemoryConversationMemoryStore;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -77,8 +79,10 @@ public class RagAppConfig {
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi,
                                    HxprQueryApi queryApi,
-                                   RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+                                   RestClient hxprRestClient,
+                                   @Value("${spring.ai.openai.embedding.model:}") String embeddingModelName) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(embeddingModelName));
     }
 
     @Bean
@@ -90,10 +94,17 @@ public class RagAppConfig {
     // Embedding service
     // ----------------------------------------------------------------------
 
+    /**
+     * The model name must be the configured model, not the implementation class name: it is
+     * reported as the embedding model on search responses and it is the value the ingesters derive
+     * the hxpr embedding type from, so a class name here made rag-service disagree with every
+     * writer about which model the corpus was embedded under.
+     */
     @Bean
-    public EmbeddingService embeddingService(EmbeddingModel embeddingModel) {
-        return new EmbeddingService(embeddingModel,
-                embeddingModel.getClass().getSimpleName());
+    public EmbeddingService embeddingService(
+            EmbeddingModel embeddingModel,
+            @Value("${spring.ai.openai.embedding.model:}") String embeddingModelName) {
+        return new EmbeddingService(embeddingModel, embeddingModelName);
     }
 
     @Bean

@@ -50,7 +50,9 @@ nuxeo:
       chunk-size: ${EMBEDDING_CHUNK_SIZE:512}
       chunk-overlap: ${EMBEDDING_CHUNK_OVERLAP:150}
       similarity-threshold: ${EMBEDDING_SIMILARITY_THRESHOLD:0.75}
-      model-name: ${EMBEDDING_MODEL_NAME:default}
+      # Must resolve to the same value in every module: the hxpr embedding type is derived from
+      # it, and two writers deriving different types leave a document with children under both.
+      model-name: ${EMBEDDING_MODEL_NAME:${EMBEDDING_MODEL:ai/mxbai-embed-large}}
       noise-reduction:
         enabled: ${NOISE_REDUCTION_ENABLED:true}
         aggressive: ${NOISE_REDUCTION_AGGRESSIVE:false}

@@ -271,7 +271,7 @@ class NuxeoAuditListenerIntegrationTest {
                 HttpServiceProxyFactory.builderFor(RestClientAdapter.create(hxprRestClient)).build();
         HxprDocumentApi documentApi = proxyFactory.createClient(HxprDocumentApi.class);
         HxprQueryApi queryApi = proxyFactory.createClient(HxprQueryApi.class);
-        HxprService hxprService = new HxprService(documentApi, queryApi, hxprRestClient);
+        HxprService hxprService = new HxprService(documentApi, queryApi, hxprRestClient, "test-embedding-model");
 
         NuxeoConversionClient conversionClient =
                 new NuxeoConversionClient(NUXEO_BASE_URL, "file:content", 30_000L, true, authentication);

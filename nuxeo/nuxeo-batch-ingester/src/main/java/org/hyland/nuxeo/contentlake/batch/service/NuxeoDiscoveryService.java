@@ -7,6 +7,7 @@ import org.hyland.nuxeo.contentlake.config.NuxeoProperties;
 import org.hyland.nuxeo.contentlake.model.NuxeoDocument;
 import org.hyland.nuxeo.contentlake.batch.model.NuxeoSyncRequest;
 import org.hyland.nuxeo.contentlake.service.NuxeoScopeResolver;
+import org.hyland.contentlake.service.DiscoveryOutcome;
 import org.hyland.contentlake.spi.SourceNode;
 import org.springframework.stereotype.Service;
 
@@ -27,28 +28,55 @@ public class NuxeoDiscoveryService {
     private final NuxeoClient nuxeoClient;
     private final NuxeoProperties props;
 
+    /**
+     * A discovery pass and its own account of whether it covered its whole scope.
+     *
+     * @param nodes   the discovered nodes
+     * @param outcome whether every configured root was enumerated in full, and the roots covered
+     */
+    public record NuxeoDiscovery(List<SourceNode> nodes, DiscoveryOutcome outcome) {
+    }
+
     public List<SourceNode> discoverFromConfig() {
-        return discover(new NuxeoSyncRequest());
+        return discoverFromConfigTallied().nodes();
     }
 
     public List<SourceNode> discover(NuxeoSyncRequest request) {
-        DiscoverySettings settings = resolveSettings(request);
-        return switch (settings.discoveryMode()) {
-            case CHILDREN -> discoverWithChildren(settings);
-            case NXQL -> discoverWithNxqlOrFallback(settings);
-        };
+        return discoverTallied(request).nodes();
     }
 
-    private List<SourceNode> discoverWithNxqlOrFallback(DiscoverySettings settings) {
+    /** As {@link #discoverFromConfig}, but also reporting the pass's completeness. */
+    public NuxeoDiscovery discoverFromConfigTallied() {
+        return discoverTallied(new NuxeoSyncRequest());
+    }
+
+    /** As {@link #discover}, but also reporting the pass's completeness. */
+    public NuxeoDiscovery discoverTallied(NuxeoSyncRequest request) {
+        DiscoverySettings settings = resolveSettings(request);
+        List<String> reasons = new ArrayList<>();
+        List<SourceNode> nodes = switch (settings.discoveryMode()) {
+            case CHILDREN -> discoverWithChildren(settings, reasons);
+            case NXQL -> discoverWithNxqlOrFallback(settings, reasons);
+        };
+        DiscoveryOutcome outcome = reasons.isEmpty()
+                ? DiscoveryOutcome.complete(settings.includedRoots())
+                : DiscoveryOutcome.incomplete(settings.includedRoots(), reasons);
+        return new NuxeoDiscovery(nodes, outcome);
+    }
+
+    private List<SourceNode> discoverWithNxqlOrFallback(DiscoverySettings settings, List<String> reasons) {
         try {
-            return discoverWithNxql(settings);
+            return discoverWithNxql(settings, reasons);
         } catch (UnsupportedOperationException e) {
+            // NOT a completeness problem. The fallback covers the same roots and applies
+            // scopeResolver.isInScope in place of the NXQL predicates, so it can only over-include,
+            // and over-inclusion cannot cause a deletion.
             log.warn("NXQL discovery is unavailable; falling back to @children traversal: {}", e.getMessage());
-            return discoverWithChildren(settings);
+            return discoverWithChildren(settings, reasons);
         }
     }
 
-    private List<SourceNode> discoverWithNxql(DiscoverySettings settings) {
+    private List<SourceNode> discoverWithNxql(DiscoverySettings settings, List<String> reasons) {
         NuxeoScopeResolver scopeResolver = settings.scopeResolver();
         String query = buildNxqlQuery(settings);
         int pageIndex = 0;
@@ -65,6 +93,13 @@ public class NuxeoDiscoveryService {
                     .forEach(discovered::add);
 
             if (page.getEntries().size() < settings.pageSize() || !page.hasMore()) {
+                // A short page while Nuxeo still reports more is a silent truncation: Page exposes no
+                // total, so the loop cannot tell it apart from the last page.
+                if (page.getEntries().size() < settings.pageSize() && page.hasMore()) {
+                    log.warn("NXQL discovery stopped on a short page while Nuxeo still reports more "
+                            + "results; the pass is incomplete");
+                    reasons.add("NXQL paging ended on a short page while more results were reported");
+                }
                 break;
             }
             pageIndex++;
@@ -73,7 +108,7 @@ public class NuxeoDiscoveryService {
         return discovered;
     }
 
-    private List<SourceNode> discoverWithChildren(DiscoverySettings settings) {
+    private List<SourceNode> discoverWithChildren(DiscoverySettings settings, List<String> reasons) {
         NuxeoScopeResolver scopeResolver = settings.scopeResolver();
         List<SourceNode> discovered = new ArrayList<>();
 
@@ -81,6 +116,7 @@ public class NuxeoDiscoveryService {
             SourceNode root = nuxeoClient.getNodeByPath(rootPath);
             if (root == null) {
                 log.warn("Configured Nuxeo root path not found: {}", rootPath);
+                reasons.add("configured root path '" + rootPath + "' was not found");
                 continue;
             }
             collectFromNode(root, scopeResolver, settings.pageSize(), discovered);

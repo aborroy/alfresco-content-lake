@@ -17,7 +17,10 @@ class RagAppConfigConversationMemoryStoreTest {
                     "hxpr.url=http://localhost:8080",
                     "hxpr.repository-id=default",
                     "hxpr.username=test-user",
-                    "hxpr.password=test-password"
+                    "hxpr.password=test-password",
+                    // Required: the hxpr embedding type is derived from it, and a blank model is
+                    // rejected rather than silently defaulted (#113).
+                    "spring.ai.openai.embedding.model=ai/mxbai-embed-large"
             )
             .withBean(EmbeddingModel.class, () -> mock(EmbeddingModel.class));
 

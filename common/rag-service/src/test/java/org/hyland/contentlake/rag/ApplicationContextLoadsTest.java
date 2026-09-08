@@ -1,7 +1,13 @@
 package org.hyland.contentlake.rag;
 
+import org.hyland.contentlake.rag.config.RagProperties;
+import org.hyland.contentlake.rag.observability.RagObservations;
+import org.hyland.contentlake.rag.observability.RetrievalFeatureSet;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Smoke test: the full application context loads with the MCP server enabled.
@@ -11,6 +17,10 @@ import org.springframework.boot.test.context.SpringBootTest;
  * tool-calling autoconfiguration to build the {@code ChatModel}) pulled in {@code SemanticSearchService}
  * -> query expansion -> the same {@code ChatModel}. Bean creation does not call any external service,
  * so the context loads offline with dummy endpoints.</p>
+ *
+ * <p>Also the one place the observability defaults are asserted against a real context. That matters
+ * because this context has a real {@code ObservationRegistry} (actuator is on the classpath), which is
+ * exactly the condition under which the spans exist whether or not anything is exported.</p>
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -24,8 +34,31 @@ import org.springframework.boot.test.context.SpringBootTest;
         })
 class ApplicationContextLoadsTest {
 
+    @Autowired
+    RagProperties ragProperties;
+
+    @Autowired
+    RagObservations ragObservations;
+
+    @Autowired
+    RetrievalFeatureSet retrievalFeatureSet;
+
     @Test
     void contextLoads() {
         // Success = the ApplicationContext refreshed without an unresolvable circular reference.
+    }
+
+    @Test
+    void spanPayloadsAndContentCaptureAreBothOffByDefault() {
+        assertThat(ragProperties.getObservability().isPayloadsEnabled()).isFalse();
+        assertThat(ragProperties.getObservability().isCaptureContent()).isFalse();
+        assertThat(ragObservations.payloadsEnabled()).isFalse();
+        assertThat(ragObservations.contentCaptureEnabled()).isFalse();
+    }
+
+    @Test
+    void theRetrievalFeatureSetIsResolvedFromTheRealConfiguration() {
+        // A per-process constant, so it must be computable at startup rather than per request.
+        assertThat(retrievalFeatureSet.value()).isNotBlank();
     }
 }

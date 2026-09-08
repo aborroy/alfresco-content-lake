@@ -120,7 +120,18 @@ Stated plainly, because each of these is a reasonable thing to assume and none o
   understand about this design.
 - **No per-user credentials at the index.** One service account serves every caller. The index's
   audit trail therefore shows the service account, not the end user; correlating a query to a user
-  means reading the `rag-service` log.
+  means reading the `rag-service` log, or the trace backend when span payloads are on. Spans identify
+  a conversation by a truncated hash of the session id rather than the username, so a trace backend
+  never receives a login name, but the log still holds the query text it always did.
+- **Trace payloads are not ACL-filtered.** With `rag.observability.capture-content` on, a span carries
+  the caller's question, the text of the chunks retrieved for it, those documents' names and paths, and
+  the generated answer. Whoever can read the trace backend can read all of it, and that set of people
+  is not the ACL that governed the retrieval. This is why content capture is a separate switch from
+  `rag.observability.payloads-enabled` rather than a verbosity level of it: ids, scores and counts are
+  opaque and travel by default, content does not travel at all unless someone decides it should. Source
+  paths are treated as content for the same reason chunk text is, because a path like
+  `/HR/Terminations/2026/jsmith-severance.pdf` discloses more than most chunk bodies. Both switches
+  default to off, and turning the first on does not turn the second on.
 - **No cross-source identity unification.** There is no federation and no SSO across repositories.
   Principals stay source-native and namespaced per source instance. The multi-source mode assumes the
   authenticated username is the same login string in each source you want to query; it does not map
@@ -199,6 +210,12 @@ Before any deployment reachable by someone else:
       results is worse for you than losing a whole source, and watch for the WARN either way.
 - [ ] **Do not expose `/actuator/metrics` or `/actuator/prometheus` publicly.** They require
       authentication already; a scraper needs an account valid in one of the configured sources.
+- [ ] **Leave `rag.observability.capture-content` at `false`** unless the trace backend sits inside the
+      same trust boundary as the index. It copies questions, chunk text and document paths out of the
+      service, and the backend applies its own access model rather than the documents' ACLs. The
+      `observability` compose profile bundles an anonymous-admin Grafana and is for development only.
+- [ ] **Point `management.otlp.tracing.endpoint` at a collector you control.** Blank, the default,
+      exports nothing. A collector is an egress path for whatever the spans carry.
 
 ## Where to look in the code
 
@@ -211,6 +228,8 @@ Before any deployment reachable by someone else:
 | Predicate construction per query | `common/rag-service/.../service/SemanticSearchService.java`, `HybridSearchService.java` |
 | ACEs written at ingest | `common/content-lake-core/.../service/NodeSyncService.java` |
 | Feedback authorization | `common/rag-service/.../service/FeedbackService.java` |
+| Span payload gating and content redaction | `common/rag-service/.../observability/RagObservations.java` |
+| The two observability switches and their defaults | `common/rag-service/.../config/RagProperties.java` (`ObservabilityProperties`) |
 
 Related documentation: [architecture.md](architecture.md) for the ACL data model and the design
 decisions behind it, and the deployment repository's RAG deployment guide for the environment

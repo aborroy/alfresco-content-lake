@@ -36,8 +36,10 @@ class ContentLakeNodeStatusServiceTest {
         hxprService = new StubHxprService();
         scopeResolver = new StubScopeResolver(alfrescoClient);
         searchService = new StubSearchService();
+        // The index-proof collaborator is unused by these status assertions; the null makes that
+        // explicit and keeps the existing cases free of embedding-query stubbing.
         service = new ContentLakeNodeStatusService(alfrescoClient, hxprService, scopeResolver,
-                searchService, Executors.newVirtualThreadPerTaskExecutor());
+                searchService, Executors.newVirtualThreadPerTaskExecutor(), null);
     }
 
     @Test
@@ -150,7 +152,7 @@ class ContentLakeNodeStatusServiceTest {
         private final List<List<String>> batchCalls = new ArrayList<>();
 
         private StubHxprService() {
-            super(null, null, null);
+            super(null, null, null, "test-embedding-type");
         }
 
         @Override

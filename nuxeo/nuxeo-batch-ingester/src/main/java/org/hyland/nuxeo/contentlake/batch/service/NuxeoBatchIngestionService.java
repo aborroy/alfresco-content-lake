@@ -1,9 +1,16 @@
 package org.hyland.nuxeo.contentlake.batch.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.hyland.nuxeo.contentlake.batch.config.NuxeoBatchProperties;
 import org.hyland.nuxeo.contentlake.batch.model.IngestionJob;
 import org.hyland.nuxeo.contentlake.batch.model.NuxeoSyncRequest;
+import org.hyland.nuxeo.contentlake.client.NuxeoClient;
+import org.hyland.nuxeo.contentlake.config.NuxeoProperties;
+import org.hyland.contentlake.service.DiscoveryOutcome;
+import org.hyland.contentlake.service.IndexReconciliationService;
 import org.hyland.contentlake.service.NodeSyncService;
+import org.hyland.contentlake.service.ReconcileConfig;
+import org.hyland.contentlake.service.SeenSet;
 import org.hyland.contentlake.spi.SourceNode;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -26,6 +33,10 @@ public class NuxeoBatchIngestionService {
     private final NuxeoDiscoveryService discoveryService;
     private final NodeSyncService nodeSyncService;
     private final Executor batchExecutor;
+    private final IndexReconciliationService reconciliationService;
+    private final NuxeoClient nuxeoClient;
+    private final NuxeoProperties nuxeoProps;
+    private final NuxeoBatchProperties batchProps;
     private final Map<String, IngestionJob> jobsById = Collections.synchronizedMap(
             new LinkedHashMap<>(MAX_RETAINED_JOBS, 0.75f, false) {
                 @Override
@@ -37,21 +48,31 @@ public class NuxeoBatchIngestionService {
 
     public NuxeoBatchIngestionService(NuxeoDiscoveryService discoveryService,
                                       NodeSyncService nodeSyncService,
-                                      @Qualifier("nuxeoBatchIngestionExecutor") Executor batchExecutor) {
+                                      @Qualifier("nuxeoBatchIngestionExecutor") Executor batchExecutor,
+                                      IndexReconciliationService reconciliationService,
+                                      NuxeoClient nuxeoClient,
+                                      NuxeoProperties nuxeoProps,
+                                      NuxeoBatchProperties batchProps) {
         this.discoveryService = discoveryService;
         this.nodeSyncService = nodeSyncService;
         this.batchExecutor = batchExecutor;
+        this.reconciliationService = reconciliationService;
+        this.nuxeoClient = nuxeoClient;
+        this.nuxeoProps = nuxeoProps;
+        this.batchProps = batchProps;
     }
 
     public IngestionJob startConfiguredSync() {
         IngestionJob job = createJob("configured sync");
-        CompletableFuture.runAsync(() -> runJob(job, "configured sync", discoveryService::discoverFromConfig), batchExecutor);
+        CompletableFuture.runAsync(
+                () -> runJob(job, "configured sync", discoveryService::discoverFromConfigTallied), batchExecutor);
         return job;
     }
 
     public IngestionJob startBatchSync(NuxeoSyncRequest request) {
         IngestionJob job = createJob("batch sync");
-        CompletableFuture.runAsync(() -> runJob(job, "batch sync", () -> discoveryService.discover(request)), batchExecutor);
+        CompletableFuture.runAsync(
+                () -> runJob(job, "batch sync", () -> discoveryService.discoverTallied(request)), batchExecutor);
         return job;
     }
 
@@ -73,10 +94,15 @@ public class NuxeoBatchIngestionService {
         return job;
     }
 
-    private void runJob(IngestionJob job, String label, Supplier<List<SourceNode>> discovery) {
+    private void runJob(IngestionJob job, String label,
+                        Supplier<NuxeoDiscoveryService.NuxeoDiscovery> discovery) {
         try {
-            List<SourceNode> nodes = discovery.get();
-            nodes.forEach(node -> syncNode(node, job));
+            ReconcileConfig config = batchProps.getReconcile().toConfig();
+            SeenSet seen = new SeenSet(config.maxSeenIds());
+
+            NuxeoDiscoveryService.NuxeoDiscovery discovered = discovery.get();
+            discovered.nodes().forEach(node -> syncNode(node, job, seen));
+
             job.complete();
             log.info("Nuxeo sync job {} completed. Discovered: {}, Synced: {}, Skipped: {}, Failed: {}",
                     job.getJobId(),
@@ -84,14 +110,50 @@ public class NuxeoBatchIngestionService {
                     job.getSyncedCountValue(),
                     job.getSkippedCountValue(),
                     job.getFailedCountValue());
+
+            sweep(job, discovered.outcome(), seen, config);
         } catch (Exception e) {
             job.fail();
             log.error("Nuxeo {} job {} failed", label, job.getJobId(), e);
         }
     }
 
-    private void syncNode(SourceNode node, IngestionJob job) {
+    /**
+     * Deletes indexed documents this sync's discovery did not see.
+     *
+     * <p>Runs after {@code job.complete()}: the sweep is a distinct optional phase and a sweep failure
+     * must not turn a successful ingestion into a failed job.</p>
+     */
+    private void sweep(IngestionJob job, DiscoveryOutcome outcome, SeenSet seen, ReconcileConfig config) {
+        if (!config.enabled()) {
+            return;
+        }
+        try {
+            List<String> prefixes = outcome.resolvedRootPaths().stream()
+                    .map(path -> nodeSyncService.contentLakePathPrefix(nuxeoClient.getSourceId(), path))
+                    .toList();
+
+            if (prefixes.isEmpty()) {
+                // No resolved scope means the predicate would match nothing, which reconcile() would
+                // then report as "index matches the source" -- a silent no-op dressed as success.
+                log.warn("Reconciliation skipped for job {}: no scope path could be resolved from "
+                        + "discovery, so the sweep has nothing it can safely own.", job.getJobId());
+                return;
+            }
+
+            job.recordReconciliation(reconciliationService.reconcile(
+                    seen, outcome, job.getFailedCountValue(),
+                    IndexReconciliationService.underAnyPath(prefixes), config));
+        } catch (Exception e) {
+            log.error("Reconciliation sweep for job {} failed; ingestion is unaffected", job.getJobId(), e);
+        }
+    }
+
+    private void syncNode(SourceNode node, IngestionJob job, SeenSet seen) {
         job.incrementDiscovered();
+        // Recorded before the sync attempt: the set means "the source has this node", which holds
+        // whether or not syncing it succeeded. A failed node blocks the sweep separately.
+        seen.add(node.nodeId());
         try {
             NodeSyncService.SyncResult metadata = nodeSyncService.ingestMetadata(node);
             if (metadata.skipped()) {

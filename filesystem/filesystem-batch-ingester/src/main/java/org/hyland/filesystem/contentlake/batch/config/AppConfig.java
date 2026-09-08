@@ -6,6 +6,8 @@ import org.hyland.contentlake.client.HxprService;
 import org.hyland.contentlake.config.HxprProperties;
 import org.hyland.contentlake.extractor.TikaTextExtractor;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
+import org.hyland.contentlake.service.IndexReconciliationService;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.NoiseReductionService;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
@@ -57,8 +59,10 @@ public class AppConfig {
     }
 
     @Bean
-    public HxprService hxprService(HxprDocumentApi documentApi, HxprQueryApi queryApi, RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+    public HxprService hxprService(HxprDocumentApi documentApi, HxprQueryApi queryApi,
+                                   RestClient hxprRestClient, FilesystemBatchProperties props) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(props.getEmbedding().getModelName()));
     }
 
     @Bean
@@ -76,6 +80,13 @@ public class AppConfig {
     @Bean
     public FileSystemScopeResolver fileSystemScopeResolver(FileSystemProperties props) {
         return new FileSystemScopeResolver(props);
+    }
+
+    @Bean
+    public IndexReconciliationService indexReconciliationService(HxprService hxprService,
+                                                                NodeSyncService nodeSyncService,
+                                                                FileSystemSourceClient sourceClient) {
+        return new IndexReconciliationService(hxprService, nodeSyncService, sourceClient);
     }
 
     @Bean

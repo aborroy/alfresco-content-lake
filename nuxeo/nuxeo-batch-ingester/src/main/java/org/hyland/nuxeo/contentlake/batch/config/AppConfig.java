@@ -9,7 +9,9 @@ import org.hyland.contentlake.config.HxprProperties;
 import org.hyland.nuxeo.contentlake.config.NuxeoProperties;
 import org.hyland.nuxeo.contentlake.batch.service.NuxeoDiscoveryService;
 import org.hyland.contentlake.service.EmbeddingService;
+import org.hyland.contentlake.service.EmbeddingTypeResolver;
 import org.hyland.nuxeo.contentlake.service.NuxeoScopeResolver;
+import org.hyland.contentlake.service.IndexReconciliationService;
 import org.hyland.contentlake.service.NodeSyncService;
 import org.hyland.contentlake.service.chunking.NoiseReductionService;
 import org.hyland.contentlake.service.chunking.SimpleChunkingService;
@@ -57,8 +59,10 @@ public class AppConfig {
     @Bean
     public HxprService hxprService(HxprDocumentApi documentApi,
                                    HxprQueryApi queryApi,
-                                   RestClient hxprRestClient) {
-        return new HxprService(documentApi, queryApi, hxprRestClient);
+                                   RestClient hxprRestClient,
+                                   NuxeoBatchProperties props) {
+        return new HxprService(documentApi, queryApi, hxprRestClient,
+                EmbeddingTypeResolver.toEmbeddingType(props.getEmbedding().getModelName()));
     }
 
     @Bean
@@ -79,6 +83,13 @@ public class AppConfig {
                 props.getScope().getExcludedLifecycleStates(),
                 nuxeoClient
         );
+    }
+
+    @Bean
+    public IndexReconciliationService indexReconciliationService(HxprService hxprService,
+                                                                NodeSyncService nodeSyncService,
+                                                                NuxeoClient nuxeoClient) {
+        return new IndexReconciliationService(hxprService, nodeSyncService, nuxeoClient);
     }
 
     @Bean
